@@ -50,7 +50,6 @@ pub const STEP_KIND_TOOL_CALL: &str = "tool_call";
 /// Step kind: agent suspended awaiting external signal.
 pub const STEP_KIND_SUSPEND: &str = "suspend";
 
-
 // ============================================================================
 // AgentStep
 // ============================================================================
@@ -477,11 +476,17 @@ mod tests {
 
         // Not exceeded yet.
         agent.act(json!({}), 40, 40, "");
-        assert!(!agent.budget_exceeded(), "40+40=80 < 100, should not be exceeded");
+        assert!(
+            !agent.budget_exceeded(),
+            "40+40=80 < 100, should not be exceeded"
+        );
 
         // Push over the limit.
         agent.act(json!({}), 10, 10, "");
-        assert!(agent.budget_exceeded(), "40+40+10+10=100 >= 100, should be exceeded");
+        assert!(
+            agent.budget_exceeded(),
+            "40+40+10+10=100 >= 100, should be exceeded"
+        );
     }
 
     /// 3. Iteration limit — 2 max, increment 3 times.

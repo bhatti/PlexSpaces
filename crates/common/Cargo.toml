@@ -11,18 +11,22 @@ description = "Common types shared across PlexSpaces crates"
 
 [dependencies]
 plexspaces-proto = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+futures = { workspace = true }
+uuid = { workspace = true }
 chrono = { workspace = true }
 ulid = { workspace = true }
 prost-types = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tokio = { version = "1", features = ["time", "fs", "net"] }
+tokio = { workspace = true }
 # Certificate generation for mTLS (used by security_validator)
 rcgen = "0.13"
 # Time handling for certificate generation (rcgen uses time crate)
 time = "0.3"
 # TOML parsing for release configuration
-toml = "0.8"
+toml = { workspace = true }
 serde = { workspace = true }
 # Tracing for logging
 tracing = { workspace = true }
@@ -30,7 +34,7 @@ tracing = { workspace = true }
 dirs = "5.0"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["time", "macros", "rt-multi-thread", "net"] }
+tokio = { workspace = true }
 tempfile = "3.8"
 serial_test = "3.0"
 

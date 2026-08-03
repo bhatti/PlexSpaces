@@ -5,12 +5,12 @@
 // Tests core functionality: actors processing messages, channels, mailboxes
 // Not scalability tests - just logic validation
 
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::ActorBuilder;
 use plexspaces_actor::{
     Actor, ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext,
     RequestContextExt, ServiceLocator,
 };
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

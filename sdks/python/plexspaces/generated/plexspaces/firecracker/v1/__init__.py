@@ -374,122 +374,136 @@ class ResourceUsage(betterproto.Message):
 class CreateVmRequest(betterproto.Message):
     """CreateVm request"""
 
-    config: "VmConfig" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    config: "VmConfig" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CreateVmResponse(betterproto.Message):
     """CreateVm response"""
 
-    success: bool = betterproto.bool_field(1)
-    vm_id: str = betterproto.string_field(2)
-    socket_path: str = betterproto.string_field(3)
-    error: "FirecrackerError" = betterproto.message_field(4)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    vm_id: str = betterproto.string_field(3)
+    socket_path: str = betterproto.string_field(4)
+    error: "FirecrackerError" = betterproto.message_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class BootVmRequest(betterproto.Message):
     """BootVm request"""
 
-    vm_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    vm_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class BootVmResponse(betterproto.Message):
     """BootVm response"""
 
-    success: bool = betterproto.bool_field(1)
-    state: "VmState" = betterproto.enum_field(2)
-    error: "FirecrackerError" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    state: "VmState" = betterproto.enum_field(3)
+    error: "FirecrackerError" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class PauseVmRequest(betterproto.Message):
     """PauseVm request"""
 
-    vm_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    vm_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class PauseVmResponse(betterproto.Message):
     """PauseVm response"""
 
-    success: bool = betterproto.bool_field(1)
-    state: "VmState" = betterproto.enum_field(2)
-    error: "FirecrackerError" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    state: "VmState" = betterproto.enum_field(3)
+    error: "FirecrackerError" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ResumeVmRequest(betterproto.Message):
     """ResumeVm request"""
 
-    vm_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    vm_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ResumeVmResponse(betterproto.Message):
     """ResumeVm response"""
 
-    success: bool = betterproto.bool_field(1)
-    state: "VmState" = betterproto.enum_field(2)
-    error: "FirecrackerError" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    state: "VmState" = betterproto.enum_field(3)
+    error: "FirecrackerError" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class StopVmRequest(betterproto.Message):
     """StopVm request"""
 
-    vm_id: str = betterproto.string_field(1)
-    force: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    vm_id: str = betterproto.string_field(2)
+    force: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class StopVmResponse(betterproto.Message):
     """StopVm response"""
 
-    success: bool = betterproto.bool_field(1)
-    error: "FirecrackerError" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    error: "FirecrackerError" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetVmStateRequest(betterproto.Message):
     """GetVmState request"""
 
-    vm_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    vm_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetVmStateResponse(betterproto.Message):
     """GetVmState response"""
 
-    success: bool = betterproto.bool_field(1)
-    vm: "VmInstance" = betterproto.message_field(2)
-    error: "FirecrackerError" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    vm: "VmInstance" = betterproto.message_field(3)
+    error: "FirecrackerError" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ListVmsRequest(betterproto.Message):
     """ListVms request"""
 
-    states: List["VmState"] = betterproto.enum_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by state (empty = all)"""
 
-    node_id: str = betterproto.string_field(2)
+    states: List["VmState"] = betterproto.enum_field(2)
+    node_id: str = betterproto.string_field(3)
     """Filter by node"""
 
-    page_size: int = betterproto.uint32_field(3)
+    page_size: int = betterproto.uint32_field(4)
     """Pagination"""
 
-    page_token: str = betterproto.string_field(4)
+    page_token: str = betterproto.string_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class ListVmsResponse(betterproto.Message):
     """ListVms response"""
 
-    vms: List["VmInstance"] = betterproto.message_field(1)
-    next_page_token: str = betterproto.string_field(2)
-    total_count: int = betterproto.uint32_field(3)
+    request_id: str = betterproto.string_field(1)
+    vms: List["VmInstance"] = betterproto.message_field(2)
+    next_page_token: str = betterproto.string_field(3)
+    total_count: int = betterproto.uint32_field(4)
 
 
 @dataclass(eq=False, repr=False)
@@ -502,13 +516,14 @@ class DeployApplicationRequest(betterproto.Message):
      Application includes framework runtime, WASM modules, and configuration.
     """
 
-    vm_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """VM identifier"""
 
-    application_id: str = betterproto.string_field(2)
+    vm_id: str = betterproto.string_field(2)
+    application_id: str = betterproto.string_field(3)
     """Application identifier"""
 
-    application_bundle: bytes = betterproto.bytes_field(3)
+    application_bundle: bytes = betterproto.bytes_field(4)
     """
     Application bundle (framework + actors + config)
     
@@ -519,7 +534,7 @@ class DeployApplicationRequest(betterproto.Message):
      - Dependencies
     """
 
-    application_config_json: str = betterproto.string_field(4)
+    application_config_json: str = betterproto.string_field(5)
     """Application configuration (optional, can be in bundle)"""
 
 
@@ -527,27 +542,30 @@ class DeployApplicationRequest(betterproto.Message):
 class DeployApplicationResponse(betterproto.Message):
     """DeployApplication response"""
 
-    success: bool = betterproto.bool_field(1)
-    application_id: str = betterproto.string_field(2)
-    vm_id: str = betterproto.string_field(3)
-    error: "FirecrackerError" = betterproto.message_field(4)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    application_id: str = betterproto.string_field(3)
+    vm_id: str = betterproto.string_field(4)
+    error: "FirecrackerError" = betterproto.message_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class UndeployApplicationRequest(betterproto.Message):
     """UndeployApplication request"""
 
-    vm_id: str = betterproto.string_field(1)
-    application_id: str = betterproto.string_field(2)
-    force: bool = betterproto.bool_field(3)
+    request_id: str = betterproto.string_field(1)
+    vm_id: str = betterproto.string_field(2)
+    application_id: str = betterproto.string_field(3)
+    force: bool = betterproto.bool_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class UndeployApplicationResponse(betterproto.Message):
     """UndeployApplication response"""
 
-    success: bool = betterproto.bool_field(1)
-    error: "FirecrackerError" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    error: "FirecrackerError" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)

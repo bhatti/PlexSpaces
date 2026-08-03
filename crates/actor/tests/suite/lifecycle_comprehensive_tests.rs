@@ -195,7 +195,7 @@ async fn test_init_called_before_message_loop() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let init_called = actor_impl.init_called.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -224,7 +224,7 @@ async fn test_init_called_only_once() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let init_call_count = actor_impl.init_call_count.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -254,7 +254,7 @@ async fn test_init_failure_prevents_start() {
     let actor_impl = ComprehensiveLifecycleActor::new()
         .with_init_error("init failed: database connection error".to_string());
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -281,7 +281,7 @@ async fn test_init_failure_prevents_start() {
 async fn test_init_success_allows_start() {
     let actor_impl = ComprehensiveLifecycleActor::new();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -311,7 +311,7 @@ async fn test_init_called_before_any_messages() {
     let init_called = actor_impl.init_called.clone();
     let message_count = actor_impl.message_count.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -364,7 +364,7 @@ async fn test_terminate_called_on_graceful_shutdown() {
     let terminate_called = actor_impl.terminate_called.clone();
     let terminate_reason = actor_impl.terminate_reason.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -399,7 +399,7 @@ async fn test_terminate_called_only_once() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_call_count = actor_impl.terminate_call_count.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -433,7 +433,7 @@ async fn test_terminate_called_with_correct_reason() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_reason = actor_impl.terminate_reason.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -465,7 +465,7 @@ async fn test_terminate_called_before_state_terminated() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_called = actor_impl.terminate_called.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -664,7 +664,7 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_called = actor_impl.terminate_called.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -749,7 +749,7 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
     let handle_exit_called = actor_impl.handle_exit_called.clone();
     let terminate_called = actor_impl.terminate_called.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -816,7 +816,7 @@ async fn test_init_called_even_if_actor_stopped_immediately() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let init_called = actor_impl.init_called.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -846,7 +846,7 @@ async fn test_terminate_not_called_if_init_fails() {
     let actor_impl = ComprehensiveLifecycleActor::new().with_init_error("init failed".to_string());
     let terminate_called = actor_impl.terminate_called.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -873,7 +873,7 @@ async fn test_multiple_exit_messages_handled_correctly() {
     let actor_impl = ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_call_count = actor_impl.handle_exit_call_count.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(

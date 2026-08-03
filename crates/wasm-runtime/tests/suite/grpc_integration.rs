@@ -380,7 +380,7 @@ async fn test_grpc_concurrent_deployments() {
             };
 
             let request = tonic::Request::new(DeployWasmModuleRequest {
-        request_id: ulid::Ulid::new().to_string(),
+                request_id: ulid::Ulid::new().to_string(),
                 module: Some(module),
                 pre_warm: 0,
                 target_node_tags: vec![],

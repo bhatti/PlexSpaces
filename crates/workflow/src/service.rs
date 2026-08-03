@@ -828,7 +828,10 @@ mod tests {
         let execution_id = start_response.into_inner().execution_id;
 
         // Get execution
-        let get_req = test_request(GetExecutionRequest { execution_id, request_id: ulid::Ulid::new().to_string() });
+        let get_req = test_request(GetExecutionRequest {
+            execution_id,
+            request_id: ulid::Ulid::new().to_string(),
+        });
 
         let result = service.get_execution(get_req).await;
         assert!(result.is_ok());
@@ -922,7 +925,10 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify status is cancelled
-        let get_req = test_request(GetExecutionRequest { execution_id, request_id: ulid::Ulid::new().to_string() });
+        let get_req = test_request(GetExecutionRequest {
+            execution_id,
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let exec = service.get_execution(get_req).await.unwrap().into_inner();
         assert_eq!(exec.execution.unwrap().status, 5); // CANCELLED
     }
@@ -1062,9 +1068,7 @@ mod tests {
         assert!(result.is_ok());
 
         let response = result.unwrap().into_inner();
-        // Step executions may be empty for simple workflows
-        #[allow(unused_comparisons)]
-        let _ = response.step_executions.len() >= 0;
+        // Step executions may be empty for simple workflows; len() is always valid
     }
 
     #[tokio::test]

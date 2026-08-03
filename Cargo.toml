@@ -21,17 +21,16 @@ members = [
     "crates/wasm-runtime",
     "crates/firecracker",
     "crates/workflow",
-    "crates/process-groups",
     "crates/channel",
     "crates/object-registry",
     "crates/elastic-pool",
-    "crates/circuit-breaker",
     "crates/http-client",
     "crates/locks",
     "crates/scheduler",
     "crates/cli",
     "crates/dashboard",
     "crates/services",
+    "crates/test-utils",
     "sdks/rust/plexspaces-sdk-macros",
     "sdks/rust/plexspaces-sdk",
 ]
@@ -59,11 +58,9 @@ default-members = [
     # "crates/supervisor" - merged into plexspaces-actor
     "crates/grpc-middleware",
     "crates/workflow",
-    "crates/process-groups",
     "crates/channel",
     "crates/object-registry",
     "crates/elastic-pool",
-    "crates/circuit-breaker",
     "crates/http-client",
     "crates/locks",
     "crates/scheduler",
@@ -73,6 +70,7 @@ default-members = [
     # "crates/cli",             # Only needed for CLI tools
     # "crates/dashboard",       # Only needed for dashboard UI
     "crates/services",        # Service implementations (consolidated)
+    "crates/test-utils",     # Shared test helpers (eliminates 38+ duplicates)
 ]
 exclude = [
     "examples/*",  # Examples are standalone, not part of workspace
@@ -227,7 +225,8 @@ sqlx = { version = "0.7", features = [
     "sqlite",
     "chrono",
     "json",
-    "migrate"
+    "migrate",
+    "any"
 ] }
 
 # Actor system
@@ -236,8 +235,8 @@ sqlx = { version = "0.7", features = [
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager", "aio"] }
 
 # WebAssembly runtime
-wasmtime = { version = "16.0", features = ["async", "pooling-allocator"] }
-wasmtime-wasi = "16.0"
+wasmtime = { version = "25", features = ["async", "pooling-allocator", "component-model", "cranelift"] }
+wasmtime-wasi = "25"
 
 # Security and crypto
 jsonwebtoken = "9.2"
@@ -265,6 +264,7 @@ metrics-exporter-prometheus = { version = "0.15", default-features = false }
 
 # Internal crates
 plexspaces-proto = { path = "crates/proto" }
+plexspaces-service-traits = { path = "crates/service-traits" }
 plexspaces-lattice = { path = "crates/lattice" }
 plexspaces-mailbox = { path = "crates/mailbox" }
 plexspaces-common = { path = "crates/common" }
@@ -281,15 +281,14 @@ plexspaces-firecracker = { path = "crates/firecracker" }
 plexspaces-workflow = { path = "crates/workflow" }
 plexspaces-channel = { path = "crates/channel" }
 plexspaces-elastic-pool = { path = "crates/elastic-pool" }
-plexspaces-circuit-breaker = { path = "crates/circuit-breaker" }
 plexspaces-http-client = { path = "crates/http-client" }
 plexspaces-locks = { path = "crates/locks" }
 plexspaces-scheduler = { path = "crates/scheduler" }
 plexspaces-object-registry = { path = "crates/object-registry" }
-plexspaces-process-groups = { path = "crates/process-groups" }
 plexspaces-journaling = { path = "crates/journaling" }
 plexspaces-dashboard = { path = "crates/dashboard" }
 plexspaces-sdk = { path = "sdks/rust/plexspaces-sdk", features = ["native"] }
+plexspaces-test-utils = { path = "crates/test-utils" }
 
 # Add more workspace dependencies
 pretty_assertions = "1.4"
@@ -298,12 +297,38 @@ tempfile = "3.8"
 testcontainers = "0.15"
 wiremock = "0.5"
 proptest = "1.4"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 
 [profile.dev]
 opt-level = 0
 debug = true
 overflow-checks = true
+
+# Speed up slow-to-compile heavy dependencies in dev/test builds.
+# These deps don't need debug symbols; higher opt-level reduces compile time
+# for their generated code without impacting our own debug experience.
+[profile.dev.package.wasmtime]
+opt-level = 1
+[profile.dev.package.wasmtime-cranelift]
+opt-level = 2
+[profile.dev.package.wasmtime-environ]
+opt-level = 1
+[profile.dev.package.sqlx-macros]
+opt-level = 3
+[profile.dev.package.ring]
+opt-level = 3
+[profile.dev.package.rustls]
+opt-level = 1
+[profile.dev.package.prost-build]
+opt-level = 1
+[profile.dev.package.object_store]
+opt-level = 1
+[profile.dev.package.aws-sdk-s3]
+opt-level = 1
+[profile.dev.package.aws-sdk-dynamodb]
+opt-level = 1
+[profile.dev.package.aws-smithy-runtime]
+opt-level = 1
 
 [profile.test]
 # Optimize test builds for faster execution while keeping compilation fast
@@ -311,6 +336,17 @@ overflow-checks = true
 opt-level = 1
 debug = true
 overflow-checks = true
+
+[profile.test.package.wasmtime]
+opt-level = 1
+[profile.test.package.wasmtime-cranelift]
+opt-level = 2
+[profile.test.package.sqlx-macros]
+opt-level = 3
+[profile.test.package.ring]
+opt-level = 3
+[profile.test.package.object_store]
+opt-level = 1
 
 [profile.release]
 opt-level = 3

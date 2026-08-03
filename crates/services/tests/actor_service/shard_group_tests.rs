@@ -14,14 +14,13 @@
 //! TDD: Tests written first, will fail until implementation is added.
 
 use async_trait::async_trait;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::Message;
 use plexspaces_actor::{
-    actor_context::ObjectRegistry as ObjectRegistryTrait,
-    Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType,
-    InitializableServiceLocator, NodeRegistryTrait, RequestContext,
-    RequestContextExt, ServiceLocator,
+    actor_context::ObjectRegistry as ObjectRegistryTrait, Actor as ActorTrait, ActorContext,
+    ActorRegistry, BehaviorError, BehaviorType, InitializableServiceLocator, NodeRegistryTrait,
+    RequestContext, RequestContextExt, ServiceLocator,
 };
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ServiceNameExt;
 use plexspaces_object_registry::ObjectRegistryImpl;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
@@ -251,16 +250,14 @@ impl GenServer for CounterActor {
                 message_type: "reply".to_string(),
                 ..Default::default()
             };
-            let actor_id = ctx.self_ref()
+            let actor_id = ctx
+                .self_ref()
                 .map(|r| r.id().clone())
                 .or_else(|| plexspaces_actor::ActorId::from_canonical(&msg.receiver_id).ok());
             if let Some(actor_id) = actor_id {
-                let _ = ctx.send_reply(
-                    Some(&msg.correlation_id),
-                    &msg.sender_id,
-                    actor_id,
-                    reply,
-                ).await;
+                let _ = ctx
+                    .send_reply(Some(&msg.correlation_id), &msg.sender_id, actor_id, reply)
+                    .await;
             }
         }
         Ok(())
@@ -503,6 +500,25 @@ async fn create_test_actor_service(
         ..Default::default()
     };
     service_locator.register_security_config(config).await;
+
+    // Register gRPC transport clients so remote actor routing works in multi-node tests.
+    // GrpcConnectionManager is already registered by initialize_services above.
+    {
+        use plexspaces_actor::{GrpcActorTransportClient, GrpcNodeTransportClient};
+        let sl_trait: Arc<dyn ServiceLocator> = service_locator.clone();
+        let grpc_actor = Arc::new(GrpcActorTransportClient::new(sl_trait.clone()));
+        let grpc_node = Arc::new(GrpcNodeTransportClient::new(sl_trait));
+        service_locator
+            .register_actor_transport_client(
+                grpc_actor as Arc<dyn plexspaces_service_traits::ActorTransportClient>,
+            )
+            .await;
+        service_locator
+            .register_node_transport_client(
+                grpc_node as Arc<dyn plexspaces_service_traits::NodeTransportClient>,
+            )
+            .await;
+    }
 
     // Cast to ServiceLocatorImpl for return type
     let service_locator_impl =
@@ -1561,8 +1577,10 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
         "heat-diffusion-rust"
     );
 
-    let discover_ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "heat-diffusion-rust".to_string());
+    let discover_ctx = RequestContext::new_without_auth(
+        "test-tenant".to_string(),
+        "heat-diffusion-rust".to_string(),
+    );
     let discovered = node2_registry
         .discover_actors_by_type(&discover_ctx, "counter")
         .await;
@@ -1856,8 +1874,11 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
 
     assert_eq!(payloads.len(), 2);
     assert!(
-        payloads.iter().all(|payload| payload.get("error").is_none()),
-        "Expected no errors in payloads, got: {:?}", payloads
+        payloads
+            .iter()
+            .all(|payload| payload.get("error").is_none()),
+        "Expected no errors in payloads, got: {:?}",
+        payloads
     );
     assert!(payloads
         .iter()
@@ -2127,7 +2148,7 @@ async fn test_spawn_actors_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     let req = test_request(SpawnActorsRequest {
-       request_id: ulid::Ulid::new().to_string(),
+        request_id: ulid::Ulid::new().to_string(),
         requests: vec![
             spawn_actor_request_for_test("default", "counter", "", 1),
             spawn_actor_request_for_test("default", "counter", "", 1),
@@ -2149,7 +2170,10 @@ async fn test_spawn_actors_success() {
 async fn test_spawn_actors_empty_request() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = test_request(SpawnActorsRequest { request_id: ulid::Ulid::new().to_string(), requests: vec![] });
+    let req = test_request(SpawnActorsRequest {
+        request_id: ulid::Ulid::new().to_string(),
+        requests: vec![],
+    });
 
     let result = service.spawn_actors(req).await;
     assert!(result.is_ok(), "Empty SpawnActors should succeed");
@@ -2163,7 +2187,7 @@ async fn test_spawn_actors_instances_count_replicas() {
 
     // Spawn 3 replicas of the same actor type with a single request
     let req = test_request(SpawnActorsRequest {
-       request_id: ulid::Ulid::new().to_string(),
+        request_id: ulid::Ulid::new().to_string(),
         requests: vec![spawn_actor_request_for_test(
             "default", "counter", "worker", 3,
         )],
@@ -2202,7 +2226,7 @@ async fn test_spawn_actors_instances_count_zero_spawns_one() {
 
     // instances_count=0 should behave as 1
     let req = test_request(SpawnActorsRequest {
-       request_id: ulid::Ulid::new().to_string(),
+        request_id: ulid::Ulid::new().to_string(),
         requests: vec![spawn_actor_request_for_test("default", "counter", "", 0)],
     });
 
@@ -2223,7 +2247,7 @@ async fn test_spawn_actors_instances_count_auto_id() {
 
     // No actor_id + instances_count=2 should generate ULID-based IDs
     let req = test_request(SpawnActorsRequest {
-       request_id: ulid::Ulid::new().to_string(),
+        request_id: ulid::Ulid::new().to_string(),
         requests: vec![spawn_actor_request_for_test("default", "counter", "", 2)],
     });
 

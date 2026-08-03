@@ -321,6 +321,16 @@ class ApplicationSpec(betterproto.Message):
     )
     """External service links this application expects at deploy time."""
 
+    static_mount: str = betterproto.string_field(16)
+    """
+    URL mount path for static files bundled in the app zip.
+    
+     When non-empty, the node serves the app's static/ directory at this path.
+     Example: "apps/chat" → files accessible at http://<node>/apps/chat/
+     Defaults to "apps/<application_id>" when static files are present but mount is empty.
+     Set in app-config.toml under [static] mount = "apps/chat"
+    """
+
 
 @dataclass(eq=False, repr=False)
 class ApplicationServiceLinkRequirement(betterproto.Message):
@@ -424,17 +434,18 @@ class ApplicationRuntimeState(betterproto.Message):
 class DeployApplicationRequest(betterproto.Message):
     """Deploy application request"""
 
-    application_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Application identifier (unique per node)"""
 
-    name: str = betterproto.string_field(2)
+    application_id: str = betterproto.string_field(2)
+    name: str = betterproto.string_field(3)
     """Application name"""
 
-    version: str = betterproto.string_field(3)
+    version: str = betterproto.string_field(4)
     """Application version"""
 
     wasm_module: Optional["__wasm_v1__.WasmModule"] = betterproto.message_field(
-        4, optional=True
+        5, optional=True
     )
     """
     WASM module (if WASM application)
@@ -442,13 +453,13 @@ class DeployApplicationRequest(betterproto.Message):
      If not provided, application must be pre-registered (native Rust).
     """
 
-    config: "ApplicationSpec" = betterproto.message_field(5)
+    config: "ApplicationSpec" = betterproto.message_field(6)
     """
     Application configuration
      Defines supervision tree, dependencies, environment variables, etc.
     """
 
-    initial_state: bytes = betterproto.bytes_field(6)
+    initial_state: bytes = betterproto.bytes_field(7)
     """
     Initial state (optional, for stateful applications)
      Passed to application's start() method.
@@ -459,16 +470,17 @@ class DeployApplicationRequest(betterproto.Message):
 class DeployApplicationResponse(betterproto.Message):
     """Deploy application response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Success flag"""
 
-    application_id: str = betterproto.string_field(2)
+    success: bool = betterproto.bool_field(2)
+    application_id: str = betterproto.string_field(3)
     """Application ID (may differ from request if auto-generated)"""
 
-    status: "ApplicationStatus" = betterproto.enum_field(3)
+    status: "ApplicationStatus" = betterproto.enum_field(4)
     """Application status after deployment"""
 
-    error: Optional[str] = betterproto.string_field(4, optional=True)
+    error: Optional[str] = betterproto.string_field(5, optional=True)
     """Error details (if success=false)"""
 
 
@@ -476,10 +488,11 @@ class DeployApplicationResponse(betterproto.Message):
 class UndeployApplicationRequest(betterproto.Message):
     """Undeploy application request"""
 
-    application_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Application ID to undeploy"""
 
-    timeout: Optional[timedelta] = betterproto.message_field(2, optional=True)
+    application_id: str = betterproto.string_field(2)
+    timeout: Optional[timedelta] = betterproto.message_field(3, optional=True)
     """
     Graceful shutdown timeout (optional, uses app config default if not provided)
     """
@@ -489,10 +502,11 @@ class UndeployApplicationRequest(betterproto.Message):
 class UndeployApplicationResponse(betterproto.Message):
     """Undeploy application response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Success flag"""
 
-    error: Optional[str] = betterproto.string_field(2, optional=True)
+    success: bool = betterproto.bool_field(2)
+    error: Optional[str] = betterproto.string_field(3, optional=True)
     """Error details (if success=false)"""
 
 
@@ -500,18 +514,22 @@ class UndeployApplicationResponse(betterproto.Message):
 class ListApplicationsRequest(betterproto.Message):
     """List applications request"""
 
-    status_filter: Optional["ApplicationStatus"] = betterproto.enum_field(
-        1, optional=True
-    )
+    request_id: str = betterproto.string_field(1)
     """Filter by status (optional, empty = all applications)"""
+
+    status_filter: Optional["ApplicationStatus"] = betterproto.enum_field(
+        2, optional=True
+    )
 
 
 @dataclass(eq=False, repr=False)
 class ListApplicationsResponse(betterproto.Message):
     """List applications response"""
 
-    applications: List["ApplicationInfo"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """List of deployed applications"""
+
+    applications: List["ApplicationInfo"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
@@ -611,31 +629,34 @@ class ApplicationMetrics(betterproto.Message):
 class GetApplicationStatusRequest(betterproto.Message):
     """Get application status request"""
 
-    application_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Application ID"""
+
+    application_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetApplicationStatusResponse(betterproto.Message):
     """Get application status response"""
 
-    application: Optional["ApplicationInfo"] = betterproto.message_field(
-        1, optional=True
-    )
+    request_id: str = betterproto.string_field(1)
     """Application information"""
 
-    state: Optional["ApplicationRuntimeState"] = betterproto.message_field(
+    application: Optional["ApplicationInfo"] = betterproto.message_field(
         2, optional=True
+    )
+    state: Optional["ApplicationRuntimeState"] = betterproto.message_field(
+        3, optional=True
     )
     """Detailed application state"""
 
-    error: Optional[str] = betterproto.string_field(3, optional=True)
+    error: Optional[str] = betterproto.string_field(4, optional=True)
     """Error if application not found"""
 
-    node_id: str = betterproto.string_field(4)
+    node_id: str = betterproto.string_field(5)
     """Node ID that served this status response."""
 
-    node_address: str = betterproto.string_field(5)
+    node_address: str = betterproto.string_field(6)
     """Node address that served this status response."""
 
 

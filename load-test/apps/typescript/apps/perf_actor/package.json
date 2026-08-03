@@ -1,0 +1,18 @@
+{
+  "name": "perf-actor-ts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bash build.sh"
+  },
+  "dependencies": {
+    "@plexspaces/sdk": "^0.1"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "^0.10",
+    "@bytecodealliance/jco": "^1.3",
+    "esbuild": "^0.24",
+    "typescript": "^5.4"
+  }
+}

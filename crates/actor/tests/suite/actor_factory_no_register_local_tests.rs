@@ -32,9 +32,9 @@ use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
     RequestContext, RequestContextExt, ServiceLocator,
 };
+use plexspaces_test_utils::messages::create_test_message;
 use std::collections::HashMap;
 use std::sync::Arc;
-use ulid::Ulid;
 
 fn test_actor_id(name: &str) -> ActorId {
     ActorId::new(name, "gen_server", "default", "test-node").expect("valid test actor id")
@@ -59,15 +59,6 @@ fn make_spawn_spec(
         facets: vec![],
         config: None,
         labels: HashMap::new(),
-        ..Default::default()
-    }
-}
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> Message {
-    Message {
-        id: Ulid::new().to_string(),
-        payload,
         ..Default::default()
     }
 }

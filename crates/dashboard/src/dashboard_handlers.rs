@@ -421,9 +421,15 @@ mod tests {
     #[test]
     fn tuple_field_variants_match_expected_enum_names() {
         use plexspaces_proto::tuplespace::v1::{tuple_field::Value as TFV, TupleField};
-        let sf = TupleField { value: Some(TFV::String("hello".to_string())) };
-        let iv = TupleField { value: Some(TFV::Integer(42)) };
-        let bv = TupleField { value: Some(TFV::Boolean(true)) };
+        let sf = TupleField {
+            value: Some(TFV::String("hello".to_string())),
+        };
+        let iv = TupleField {
+            value: Some(TFV::Integer(42)),
+        };
+        let bv = TupleField {
+            value: Some(TFV::Boolean(true)),
+        };
         match &sf.value {
             Some(TFV::String(s)) => assert_eq!(s, "hello"),
             _ => panic!("expected String"),
@@ -585,22 +591,23 @@ async fn api_nodes(
     let nodes_response = response.into_inner();
 
     // Build node_id → node_address map from node registry
-    let address_map: std::collections::HashMap<String, String> =
-        if let Some(node_registry) = _service_locator.get_node_registry().await {
-            let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true);
-            node_registry
-                .list_nodes(&ctx, None, 1000, "")
-                .await
-                .map(|(regs, _)| {
-                    regs.into_iter()
-                        .map(|r| (r.node_id, r.node_address))
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else {
-            std::collections::HashMap::new()
-        };
+    let address_map: std::collections::HashMap<String, String> = if let Some(node_registry) =
+        _service_locator.get_node_registry().await
+    {
+        let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), String::new())
+            .with_admin(true);
+        node_registry
+            .list_nodes(&ctx, None, 1000, "")
+            .await
+            .map(|(regs, _)| {
+                regs.into_iter()
+                    .map(|r| (r.node_id, r.node_address))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
 
     // Convert nodes to JSON with address
     let nodes: Vec<serde_json::Value> = nodes_response
@@ -609,14 +616,8 @@ async fn api_nodes(
         .map(|node| {
             let mut json = node_to_json(node);
             if let Some(obj) = json.as_object_mut() {
-                let addr = address_map
-                    .get(&node.id)
-                    .cloned()
-                    .unwrap_or_default();
-                obj.insert(
-                    "node_address".to_string(),
-                    serde_json::Value::String(addr),
-                );
+                let addr = address_map.get(&node.id).cloned().unwrap_or_default();
+                obj.insert("node_address".to_string(), serde_json::Value::String(addr));
             }
             json
         })
@@ -689,8 +690,11 @@ async fn api_node_dashboard(
         let mut node_json = node_to_json(node);
         if let Some(obj) = node_json.as_object_mut() {
             let addr = if let Some(nr) = _service_locator.get_node_registry().await {
-                let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true);
+                let ctx = plexspaces_common::RequestContext::new_without_auth(
+                    String::new(),
+                    String::new(),
+                )
+                .with_admin(true);
                 nr.lookup_node(&ctx, &node.id)
                     .await
                     .ok()
@@ -2118,12 +2122,14 @@ async fn api_metrics_table(
             let (metric_type, value) = match &m.value {
                 Some(MV::CounterValue(v)) => ("counter", serde_json::json!(v)),
                 Some(MV::GaugeValue(v)) => ("gauge", serde_json::json!(v)),
-                Some(MV::HistogramValue(h)) => {
-                    ("histogram", serde_json::json!({"count": h.count, "sum": h.sum}))
-                }
-                Some(MV::SummaryValue(s)) => {
-                    ("summary", serde_json::json!({"count": s.count, "sum": s.sum}))
-                }
+                Some(MV::HistogramValue(h)) => (
+                    "histogram",
+                    serde_json::json!({"count": h.count, "sum": h.sum}),
+                ),
+                Some(MV::SummaryValue(s)) => (
+                    "summary",
+                    serde_json::json!({"count": s.count, "sum": s.sum}),
+                ),
                 None => ("unknown", serde_json::Value::Null),
             };
             let mut mj = serde_json::Map::new();

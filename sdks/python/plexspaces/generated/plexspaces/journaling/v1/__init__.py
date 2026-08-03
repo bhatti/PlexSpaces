@@ -479,120 +479,136 @@ class CheckpointConfig(betterproto.Message):
 class AppendRequest(betterproto.Message):
     """/ Append single journal entry request"""
 
-    entry: "JournalEntry" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    entry: "JournalEntry" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AppendResponse(betterproto.Message):
     """/ Append single journal entry response"""
 
-    sequence: int = betterproto.uint64_field(1)
+    request_id: str = betterproto.string_field(1)
+    sequence: int = betterproto.uint64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AppendBatchRequest(betterproto.Message):
     """/ Append batch of journal entries request (atomic operation)"""
 
-    entries: List["JournalEntry"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    entries: List["JournalEntry"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AppendBatchResponse(betterproto.Message):
     """/ Append batch of journal entries response"""
 
-    first_sequence: int = betterproto.uint64_field(1)
-    last_sequence: int = betterproto.uint64_field(2)
-    count: int = betterproto.uint32_field(3)
+    request_id: str = betterproto.string_field(1)
+    first_sequence: int = betterproto.uint64_field(2)
+    last_sequence: int = betterproto.uint64_field(3)
+    count: int = betterproto.uint32_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ReplayFromRequest(betterproto.Message):
     """/ Replay journal entries from sequence request"""
 
-    actor_id: str = betterproto.string_field(1)
-    from_sequence: int = betterproto.uint64_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    from_sequence: int = betterproto.uint64_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetLatestCheckpointRequest(betterproto.Message):
     """/ Get latest checkpoint for actor request"""
 
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class SaveCheckpointRequest(betterproto.Message):
     """/ Save checkpoint request"""
 
-    checkpoint: "Checkpoint" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    checkpoint: "Checkpoint" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class SaveCheckpointResponse(betterproto.Message):
     """/ Save checkpoint response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class TruncateToRequest(betterproto.Message):
     """/ Truncate journal to sequence request (cleanup after checkpoint)"""
 
-    actor_id: str = betterproto.string_field(1)
-    sequence: int = betterproto.uint64_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    sequence: int = betterproto.uint64_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class TruncateToResponse(betterproto.Message):
     """/ Truncate journal to sequence response"""
 
-    deleted_count: int = betterproto.uint64_field(1)
+    request_id: str = betterproto.string_field(1)
+    deleted_count: int = betterproto.uint64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStatsRequest(betterproto.Message):
     """/ Get journal statistics request"""
 
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AppendEventRequest(betterproto.Message):
     """/ Append event request"""
 
-    event: "ActorEvent" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    event: "ActorEvent" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AppendEventResponse(betterproto.Message):
     """/ Append event response"""
 
-    sequence: int = betterproto.uint64_field(1)
+    request_id: str = betterproto.string_field(1)
+    sequence: int = betterproto.uint64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ReplayEventsFromRequest(betterproto.Message):
     """/ Replay events from sequence request (paginated)"""
 
-    actor_id: str = betterproto.string_field(1)
-    from_sequence: int = betterproto.uint64_field(2)
-    page_request: "__common_v1__.PageRequest" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    from_sequence: int = betterproto.uint64_field(3)
+    page_request: "__common_v1__.PageRequest" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ReplayEventsFromResponse(betterproto.Message):
     """/ Replay events from sequence response (paginated)"""
 
-    events: List["ActorEvent"] = betterproto.message_field(1)
-    page_response: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    events: List["ActorEvent"] = betterproto.message_field(2)
+    page_response: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetActorHistoryRequest(betterproto.Message):
     """/ Get actor history request (paginated)"""
 
-    actor_id: str = betterproto.string_field(1)
-    page_request: "__common_v1__.PageRequest" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    page_request: "__common_v1__.PageRequest" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)

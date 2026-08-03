@@ -20,7 +20,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::actor_context::ActorService;
@@ -28,9 +28,9 @@ use crate::service_locator_trait::ServiceLocator;
 use crate::ActorFactory;
 use crate::Service;
 use crate::{
-    ActorId, ExitReason, MessageSender, ReplyWaiter, ReplyWaiterRegistry, RequestContext,
-    RequestContextExt, VirtualActorManager, TEMP_SENDER_ACTOR_TYPE,
+    ActorId, ExitReason, MessageSender, RequestContext, RequestContextExt, VirtualActorManager,
 };
+use crate::pending_asks::PendingAsks;
 use plexspaces_common::ServiceNameExt;
 use plexspaces_facet::{ExitReason as FacetExitReason, FacetManager};
 use plexspaces_proto::common::v1::Message;
@@ -87,6 +87,15 @@ pub enum ActorRegistryError {
     /// Link/monitor/unlink/demonitor rejected (namespace/tenant scope or locality).
     #[error("link/monitor denied: {0}")]
     LinkMonitorDenied(String),
+
+    /// Target actor's mailbox is full. Transient — caller should retry after `retry_after_ms`.
+    /// Maps to gRPC RESOURCE_EXHAUSTED (code 8).
+    #[error("Mailbox full (depth={depth}, capacity={capacity}, retry_after_ms={retry_after_ms})")]
+    MailboxFull {
+        depth: usize,
+        capacity: usize,
+        retry_after_ms: u64,
+    },
 }
 
 /// ## Actor Data Storage
@@ -112,8 +121,8 @@ pub struct ActorRegistry {
     actor_factory: Arc<RwLock<Option<Arc<dyn ActorFactory>>>>,
     /// VirtualActorManager is the source of truth for virtual actor metadata.
     virtual_actor_manager: Arc<RwLock<Option<Arc<VirtualActorManager>>>>,
-    /// ReplyWaiterRegistry is used by local ask() to await replies.
-    reply_waiter_registry: Arc<RwLock<Option<Arc<ReplyWaiterRegistry>>>>,
+    /// PendingAsks tracks in-flight local ask() correlations via oneshot channels.
+    pending_asks: Arc<PendingAsks>,
     /// Monitor and link state (see actor_monitor module).
     actor_monitor: Arc<crate::actor_monitor::ActorMonitor>,
     /// Lifecycle event subscribers (for observability backends like Prometheus, StatsD)
@@ -135,11 +144,6 @@ pub struct ActorRegistry {
     /// Dialable HTTP base (`http://listen_addr`) for remote `NotifyActorDown` when the
     /// supervisor is on another node. Set via [`Self::set_local_listen_addr`] during node startup.
     local_listen_addr: Arc<RwLock<String>>,
-    /// Temporary sender mappings: temporary_sender_id -> TemporarySenderEntry
-    /// Used for ask() pattern when called from outside actor context
-    /// Key: structured temporary sender ActorId
-    /// Value: ActorRef ID that created it, correlation_id, and expiration time
-    temporary_senders: Arc<RwLock<HashMap<ActorId, TemporarySenderEntry>>>,
     /// Efficient actor-type lookup: (tenant_id, namespace, actor_type) -> Vec<actor_id>
     /// Used for FaaS-style actor request routing to quickly find actors by type
     /// Maintained in sync with actors map for O(1) lookup
@@ -155,25 +159,6 @@ pub struct ActorRegistry {
     /// Enables quick parent lookup for child actors
     /// Used for cascading shutdown and parent notification
     child_to_parent: Arc<RwLock<HashMap<ActorId, ActorId>>>,
-}
-
-/// Temporary sender entry for ask() pattern
-///
-/// ## Purpose
-/// Stores metadata for temporary senders created when ask() is called from outside actor context.
-/// The temporary sender itself is registered as an ActorRef in the actors map.
-///
-/// ## Design
-/// - Temporary sender uses its own canonical ActorId as actor_ref_id
-/// - Used for correlation_id lookup and expiration tracking
-#[derive(Clone, Debug)]
-pub struct TemporarySenderEntry {
-    /// Temporary sender actor ID.
-    pub actor_ref_id: ActorId,
-    /// Correlation ID for matching replies
-    pub correlation_id: String,
-    /// Expiration time (for automatic cleanup)
-    pub expires_at: Instant,
 }
 
 // MonitorLink is defined in crate::actor_monitor and re-exported above.
@@ -237,13 +222,12 @@ impl ActorRegistry {
             lifecycle_subscribers: Arc::new(RwLock::new(Vec::new())),
             actor_configs: Arc::new(RwLock::new(HashMap::new())),
             registered_actor_entries: Arc::new(RwLock::new(HashSet::new())),
-            temporary_senders: Arc::new(RwLock::new(HashMap::new())),
+            pending_asks: Arc::new(PendingAsks::from_env()),
             actor_type_index: Arc::new(RwLock::new(HashMap::new())),
             parent_to_children: Arc::new(RwLock::new(HashMap::new())),
             child_to_parent: Arc::new(RwLock::new(HashMap::new())),
             actor_factory: Arc::new(RwLock::new(None)),
             virtual_actor_manager: Arc::new(RwLock::new(None)),
-            reply_waiter_registry: Arc::new(RwLock::new(None)),
             actor_service: Arc::new(RwLock::new(Arc::new(
                 crate::actor_monitor::LocalOnlyActorService,
             ) as Arc<dyn ActorService>)),
@@ -264,11 +248,6 @@ impl ActorRegistry {
     /// Sets the VirtualActorManager used for metadata-driven activation.
     pub async fn set_virtual_actor_manager(&self, manager: Arc<VirtualActorManager>) {
         *self.virtual_actor_manager.write().await = Some(manager);
-    }
-
-    /// Sets the ReplyWaiterRegistry used by local ask().
-    pub async fn set_reply_waiter_registry(&self, registry: Arc<ReplyWaiterRegistry>) {
-        *self.reply_waiter_registry.write().await = Some(registry);
     }
 
     /// Replaces the ActorService used to route messages to remote actors.
@@ -937,18 +916,6 @@ impl ActorRegistry {
             })
     }
 
-    async fn require_reply_waiter_registry(
-        &self,
-    ) -> Result<Arc<ReplyWaiterRegistry>, ActorRegistryError> {
-        self.reply_waiter_registry
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| {
-                ActorRegistryError::DependencyUnavailable("ReplyWaiterRegistry".to_string())
-            })
-    }
-
     async fn get_or_activate_local_sender(
         &self,
         actor_id: &ActorId,
@@ -985,11 +952,32 @@ impl ActorRegistry {
         actor_id: &ActorId,
         message: Message,
     ) -> Result<(), ActorRegistryError> {
+        // Replies to pending asks bypass the actor mailbox entirely.
+        if actor_id.is_temporary_sender() {
+            let corr_id = message.correlation_id.clone();
+            if corr_id.is_empty() {
+                return Err(ActorRegistryError::SendFailed(format!(
+                    "Reply to temporary sender '{}' missing correlation_id",
+                    actor_id
+                )));
+            }
+            let resolved = self.pending_asks.resolve(&corr_id, message);
+            if !resolved && tracing::enabled!(tracing::Level::DEBUG) {
+                // Entry already resolved, expired, or cancelled — not an error.
+                tracing::debug!(
+                    correlation_id = %corr_id,
+                    actor_id = %actor_id,
+                    "PendingAsks: reply arrived for unknown/expired correlation; dropping"
+                );
+            }
+            return Ok(());
+        }
+
         if let Some(sender) = self.lookup_actor(actor_id).await {
             return sender
                 .tell(ctx, message)
                 .await
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
+                .map_err(box_err_to_registry);
         }
 
         // VirtualActorManager is optional; treat its absence as "no virtual actors" rather
@@ -1010,7 +998,7 @@ impl ActorRegistry {
             return sender
                 .tell(ctx, message)
                 .await
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
+                .map_err(box_err_to_registry);
         }
 
         // Validate caller's tenant matches the virtual actor's stored tenant.
@@ -1019,7 +1007,10 @@ impl ActorRegistry {
         if let Some(metadata) = manager.get_metadata(actor_id).await {
             let caller_tenant = ctx.tenant_id();
             let actor_tenant = &metadata.spec.tenant_id;
-            if !caller_tenant.is_empty() && !actor_tenant.is_empty() && caller_tenant != actor_tenant {
+            if !caller_tenant.is_empty()
+                && !actor_tenant.is_empty()
+                && caller_tenant != actor_tenant
+            {
                 return Err(ActorRegistryError::SendFailed(format!(
                     "Tenant isolation violation: caller tenant '{}' cannot access virtual actor in tenant '{}'",
                     caller_tenant, actor_tenant
@@ -1033,24 +1024,60 @@ impl ActorRegistry {
             }
         }
 
-        let mut should_activate = true;
+        // Check the per-instance facet first (already-registered instance path).
+        // If start_activation() returns false, a concurrent caller already owns the activation.
         if let Ok(facet_arc) = manager.get_facet(actor_id).await {
             let facet_guard = facet_arc.read().await;
-            should_activate = facet_guard.start_activation().await;
+            let should_activate = facet_guard.start_activation().await;
+            drop(facet_guard);
+
+            manager.queue_message(ctx, actor_id, message).await;
+
+            if should_activate {
+                let actor_factory = self.require_actor_factory().await?;
+                actor_factory
+                    .activate_virtual_actor(actor_id)
+                    .await
+                    .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+                manager.update_last_access(actor_id).await;
+            }
+            return Ok(());
         }
 
-        manager.queue_message(ctx, actor_id, message).await;
+        // Type-registered path: no per-instance facet.
+        // Use activation_in_flight guard so exactly one caller activates the actor.
+        // All concurrent callers arrive here because lookup_actor returned None above.
+        //
+        // Guard protocol:
+        //   Winner:  inserts entry → queues message → activates → releases (notify_waiters)
+        //   Waiters: wait on Notify → on wake, deliver directly to the now-live actor
+        //
+        // Late-winners (arrive after guard is released): re-check lookup_actor.
+        // If active, deliver directly. If not, try to (re-)insert and activate.
+        loop {
+            if let Some(sender) = self.lookup_actor(actor_id).await {
+                return sender.tell(ctx, message).await.map_err(box_err_to_registry);
+            }
 
-        if should_activate {
+            let (won, notify) = manager.try_acquire_activation(actor_id);
+            if !won {
+                // Wait for the current activation to finish.
+                notify.notified().await;
+                // Loop back: the actor should now be live; lookup_actor will find it.
+                continue;
+            }
+
+            // We are the winner. Queue our message, then activate.
+            manager.queue_message(ctx, actor_id, message).await;
+
             let actor_factory = self.require_actor_factory().await?;
-            actor_factory
-                .activate_virtual_actor(actor_id)
-                .await
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            let activate_result = actor_factory.activate_virtual_actor(actor_id).await;
+            // Always release so waiters unblock, even on failure.
+            manager.release_activation_guard(actor_id);
+            activate_result.map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
             manager.update_last_access(actor_id).await;
+            return Ok(());
         }
-
-        Ok(())
     }
 
     /// Sends a message to an actor, routing locally or remotely as needed.
@@ -1105,7 +1132,11 @@ impl ActorRegistry {
         result
     }
 
-    /// Sends a local request and waits for a reply using the temporary-sender pattern.
+    /// Sends a local request and waits for a reply.
+    ///
+    /// Uses a oneshot channel keyed by correlation_id in `PendingAsks`.
+    /// No actor object or mailbox is created — the reply is delivered directly
+    /// via `dispatch_local_message` when the actor calls back.
     pub async fn ask(
         &self,
         ctx: &RequestContext,
@@ -1113,28 +1144,10 @@ impl ActorRegistry {
         mut message: Message,
         timeout: Duration,
     ) -> Result<Message, ActorRegistryError> {
-        let waiter_registry = self.require_reply_waiter_registry().await?;
-        let actor_factory = self.require_actor_factory().await?;
         let correlation_id = Ulid::new().to_string();
         let temp_sender_id =
             ActorId::temporary_sender(&correlation_id, ctx.namespace(), &self.local_node_id)
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
-        let expires_at = Instant::now() + (timeout * 2);
-
-        actor_factory
-            .create_temporary_sender(
-                ctx,
-                temp_sender_id.clone(),
-                correlation_id.clone(),
-                expires_at,
-            )
-            .await
-            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
-
-        let waiter = ReplyWaiter::new();
-        waiter_registry
-            .register(correlation_id.clone(), waiter.clone())
-            .await;
 
         message.sender_id = temp_sender_id.to_string();
         message.correlation_id = correlation_id.clone();
@@ -1142,16 +1155,8 @@ impl ActorRegistry {
             message.receiver_id = actor_id.to_string();
         }
 
-        // Route: local fast-path or remote via ActorService.
-        // Only route remotely when node_id is an explicit non-local node name.
-        let is_remote = !actor_id.is_on_node(&self.local_node_id);
-
-        if is_remote {
-            // For remote actors use ask_reply gRPC (send_and_wait) so the reply is returned
-            // synchronously. The fire-and-forget send() path converts "call" → "cast" on the
-            // remote side and never produces a reply back to the temp sender waiter.
-            waiter_registry.remove(&correlation_id).await;
-            self.remove_temporary_sender(&temp_sender_id).await;
+        // Remote actors: delegate to gRPC ask_reply — no oneshot needed.
+        if !actor_id.is_on_node(&self.local_node_id) {
             let svc = self.actor_service.read().await.clone();
             return svc
                 .send_and_wait(ctx, actor_id.as_ref(), message, Some(timeout))
@@ -1159,36 +1164,44 @@ impl ActorRegistry {
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
         }
 
+        let rx = self.pending_asks.register(correlation_id.clone(), timeout);
+
         let dispatch_result = self.dispatch_local_message(ctx, actor_id, message).await;
         if let Err(err) = dispatch_result {
-            waiter_registry.remove(&correlation_id).await;
-            self.remove_temporary_sender(&temp_sender_id).await;
+            self.pending_asks.cancel(&correlation_id);
+            metrics::counter!("plexspaces_ask_errors_total", "reason" => "dispatch").increment(1);
             return Err(err);
         }
 
-        let reply = waiter.wait(timeout).await.map_err(|e| match e {
-            crate::ReplyWaiterError::Timeout => ActorRegistryError::Timeout,
-            other => ActorRegistryError::SendFailed(other.to_string()),
-        });
-
-        waiter_registry.remove(&correlation_id).await;
-        self.remove_temporary_sender(&temp_sender_id).await;
-        reply
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(reply)) => Ok(reply),
+            Ok(Err(_)) => {
+                metrics::counter!("plexspaces_ask_errors_total", "reason" => "channel_closed")
+                    .increment(1);
+                Err(ActorRegistryError::SendFailed(
+                    "ask() reply channel closed before reply arrived".to_string(),
+                ))
+            }
+            Err(_) => {
+                self.pending_asks.cancel(&correlation_id);
+                metrics::counter!("plexspaces_ask_errors_total", "reason" => "timeout")
+                    .increment(1);
+                Err(ActorRegistryError::Timeout)
+            }
+        }
     }
 
-    /// Ask with a caller-supplied temporary sender and correlation ID.
+    /// Ask with a caller-supplied correlation ID (for shard-group fanout).
     ///
-    /// Same as [`ask`] but the caller creates the temporary sender and correlation ID (e.g. for
-    /// shard-group fanout where one temp sender is shared across many concurrent asks).
-    /// The caller is responsible for creating and cleaning up the temporary sender.
-    /// This method owns the per-correlation `ReplyWaiter` registration and removal.
+    /// Same as [`ask`] but the caller supplies the correlation ID so that
+    /// one logical operation can fan out N concurrent asks each with their own
+    /// correlation_id — no shared temporary actor object needed.
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext with tenant_id and namespace
     /// * `actor_id` - Target actor to send to
     /// * `message` - Message to send (sender_id and correlation_id will be set)
     /// * `timeout` - How long to wait for the reply
-    /// * `temp_sender_id` - Pre-created temporary sender actor ID
     /// * `correlation_id` - Correlation ID for this specific ask
     pub async fn ask_with_sender(
         &self,
@@ -1196,10 +1209,11 @@ impl ActorRegistry {
         actor_id: &ActorId,
         mut message: Message,
         timeout: Duration,
-        temp_sender_id: ActorId,
         correlation_id: String,
     ) -> Result<Message, ActorRegistryError> {
-        let waiter_registry = self.require_reply_waiter_registry().await?;
+        let temp_sender_id =
+            ActorId::temporary_sender(&correlation_id, ctx.namespace(), &self.local_node_id)
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
 
         message.sender_id = temp_sender_id.to_string();
         message.correlation_id = correlation_id.clone();
@@ -1207,17 +1221,8 @@ impl ActorRegistry {
             message.receiver_id = actor_id.to_string();
         }
 
-        let waiter = ReplyWaiter::new();
-        waiter_registry
-            .register(correlation_id.clone(), waiter.clone())
-            .await;
-
-        let is_remote = !actor_id.is_on_node(&self.local_node_id);
-        if is_remote {
-            // For remote actors use ask_reply gRPC (send_and_wait) so the reply is returned
-            // synchronously over the same connection. The fire-and-forget send() path would
-            // convert message_type "call" → "cast" on the remote side and never produce a reply.
-            waiter_registry.remove(&correlation_id).await;
+        // Remote: delegate to gRPC ask_reply.
+        if !actor_id.is_on_node(&self.local_node_id) {
             let svc = self.actor_service.read().await.clone();
             return svc
                 .send_and_wait(ctx, actor_id.as_ref(), message, Some(timeout))
@@ -1225,19 +1230,26 @@ impl ActorRegistry {
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
         }
 
-        let dispatch_result = self.dispatch_local_message(ctx, actor_id, message).await;
+        let rx = self.pending_asks.register(correlation_id.clone(), timeout);
 
+        let dispatch_result = self.dispatch_local_message(ctx, actor_id, message).await;
         if let Err(err) = dispatch_result {
-            waiter_registry.remove(&correlation_id).await;
+            self.pending_asks.cancel(&correlation_id);
             return Err(err);
         }
 
-        let reply = waiter.wait(timeout).await.map_err(|e| match e {
-            crate::ReplyWaiterError::Timeout => ActorRegistryError::Timeout,
-            other => ActorRegistryError::SendFailed(other.to_string()),
-        });
-        waiter_registry.remove(&correlation_id).await;
-        reply
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(reply)) => Ok(reply),
+            Ok(Err(_)) => Err(ActorRegistryError::SendFailed(
+                "ask_with_sender() reply channel closed before reply arrived".to_string(),
+            )),
+            Err(_) => {
+                self.pending_asks.cancel(&correlation_id);
+                metrics::counter!("plexspaces_ask_errors_total", "reason" => "timeout")
+                    .increment(1);
+                Err(ActorRegistryError::Timeout)
+            }
+        }
     }
 
     /// Removes only the live sender/runtime for a passivated virtual actor while preserving
@@ -1377,168 +1389,11 @@ impl ActorRegistry {
         Ok(())
     }
 
-    // === Temporary Sender Management ===
-
-    /// Register a temporary sender ActorRef for ask() pattern
-    ///
-    /// ## Purpose
-    /// Registers a temporary sender ActorRef in ActorRegistry so it can be looked up when replies arrive.
-    /// Used when ask() is called from outside an actor context.
-    ///
-    /// ## Design
-    /// Temporary senders are registered as actual ActorRefs in the actors map (not just IDs).
-    /// This allows `send_reply()` to look them up via `lookup_actor()` and call `tell()` on them.
-    /// The temporary sender ActorRef's `tell()` method routes messages to ReplyWaiter.
-    ///
-    /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation
-    /// * `temporary_sender_id` - Temporary sender actor ID
-    /// * `temporary_sender_ref` - ActorRef for the temporary sender (implements MessageSender)
-    /// * `correlation_id` - Correlation ID for matching replies
-    /// * `expires_at` - Expiration time for automatic cleanup
-    pub async fn register_temporary_sender(
-        &self,
-        ctx: &RequestContext,
-        temporary_sender_id: ActorId,
-        temporary_sender_ref: Arc<dyn MessageSender>,
-        correlation_id: String,
-        expires_at: Instant,
-    ) {
-        let correlation_id_clone = correlation_id.clone();
-        self.register_actor(
-            ctx,
-            ActorRegistrationParams {
-                actor_id: temporary_sender_id.clone(),
-                sender: temporary_sender_ref,
-                actor_type: TEMP_SENDER_ACTOR_TYPE.to_string(),
-                config: None,
-                instance: None,
-                behavior_kind: None,
-            },
-        )
-        .await;
-
-        let mut temp_senders = self.temporary_senders.write().await;
-        temp_senders.insert(
-            temporary_sender_id.clone(),
-            TemporarySenderEntry {
-                actor_ref_id: temporary_sender_id.clone(),
-                correlation_id: correlation_id_clone,
-                expires_at,
-            },
-        );
-        let count = temp_senders.len();
-        drop(temp_senders);
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-            "ActorRegistry: Registered temporary sender ActorRef: temporary_sender_id={}, correlation_id={}, expires_at={:?}, total_temp_senders={}",
-            temporary_sender_id,
-            correlation_id,
-            expires_at,
-            count
-        );
-        }
+    /// Returns the number of in-flight ask() correlations.
+    pub fn pending_ask_count(&self) -> usize {
+        self.pending_asks.len()
     }
 
-    /// Lookup temporary sender entry
-    ///
-    /// ## Arguments
-    /// * `temporary_sender_id` - Temporary sender ID to lookup
-    ///
-    /// ## Returns
-    /// Some(TemporarySenderEntry) if found, None otherwise
-    pub async fn lookup_temporary_sender(
-        &self,
-        temporary_sender_id: &ActorId,
-    ) -> Option<TemporarySenderEntry> {
-        let temp_senders = self.temporary_senders.read().await;
-        temp_senders.get(temporary_sender_id).cloned()
-    }
-
-    /// Remove a temporary sender mapping
-    ///
-    /// ## Purpose
-    /// Removes temporary sender from both actors map and temporary_senders map.
-    /// This ensures complete cleanup when temporary sender is no longer needed.
-    ///
-    /// ## Arguments
-    /// * `temporary_sender_id` - Temporary sender ID to remove
-    pub async fn remove_temporary_sender(&self, temporary_sender_id: &ActorId) {
-        if let Err(e) = self.unregister_with_cleanup(temporary_sender_id).await {
-            tracing::warn!(
-                "ActorRegistry: Failed to unregister temporary sender ActorRef: temporary_sender_id={}, error={}",
-                temporary_sender_id, e
-            );
-        }
-        let mut temp_senders = self.temporary_senders.write().await;
-        if temp_senders.remove(temporary_sender_id).is_some()
-            && tracing::enabled!(tracing::Level::TRACE)
-        {
-            tracing::trace!(
-                "ActorRegistry: Removed temporary sender: temporary_sender_id={}, remaining={}",
-                temporary_sender_id,
-                temp_senders.len()
-            );
-        }
-    }
-
-    /// Cleanup expired temporary senders
-    ///
-    /// ## Purpose
-    /// Removes expired temporary sender mappings and unregisters them from the actors map.
-    /// This prevents memory leaks. Should be called periodically (e.g., every 30 seconds).
-    ///
-    /// ## Returns
-    /// `(expired_count, remaining_temporary_senders_after)`.
-    pub async fn cleanup_expired_temporary_senders(&self) -> (usize, usize) {
-        let now = Instant::now();
-        let expired_ids: Vec<ActorId> = {
-            let temp_senders = self.temporary_senders.read().await;
-            temp_senders
-                .iter()
-                .filter(|(_id, entry)| entry.expires_at <= now)
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        let expired_count = expired_ids.len();
-
-        for temp_sender_id in &expired_ids {
-            if let Err(e) = self.unregister_with_cleanup(temp_sender_id).await {
-                tracing::warn!(
-                    "ActorRegistry: Failed to unregister expired temporary sender ActorRef: temporary_sender_id={}, error={}",
-                    temp_sender_id, e
-                );
-            }
-        }
-
-        let remaining = if expired_count > 0 {
-            let mut temp_senders = self.temporary_senders.write().await;
-            for temp_sender_id in &expired_ids {
-                temp_senders.remove(temp_sender_id);
-            }
-            let after_count = temp_senders.len();
-
-            // OBSERVABILITY: Track expired temporary sender cleanup
-            metrics::counter!("plexspaces_actor_registry_temporary_sender_expired_total",
-                "node_id" => self.local_node_id.clone()
-            )
-            .increment(expired_count as u64);
-            metrics::gauge!("plexspaces_actor_registry_temporary_sender_mappings",
-                "node_id" => self.local_node_id.clone()
-            )
-            .set(after_count as f64);
-
-            after_count
-        } else {
-            self.temporary_senders.read().await.len()
-        };
-
-        (expired_count, remaining)
-    }
-
-    /// Get count of temporary senders (for metrics/monitoring)
     /// Discover actors by type (efficient O(1) lookup using index)
     ///
     /// ## Purpose
@@ -1566,21 +1421,17 @@ impl ActorRegistry {
             actor_type.to_string(),
         );
         let actor_ids = index.get(&key).cloned().unwrap_or_default();
-        tracing::debug!(
-            tenant_id = %key.0,
-            namespace = %key.1,
-            actor_type = %key.2,
-            actor_count = actor_ids.len(),
-            actor_ids = ?actor_ids,
-            "discover_actors_by_type"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                tenant_id = %key.0,
+                namespace = %key.1,
+                actor_type = %key.2,
+                actor_count = actor_ids.len(),
+                actor_ids = ?actor_ids,
+                "discover_actors_by_type"
+            );
+        }
         actor_ids
-    }
-
-    /// Returns the number of outstanding temporary senders (reply correlations in flight).
-    pub async fn temporary_sender_count(&self) -> usize {
-        let temp_senders = self.temporary_senders.read().await;
-        temp_senders.len()
     }
 
     // ============================================================================
@@ -1822,41 +1673,11 @@ impl ActorRegistry {
         map.get(parent_id).map(|v| v.len()).unwrap_or(0)
     }
 
-    /// Start background cleanup task for expired temporary senders
+    /// Start the background GC task for `PendingAsks`.
     ///
-    /// ## Purpose
-    /// Periodically cleans up expired temporary sender mappings to prevent memory leaks.
-    /// Runs every 30 seconds.
-    ///
-    /// ## Note
-    /// This should be called once when the node starts. The task will run until
-    /// the node shuts down.
-    ///
-    /// ## Arguments
-    /// * `registry` - Arc<ActorRegistry> to use for cleanup (must be Arc to share across tasks)
-    pub fn start_temporary_sender_cleanup(registry: Arc<Self>) {
-        let local_node_id = registry.local_node_id.clone();
-
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
-
-            loop {
-                interval.tick().await;
-
-                let (expired_count, after_count) =
-                    registry.cleanup_expired_temporary_senders().await;
-                if expired_count > 0 && tracing::enabled!(tracing::Level::DEBUG) {
-                    let before_count = expired_count + after_count;
-                    tracing::debug!(
-                        expired_count = expired_count,
-                        before_count = before_count,
-                        after_count = after_count,
-                        node_id = %local_node_id,
-                        "ActorRegistry: Cleaned up expired temporary senders"
-                    );
-                }
-            }
-        });
+    /// Delegates to `PendingAsks::start_gc()`. Call once at node startup.
+    pub fn start_pending_asks_gc(registry: Arc<Self>) {
+        registry.pending_asks.clone().start_gc();
     }
 
     // ============================================================================
@@ -2307,12 +2128,6 @@ impl ActorRegistry {
             }
         }
 
-        // OBSERVABILITY: Metrics
-        metrics::counter!("plexspaces_actor_exit_handled_total",
-            "actor_id" => actor_id.to_string(),
-            "action" => "down_sent"
-        )
-        .increment(monitors.len() as u64);
     }
 
     /// Propagate EXIT to linked actors (Phase 6)
@@ -2394,12 +2209,6 @@ impl ActorRegistry {
             }
         }
 
-        // OBSERVABILITY: Metrics
-        metrics::counter!("plexspaces_actor_exit_propagated_total",
-            "actor_id" => actor_id.to_string(),
-            "linked_count" => linked_count.to_string()
-        )
-        .increment(linked_count as u64);
     }
 
     /// Clean up link/monitor entries for terminated actor (Phase 6)
@@ -2625,5 +2434,34 @@ impl crate::LinkProvider for ActorRegistry {
 impl plexspaces_service_traits::ActorStateChecker for ActorRegistry {
     async fn is_actor_state_active(&self, actor_id: &ActorId) -> bool {
         ActorRegistry::is_actor_state_active(self, actor_id).await
+    }
+}
+
+impl From<crate::actor_ref::ActorRefError> for ActorRegistryError {
+    fn from(e: crate::actor_ref::ActorRefError) -> Self {
+        match e {
+            crate::actor_ref::ActorRefError::MailboxFull { depth, capacity, retry_after_ms } => {
+                ActorRegistryError::MailboxFull { depth, capacity, retry_after_ms }
+            }
+            crate::actor_ref::ActorRefError::ActorNotFound(id) => {
+                ActorRegistryError::ActorNotFound(id.to_string())
+            }
+            crate::actor_ref::ActorRefError::Timeout => ActorRegistryError::Timeout,
+            crate::actor_ref::ActorRefError::VisibilityDenied(m) => {
+                ActorRegistryError::VisibilityDenied(m)
+            }
+            other => ActorRegistryError::SendFailed(other.to_string()),
+        }
+    }
+}
+
+/// Convert a boxed `MessageSender::tell` error into `ActorRegistryError`.
+///
+/// Tries to downcast to `ActorRefError` first so `MailboxFull` structure is
+/// preserved. Falls back to `SendFailed` for any other boxed error type.
+fn box_err_to_registry(e: Box<dyn std::error::Error + Send + Sync>) -> ActorRegistryError {
+    match e.downcast::<crate::actor_ref::ActorRefError>() {
+        Ok(ref_err) => ActorRegistryError::from(*ref_err),
+        Err(other) => ActorRegistryError::SendFailed(other.to_string()),
     }
 }

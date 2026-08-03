@@ -74,7 +74,8 @@ pub async fn register_node(
         .register(ctx, registration)
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })
 }
 
@@ -125,7 +126,8 @@ pub async fn register_workflow(
         .register(ctx, registration)
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })
 }
 
@@ -155,7 +157,8 @@ pub async fn discover_application_nodes(
         )
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
 
     Ok(registrations)
@@ -187,7 +190,8 @@ pub async fn discover_workflow_nodes(
         )
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
 
     Ok(registrations)

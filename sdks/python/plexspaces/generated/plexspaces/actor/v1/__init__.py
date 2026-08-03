@@ -942,92 +942,103 @@ class NodePlacement(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class CreateShardGroupRequest(betterproto.Message):
-    config: "DataParallelConfig" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
      Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
     """
 
-    actor_type: str = betterproto.string_field(2)
-    shard_config: "ActorConfig" = betterproto.message_field(3)
+    config: "DataParallelConfig" = betterproto.message_field(2)
+    actor_type: str = betterproto.string_field(3)
+    shard_config: "ActorConfig" = betterproto.message_field(4)
     """
     Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
     """
 
-    initial_state: bytes = betterproto.bytes_field(4)
+    initial_state: bytes = betterproto.bytes_field(5)
     metadata: Dict[str, str] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
 @dataclass(eq=False, repr=False)
 class CreateShardGroupResponse(betterproto.Message):
-    group: "ShardGroup" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    group: "ShardGroup" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteShardGroupRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
-    force: bool = betterproto.bool_field(2)
-    shutdown_timeout: timedelta = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
+    force: bool = betterproto.bool_field(3)
+    shutdown_timeout: timedelta = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class GetShardGroupRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetShardGroupResponse(betterproto.Message):
-    group: "ShardGroup" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    group: "ShardGroup" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListShardGroupsRequest(betterproto.Message):
-    actor_type: str = betterproto.string_field(1)
-    state: "ShardGroupState" = betterproto.enum_field(2)
-    page: "__common_v1__.PageRequest" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_type: str = betterproto.string_field(2)
+    state: "ShardGroupState" = betterproto.enum_field(3)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ListShardGroupsResponse(betterproto.Message):
-    groups: List["ShardGroup"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    groups: List["ShardGroup"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class SendToShardRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
-    partition_key: bytes = betterproto.bytes_field(2)
-    message: "__common_v1__.Message" = betterproto.message_field(3)
-    wait_for_response: bool = betterproto.bool_field(4)
-    timeout: timedelta = betterproto.message_field(5)
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
+    partition_key: bytes = betterproto.bytes_field(3)
+    message: "__common_v1__.Message" = betterproto.message_field(4)
+    wait_for_response: bool = betterproto.bool_field(5)
+    timeout: timedelta = betterproto.message_field(6)
 
 
 @dataclass(eq=False, repr=False)
 class SendToShardResponse(betterproto.Message):
-    shard_id: int = betterproto.uint32_field(1)
-    shard_actor_id: str = betterproto.string_field(2)
-    response: "__common_v1__.Message" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    shard_id: int = betterproto.uint32_field(2)
+    shard_actor_id: str = betterproto.string_field(3)
+    response: "__common_v1__.Message" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ScatterGatherRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
-    query: "__common_v1__.Message" = betterproto.message_field(2)
-    timeout: timedelta = betterproto.message_field(3)
-    aggregation: "ShardGroupAggregationStrategy" = betterproto.enum_field(4)
-    min_responses: int = betterproto.uint32_field(5)
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
+    query: "__common_v1__.Message" = betterproto.message_field(3)
+    timeout: timedelta = betterproto.message_field(4)
+    aggregation: "ShardGroupAggregationStrategy" = betterproto.enum_field(5)
+    min_responses: int = betterproto.uint32_field(6)
 
 
 @dataclass(eq=False, repr=False)
 class ShardQueryResponse(betterproto.Message):
-    shard_id: int = betterproto.uint32_field(1)
-    shard_actor_id: str = betterproto.string_field(2)
-    response: "__common_v1__.Message" = betterproto.message_field(3)
-    latency: timedelta = betterproto.message_field(4)
-    success: bool = betterproto.bool_field(5)
-    error: str = betterproto.string_field(6)
+    request_id: str = betterproto.string_field(1)
+    shard_id: int = betterproto.uint32_field(2)
+    shard_actor_id: str = betterproto.string_field(3)
+    response: "__common_v1__.Message" = betterproto.message_field(4)
+    latency: timedelta = betterproto.message_field(5)
+    success: bool = betterproto.bool_field(6)
+    error: str = betterproto.string_field(7)
 
 
 @dataclass(eq=False, repr=False)
@@ -1040,9 +1051,10 @@ class ScatterGatherStats(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class ScatterGatherResponse(betterproto.Message):
-    result: "__common_v1__.Message" = betterproto.message_field(1)
-    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(2)
-    stats: "ScatterGatherStats" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    result: "__common_v1__.Message" = betterproto.message_field(2)
+    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(3)
+    stats: "ScatterGatherStats" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
@@ -1052,42 +1064,44 @@ class BulkUpdateShardGroupRequest(betterproto.Message):
      Inspired by NSDI'22 Data-Parallel Actors paper
     """
 
-    group_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group to update"""
 
+    group_id: str = betterproto.string_field(2)
     updates: Dict[str, "__common_v1__.Message"] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_MESSAGE
+        3, betterproto.TYPE_STRING, betterproto.TYPE_MESSAGE
     )
     """
     Update messages: partition_key -> message
      Messages will be routed to appropriate shards based on partition_key
     """
 
-    consistency_level: "ConsistencyLevel" = betterproto.enum_field(3)
+    consistency_level: "ConsistencyLevel" = betterproto.enum_field(4)
     """Consistency level for updates"""
 
-    timeout: timedelta = betterproto.message_field(4)
+    timeout: timedelta = betterproto.message_field(5)
     """Timeout for updates"""
 
-    wait_for_responses: bool = betterproto.bool_field(5)
+    wait_for_responses: bool = betterproto.bool_field(6)
     """Wait for responses (true = wait for all, false = fire-and-forget)"""
 
 
 @dataclass(eq=False, repr=False)
 class BulkUpdateShardGroupResponse(betterproto.Message):
-    updates_sent: int = betterproto.uint32_field(1)
+    request_id: str = betterproto.string_field(1)
     """Number of updates sent"""
 
-    updates_succeeded: int = betterproto.uint32_field(2)
+    updates_sent: int = betterproto.uint32_field(2)
+    updates_succeeded: int = betterproto.uint32_field(3)
     """Number of successful updates"""
 
-    updates_failed: int = betterproto.uint32_field(3)
+    updates_failed: int = betterproto.uint32_field(4)
     """Number of failed updates"""
 
-    shard_stats: List["ShardUpdateStats"] = betterproto.message_field(4)
+    shard_stats: List["ShardUpdateStats"] = betterproto.message_field(5)
     """Per-shard statistics"""
 
-    errors: List[str] = betterproto.string_field(5)
+    errors: List[str] = betterproto.string_field(6)
     """Errors (if any)"""
 
 
@@ -1107,25 +1121,27 @@ class MapShardGroupRequest(betterproto.Message):
      Inspired by NSDI'22 Data-Parallel Actors paper
     """
 
-    group_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group to map over"""
 
-    map_function: "__common_v1__.Message" = betterproto.message_field(2)
+    group_id: str = betterproto.string_field(2)
+    map_function: "__common_v1__.Message" = betterproto.message_field(3)
     """Map function message (sent to each shard)"""
 
-    timeout: timedelta = betterproto.message_field(3)
+    timeout: timedelta = betterproto.message_field(4)
     """Timeout for map operation"""
 
-    min_responses: int = betterproto.uint32_field(4)
+    min_responses: int = betterproto.uint32_field(5)
     """Minimum number of shards that must respond (0 = all required)"""
 
 
 @dataclass(eq=False, repr=False)
 class MapShardGroupResponse(betterproto.Message):
-    shard_results: List["ShardQueryResponse"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Mapped results from each shard"""
 
-    stats: "ScatterGatherStats" = betterproto.message_field(2)
+    shard_results: List["ShardQueryResponse"] = betterproto.message_field(2)
+    stats: "ScatterGatherStats" = betterproto.message_field(3)
     """Statistics"""
 
 
@@ -1136,90 +1152,100 @@ class CollectiveTargetField(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class BroadcastShardGroupRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
-    message: "__common_v1__.Message" = betterproto.message_field(2)
-    timeout: timedelta = betterproto.message_field(3)
-    min_acks: int = betterproto.uint32_field(4)
-
-
-@dataclass(eq=False, repr=False)
-class BroadcastShardGroupResponse(betterproto.Message):
-    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(1)
-    stats: "ScatterGatherStats" = betterproto.message_field(2)
-
-
-@dataclass(eq=False, repr=False)
-class ReduceShardGroupRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
-    map_function: "__common_v1__.Message" = betterproto.message_field(2)
-    timeout: timedelta = betterproto.message_field(3)
-    min_responses: int = betterproto.uint32_field(4)
-    reduction: "CollectiveReduction" = betterproto.enum_field(5)
-    target: "CollectiveTargetField" = betterproto.message_field(6)
-
-
-@dataclass(eq=False, repr=False)
-class ReduceShardGroupResponse(betterproto.Message):
-    result: "__common_v1__.Message" = betterproto.message_field(1)
-    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(2)
-    stats: "ScatterGatherStats" = betterproto.message_field(3)
-
-
-@dataclass(eq=False, repr=False)
-class AllReduceShardGroupRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
-    map_function: "__common_v1__.Message" = betterproto.message_field(2)
-    timeout: timedelta = betterproto.message_field(3)
-    min_responses: int = betterproto.uint32_field(4)
-    reduction: "CollectiveReduction" = betterproto.enum_field(5)
-    target: "CollectiveTargetField" = betterproto.message_field(6)
-
-
-@dataclass(eq=False, repr=False)
-class AllReduceShardGroupResponse(betterproto.Message):
-    result: "__common_v1__.Message" = betterproto.message_field(1)
-    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(2)
-    stats: "ScatterGatherStats" = betterproto.message_field(3)
-
-
-@dataclass(eq=False, repr=False)
-class BarrierShardGroupRequest(betterproto.Message):
-    group_id: str = betterproto.string_field(1)
-    barrier_id: str = betterproto.string_field(2)
-    round: int = betterproto.uint64_field(3)
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
+    message: "__common_v1__.Message" = betterproto.message_field(3)
     timeout: timedelta = betterproto.message_field(4)
     min_acks: int = betterproto.uint32_field(5)
 
 
 @dataclass(eq=False, repr=False)
+class BroadcastShardGroupResponse(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(2)
+    stats: "ScatterGatherStats" = betterproto.message_field(3)
+
+
+@dataclass(eq=False, repr=False)
+class ReduceShardGroupRequest(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
+    map_function: "__common_v1__.Message" = betterproto.message_field(3)
+    timeout: timedelta = betterproto.message_field(4)
+    min_responses: int = betterproto.uint32_field(5)
+    reduction: "CollectiveReduction" = betterproto.enum_field(6)
+    target: "CollectiveTargetField" = betterproto.message_field(7)
+
+
+@dataclass(eq=False, repr=False)
+class ReduceShardGroupResponse(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    result: "__common_v1__.Message" = betterproto.message_field(2)
+    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(3)
+    stats: "ScatterGatherStats" = betterproto.message_field(4)
+
+
+@dataclass(eq=False, repr=False)
+class AllReduceShardGroupRequest(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
+    map_function: "__common_v1__.Message" = betterproto.message_field(3)
+    timeout: timedelta = betterproto.message_field(4)
+    min_responses: int = betterproto.uint32_field(5)
+    reduction: "CollectiveReduction" = betterproto.enum_field(6)
+    target: "CollectiveTargetField" = betterproto.message_field(7)
+
+
+@dataclass(eq=False, repr=False)
+class AllReduceShardGroupResponse(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    result: "__common_v1__.Message" = betterproto.message_field(2)
+    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(3)
+    stats: "ScatterGatherStats" = betterproto.message_field(4)
+
+
+@dataclass(eq=False, repr=False)
+class BarrierShardGroupRequest(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    group_id: str = betterproto.string_field(2)
+    barrier_id: str = betterproto.string_field(3)
+    round: int = betterproto.uint64_field(4)
+    timeout: timedelta = betterproto.message_field(5)
+    min_acks: int = betterproto.uint32_field(6)
+
+
+@dataclass(eq=False, repr=False)
 class BarrierShardGroupResponse(betterproto.Message):
-    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(1)
-    stats: "ScatterGatherStats" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    shard_responses: List["ShardQueryResponse"] = betterproto.message_field(2)
+    stats: "ScatterGatherStats" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class ScaleShardGroupRequest(betterproto.Message):
     """Scale shard group (add/remove shards with rebalancing)"""
 
-    group_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group to scale"""
 
-    new_shard_count: int = betterproto.uint32_field(2)
+    group_id: str = betterproto.string_field(2)
+    new_shard_count: int = betterproto.uint32_field(3)
     """New shard count"""
 
-    rebalance_policy: "RebalancePolicy" = betterproto.enum_field(3)
+    rebalance_policy: "RebalancePolicy" = betterproto.enum_field(4)
     """Rebalancing policy"""
 
-    new_shard_config: "ActorConfig" = betterproto.message_field(4)
+    new_shard_config: "ActorConfig" = betterproto.message_field(5)
     """Configuration for new shards (if scaling up)"""
 
 
 @dataclass(eq=False, repr=False)
 class ScaleShardGroupResponse(betterproto.Message):
-    group: "ShardGroup" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Updated shard group"""
 
-    rebalance_status: "RebalanceStatus" = betterproto.message_field(2)
+    group: "ShardGroup" = betterproto.message_field(2)
+    rebalance_status: "RebalanceStatus" = betterproto.message_field(3)
     """Rebalancing status"""
 
 
@@ -1238,18 +1264,19 @@ class ActorMetrics(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class SpawnActorRequest(betterproto.Message):
-    spec: "ActorSpawnSpec" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Full spawn contract: identity, role, namespace, tenant_id, behavior_kind, args, facets, labels, config, visibility.
     """
 
-    namespace: str = betterproto.string_field(2)
+    spec: "ActorSpawnSpec" = betterproto.message_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Optional namespace override for this RPC only.
      If non-empty, the server merges this into spec.namespace for the spawn operation; if empty, spec.namespace is used.
     """
 
-    instances_count: int = betterproto.uint32_field(3)
+    instances_count: int = betterproto.uint32_field(4)
     """
     Number of identical replicas to spawn (default: 1 when 0).
      When > 1, spawns N actors with auto-generated instance names derived from spec.identity.name (prefix pattern).
@@ -1274,14 +1301,15 @@ class SpawnActorResponse(betterproto.Message):
        - Useful for monitoring and debugging
     """
 
-    actor_ref: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Reference to spawned actor (format: "actor_id@node_id")
      Example: "general-1@node2", "worker-abc@prod-7"
      Use this for messaging: actor_ref.tell(msg), actor_ref.ask(msg)
     """
 
-    actor: "Actor" = betterproto.message_field(2)
+    actor_ref: str = betterproto.string_field(2)
+    actor: "Actor" = betterproto.message_field(3)
     """
     Full actor details (state, config, metrics)
      Useful for inspection and monitoring
@@ -1290,7 +1318,8 @@ class SpawnActorResponse(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class SpawnActorsRequest(betterproto.Message):
-    requests: List["SpawnActorRequest"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    requests: List["SpawnActorRequest"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
@@ -1302,32 +1331,36 @@ class SpawnActorResult(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class SpawnActorsResponse(betterproto.Message):
-    results: List["SpawnActorResult"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    results: List["SpawnActorResult"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetActorRequest(betterproto.Message):
     """Request to get an actor"""
 
-    actor_id: str = betterproto.string_field(1)
-    namespace: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """Namespace for tenant isolation (tenant_id from JWT)"""
 
 
 @dataclass(eq=False, repr=False)
 class GetActorResponse(betterproto.Message):
-    actor: "Actor" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    actor: "Actor" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListActorsRequest(betterproto.Message):
     """Request to list actors"""
 
-    page_request: "__common_v1__.PageRequest" = betterproto.message_field(1)
-    actor_type: str = betterproto.string_field(2)
-    state: "ActorState" = betterproto.enum_field(3)
-    node_id: str = betterproto.string_field(4)
-    namespace: str = betterproto.string_field(5)
+    request_id: str = betterproto.string_field(1)
+    page_request: "__common_v1__.PageRequest" = betterproto.message_field(2)
+    actor_type: str = betterproto.string_field(3)
+    state: "ActorState" = betterproto.enum_field(4)
+    node_id: str = betterproto.string_field(5)
+    namespace: str = betterproto.string_field(6)
     """
     Namespace for tenant isolation (tenant_id from JWT)
      Only actors in this namespace will be returned
@@ -1336,63 +1369,65 @@ class ListActorsRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class ListActorsResponse(betterproto.Message):
-    actors: List["Actor"] = betterproto.message_field(1)
-    page_response: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    actors: List["Actor"] = betterproto.message_field(2)
+    page_response: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class SendMessageRequest(betterproto.Message):
     """Request to send a message via tell semantics"""
 
-    namespace: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
     """
 
-    actor_type: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(2)
+    actor_type: str = betterproto.string_field(3)
     """
     Actor type or actor id to target.
      If this value contains '@', it is treated as a direct actor id first.
     """
 
-    http_method: str = betterproto.string_field(3)
+    http_method: str = betterproto.string_field(4)
     """Optional HTTP method metadata for gateway-originated requests."""
 
-    payload: bytes = betterproto.bytes_field(4)
+    payload: bytes = betterproto.bytes_field(5)
     """Request payload bytes."""
 
     headers: Dict[str, str] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Request headers or message metadata."""
 
     query_params: Dict[str, str] = betterproto.map_field(
-        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        7, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Query parameters from HTTP requests."""
 
-    path: str = betterproto.string_field(7)
+    path: str = betterproto.string_field(8)
     """Full request path for gateway-originated requests."""
 
-    subpath: str = betterproto.string_field(8)
+    subpath: str = betterproto.string_field(9)
     """Remaining path segment after actor_type."""
 
-    sender_id: str = betterproto.string_field(9)
+    sender_id: str = betterproto.string_field(10)
     """Optional sender actor id for remoting and tracing."""
 
-    message_type: str = betterproto.string_field(10)
+    message_type: str = betterproto.string_field(11)
     """Optional application or transport message type."""
 
-    correlation_id: str = betterproto.string_field(11)
+    correlation_id: str = betterproto.string_field(12)
     """Optional correlation id preserved for remoting."""
 
-    reply_to: str = betterproto.string_field(12)
+    reply_to: str = betterproto.string_field(13)
     """Optional reply_to preserved for remoting."""
 
-    message_id: str = betterproto.string_field(13)
+    message_id: str = betterproto.string_field(14)
     """Optional client-provided message id."""
 
-    actor_name: str = betterproto.string_field(20)
+    actor_name: str = betterproto.string_field(21)
     """
     Optional actor instance name. When set together with actor_type and namespace,
      the handler constructs the canonical actor ID directly:
@@ -1404,18 +1439,20 @@ class SendMessageRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class SendMessageResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    message_id: str = betterproto.string_field(2)
-    actor_id: str = betterproto.string_field(3)
-    error_message: str = betterproto.string_field(4)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    message_id: str = betterproto.string_field(3)
+    actor_id: str = betterproto.string_field(4)
+    error_message: str = betterproto.string_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class StreamMessageRequest(betterproto.Message):
     """Request for streaming messages (high-throughput)"""
 
-    message: "__common_v1__.Message" = betterproto.message_field(1)
-    sequence: int = betterproto.uint64_field(2)
+    request_id: str = betterproto.string_field(1)
+    message: "__common_v1__.Message" = betterproto.message_field(2)
+    sequence: int = betterproto.uint64_field(3)
     """Sequence number for ordering (client-generated)"""
 
 
@@ -1423,14 +1460,15 @@ class StreamMessageRequest(betterproto.Message):
 class StreamMessageResponse(betterproto.Message):
     """Response for streaming messages"""
 
-    message_id: str = betterproto.string_field(1)
-    sequence: int = betterproto.uint64_field(2)
+    request_id: str = betterproto.string_field(1)
+    message_id: str = betterproto.string_field(2)
+    sequence: int = betterproto.uint64_field(3)
     """Acknowledgement of sequence number"""
 
-    status: str = betterproto.string_field(3)
+    status: str = betterproto.string_field(4)
     """Status: "delivered", "failed", "queued"""
 
-    error: str = betterproto.string_field(4)
+    error: str = betterproto.string_field(5)
     """Optional error message"""
 
 
@@ -1438,9 +1476,10 @@ class StreamMessageResponse(betterproto.Message):
 class DeleteActorRequest(betterproto.Message):
     """Request to delete actor"""
 
-    actor_id: str = betterproto.string_field(1)
-    force: bool = betterproto.bool_field(2)
-    namespace: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    force: bool = betterproto.bool_field(3)
+    namespace: str = betterproto.string_field(4)
     """Namespace for tenant isolation (tenant_id from JWT)"""
 
 
@@ -1707,9 +1746,10 @@ class MonitorActorRequest(betterproto.Message):
        for forward compatibility with a possible push-style callback path.
     """
 
-    actor_id: str = betterproto.string_field(1)
-    supervisor_id: str = betterproto.string_field(2)
-    supervisor_callback: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    supervisor_id: str = betterproto.string_field(3)
+    supervisor_callback: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
@@ -1728,7 +1768,8 @@ class MonitorActorResponse(betterproto.Message):
      - Can be used for future demonitor() operation
     """
 
-    monitor_ref: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    monitor_ref: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
@@ -1742,9 +1783,10 @@ class DemonitorActorRequest(betterproto.Message):
      returned by MonitorActor.
     """
 
-    actor_id: str = betterproto.string_field(1)
-    supervisor_id: str = betterproto.string_field(2)
-    monitor_ref: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    supervisor_id: str = betterproto.string_field(3)
+    monitor_ref: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
@@ -1798,21 +1840,25 @@ class GetActorStatesRequest(betterproto.Message):
      that no longer exist on their hosting node.
     """
 
-    actor_ids: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """List of canonical actor IDs to check"""
+
+    actor_ids: List[str] = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetActorStatesResponse(betterproto.Message):
     """Response for batch actor state check — uses existing ActorState enum"""
 
-    states: Dict[str, "ActorState"] = betterproto.map_field(
-        1, betterproto.TYPE_STRING, betterproto.TYPE_ENUM
-    )
+    request_id: str = betterproto.string_field(1)
     """
     Map of canonical actor_id -> ActorState (uses existing ActorState enum)
      ACTOR_STATE_UNSPECIFIED / ACTOR_STATE_TERMINATED / not present = actor not found on this node
     """
+
+    states: Dict[str, "ActorState"] = betterproto.map_field(
+        2, betterproto.TYPE_STRING, betterproto.TYPE_ENUM
+    )
 
 
 @dataclass(eq=False, repr=False)
@@ -1888,15 +1934,17 @@ class LinkActorRequest(betterproto.Message):
     / ```
     """
 
-    actor_id: str = betterproto.string_field(1)
-    linked_actor_id: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    linked_actor_id: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class LinkActorResponse(betterproto.Message):
     """/ Response to LinkActor request"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
@@ -1912,36 +1960,41 @@ class UnlinkActorRequest(betterproto.Message):
     / Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
     """
 
-    actor_id: str = betterproto.string_field(1)
-    linked_actor_id: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    linked_actor_id: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class UnlinkActorResponse(betterproto.Message):
     """/ Response to UnlinkActor request"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CheckActorExistsRequest(betterproto.Message):
     """Request to check if actor exists"""
 
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Actor ID to check"""
+
+    actor_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CheckActorExistsResponse(betterproto.Message):
     """Response to check actor exists request"""
 
-    exists: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Actor exists (virtual or active)"""
 
-    is_active: bool = betterproto.bool_field(2)
+    exists: bool = betterproto.bool_field(2)
+    is_active: bool = betterproto.bool_field(3)
     """Actor is currently active (in memory)"""
 
-    is_virtual: bool = betterproto.bool_field(3)
+    is_virtual: bool = betterproto.bool_field(4)
     """Actor has VirtualActorFacet (is virtual)"""
 
 
@@ -1959,23 +2012,24 @@ class AskReplyRequest(betterproto.Message):
      - POST: Request body becomes payload, HTTP headers become headers map
     """
 
-    namespace: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
      Can be empty - defaults to empty string if not provided
      Tenant ID comes from gRPC auth (JWT middleware) or default config, not from request
     """
 
-    actor_type: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(2)
+    actor_type: str = betterproto.string_field(3)
     """
     Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})
      Used to lookup actors via ActorRegistry discover_actors_by_type
     """
 
-    http_method: str = betterproto.string_field(3)
+    http_method: str = betterproto.string_field(4)
     """HTTP method metadata (GET, POST, or PUT)"""
 
-    payload: bytes = betterproto.bytes_field(4)
+    payload: bytes = betterproto.bytes_field(5)
     """
     Request payload
      For GET: JSON string of query parameters
@@ -1983,7 +2037,7 @@ class AskReplyRequest(betterproto.Message):
     """
 
     headers: Dict[str, str] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """
     HTTP headers
@@ -1991,21 +2045,21 @@ class AskReplyRequest(betterproto.Message):
     """
 
     query_params: Dict[str, str] = betterproto.map_field(
-        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        7, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """
     Query parameters (for GET requests)
      Converted to JSON and stored in payload
     """
 
-    path: str = betterproto.string_field(7)
+    path: str = betterproto.string_field(8)
     """
     Full HTTP path for the request (optional)
      Example: "/api/v1/actors/default/counter/custom/path"
      Allows actors to perform custom routing based on the complete URL
     """
 
-    subpath: str = betterproto.string_field(8)
+    subpath: str = betterproto.string_field(9)
     """
     Subpath after the actor_type segment (optional)
      Example: for "/api/v1/actors/default/counter/metrics/latest"
@@ -2013,29 +2067,29 @@ class AskReplyRequest(betterproto.Message):
      This will be used in future for advanced per-actor routing capabilities.
     """
 
-    sender_id: str = betterproto.string_field(9)
+    sender_id: str = betterproto.string_field(10)
     """Optional sender actor id for remoting and tracing."""
 
-    message_type: str = betterproto.string_field(10)
+    message_type: str = betterproto.string_field(11)
     """Optional transport message type."""
 
-    correlation_id: str = betterproto.string_field(11)
+    correlation_id: str = betterproto.string_field(12)
     """Optional correlation id preserved for remoting."""
 
-    reply_to: str = betterproto.string_field(12)
+    reply_to: str = betterproto.string_field(13)
     """Optional reply_to preserved for remoting."""
 
-    message_id: str = betterproto.string_field(13)
+    message_id: str = betterproto.string_field(14)
     """Optional client-provided message id."""
 
-    timeout: timedelta = betterproto.message_field(14)
+    timeout: timedelta = betterproto.message_field(15)
     """
     Optional timeout for request-reply (ask) operations.
      Defaults to 5 seconds if not specified. Use for long-running operations like training.
      HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
     """
 
-    actor_name: str = betterproto.string_field(20)
+    actor_name: str = betterproto.string_field(21)
     """
     Optional actor instance name. When set together with actor_type and namespace,
      the handler constructs the canonical actor ID directly:
@@ -2053,24 +2107,25 @@ class AskReplyResponse(betterproto.Message):
      Returns the result of an actor ask request.
     """
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Success status"""
 
-    payload: bytes = betterproto.bytes_field(2)
+    success: bool = betterproto.bool_field(2)
+    payload: bytes = betterproto.bytes_field(3)
     """
     Response payload (for GET/ask requests)
      Contains the reply message from actor
     """
 
     headers: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Response headers (optional metadata)"""
 
-    actor_id: str = betterproto.string_field(4)
+    actor_id: str = betterproto.string_field(5)
     """Actor ID that was invoked (format: "actor_id@node_id")"""
 
-    error_message: str = betterproto.string_field(5)
+    error_message: str = betterproto.string_field(6)
     """Error message (if success is false)"""
 
 

@@ -45,7 +45,11 @@ async fn start_node_background(node: Arc<Node>) {
     let node_id = node.id().as_str().to_string();
     let cluster_name = {
         let c = node.config().cluster_name.clone();
-        if c.is_empty() { None } else { Some(c) }
+        if c.is_empty() {
+            None
+        } else {
+            Some(c)
+        }
     };
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(8);

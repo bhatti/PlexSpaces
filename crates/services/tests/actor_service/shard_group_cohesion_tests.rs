@@ -17,13 +17,13 @@
 //! ```
 
 use async_trait::async_trait;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::Message;
 use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, Actor as ActorTrait, ActorContext,
     ActorRegistry, BehaviorError, BehaviorType, InitializableServiceLocator, NodeRegistryTrait,
     RequestContext, RequestContextExt,
 };
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ServiceNameExt;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
@@ -464,8 +464,7 @@ async fn test_capabilities_to_labels_mapping() {
     // and uses the cluster label as the namespace (here "prod" from capabilities).
     // We must use the same (tenant="", namespace="prod") context to look up the record.
     use plexspaces_proto::object_registry::v1::ObjectType;
-    let system_ctx =
-        RequestContext::new_without_auth(String::new(), "prod".to_string());
+    let system_ctx = RequestContext::new_without_auth(String::new(), "prod".to_string());
     let obj_reg = object_registry_impl
         .lookup_full(&system_ctx, ObjectType::ObjectTypeNode, "test-node")
         .await

@@ -31,7 +31,7 @@ use plexspaces_actor::{
     actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder, ActorFactory, ActorRef,
 };
 use plexspaces_actor::{
-    Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, ActorRegistrationParams,
+    Actor as ActorTrait, ActorContext, ActorId, ActorRegistrationParams, ActorRegistry,
     BehaviorError, BehaviorType, FacetManager, MessageSender, RequestContext, RequestContextExt,
     ServiceLocator, VirtualActorManager,
 };
@@ -205,15 +205,12 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
-        self.inner
-            .discover(ctx, opts)
-            .await
-            .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
-            })
+        self.inner.discover(ctx, opts).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 }
 

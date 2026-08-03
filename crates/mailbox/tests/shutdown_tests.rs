@@ -54,7 +54,7 @@ async fn create_sqlite_mailbox(mailbox_id: &str) -> Mailbox {
 #[tokio::test]
 async fn test_in_memory_mailbox_shutdown_does_not_reject_enqueue() {
     // In-memory mailboxes should continue accepting messages during shutdown
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-in-memory".to_string())
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-in-memory".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -233,14 +233,14 @@ async fn test_shutdown_flushes_durable_messages() {
         .unwrap();
 
     // Messages should be flushed (check stats)
-    let stats = mailbox.get_stats().await;
+    let stats = mailbox.get_stats();
     assert_eq!(stats.total_enqueued, 5);
 }
 
 #[tokio::test]
 async fn test_in_memory_shutdown_does_not_close_channel() {
     // In-memory mailboxes don't close channel during shutdown
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-in-memory-close".to_string())
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-in-memory-close".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 

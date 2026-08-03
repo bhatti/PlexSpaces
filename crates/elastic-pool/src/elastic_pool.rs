@@ -125,7 +125,9 @@ struct Worker {
 
 impl Worker {
     fn new() -> Self {
-        Self { state: WorkerState::Available }
+        Self {
+            state: WorkerState::Available,
+        }
     }
 }
 
@@ -482,12 +484,7 @@ impl ElasticPool {
                     busy += 1;
                 }
             }
-            (
-                total,
-                busy,
-                available.len() as u32,
-                queue.len() as u32,
-            )
+            (total, busy, available.len() as u32, queue.len() as u32)
         }; // workers, available, queue all released here
 
         // Phase 2: read scaling_state (cheap, no contention with above locks).
@@ -568,7 +565,7 @@ impl ElasticPool {
                 return Err(ElasticPoolError::CheckoutTimeout(timeout));
             }
 
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::task::yield_now().await;
         }
 
         let drained = self.workers.read().await.len() as u32;
@@ -919,8 +916,8 @@ mod tests {
         let drain_task =
             tokio::spawn(async move { pool_clone.drain(Duration::from_secs(5)).await });
 
-        // Give drain time to start
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Yield to give drain task time to enter the wait loop
+        tokio::task::yield_now().await;
 
         // Checkin the worker
         pool.checkin(_handle).await.unwrap();

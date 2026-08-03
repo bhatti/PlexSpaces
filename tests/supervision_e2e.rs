@@ -90,7 +90,7 @@ async fn create_child_spec(
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
     let actor_id = test_actor_id(&id);
-    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
         .await
         .expect("Failed to create mailbox");
     let service_locator: std::sync::Arc<dyn plexspaces_actor::core::ServiceLocator> =
@@ -225,7 +225,7 @@ async fn test_one_for_one_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -255,7 +255,7 @@ async fn test_one_for_one_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -361,7 +361,7 @@ async fn test_one_for_all_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -390,7 +390,7 @@ async fn test_one_for_all_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -472,7 +472,7 @@ async fn test_rest_for_one_restart() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                    rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -531,7 +531,7 @@ async fn test_restart_limits() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -609,7 +609,7 @@ async fn test_hierarchical_supervision() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -665,7 +665,7 @@ async fn test_permanent_restart_policy() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -716,7 +716,7 @@ async fn test_temporary_restart_policy() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")
@@ -767,7 +767,7 @@ async fn test_transient_restart_policy() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone(), String::new(), String::new(), None))
             })
             .join()
             .expect("Thread panicked")

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
 [package]
 name = "plexspaces-mailbox"
 version.workspace = true
@@ -9,10 +12,14 @@ keywords.workspace = true
 categories.workspace = true
 description = "Message queue and mailbox implementations"
 
+[features]
+default = []
+sqlite-backend = ["plexspaces-channel/sqlite-backend", "dep:sqlx", "sqlx/sqlite"]
+
 [dependencies]
-# Mailbox depends on channel for backend abstraction
 plexspaces-proto = { workspace = true }
 plexspaces-channel = { path = "../channel", default-features = false }
+plexspaces-service-traits = { path = "../service-traits" }
 
 # Observability
 metrics = { workspace = true }
@@ -25,16 +32,15 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-ulid = { version = "1.1", features = ["serde"] }
+ulid = { workspace = true }
 rand = "0.8"
-
-# Proto conversion
+dashmap = "5"
+bytes = { workspace = true }
 prost-types = { workspace = true }
 chrono = { workspace = true }
 
-[features]
-default = []
-sqlite-backend = ["plexspaces-channel/sqlite-backend"]
+# Optional: SQLite-backed idempotency store
+sqlx = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }

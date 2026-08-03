@@ -196,11 +196,7 @@ impl SchemaValidationFacet {
     ///
     /// ## Errors
     /// Returns `Err` if the schema string is not valid JSON or does not compile.
-    pub async fn register_schema(
-        &self,
-        method: &str,
-        schema_json: &str,
-    ) -> Result<(), FacetError> {
+    pub async fn register_schema(&self, method: &str, schema_json: &str) -> Result<(), FacetError> {
         let schema_val: Value = serde_json::from_str(schema_json).map_err(|e| {
             FacetError::InvalidConfig(format!(
                 "schema_validation: register_schema '{}': invalid JSON: {}",
@@ -332,7 +328,8 @@ impl Facet for SchemaValidationFacet {
                         metrics::counter!("schema_validation_rejections_total",
                             "method" => method.to_string(),
                             "actor_id" => actor_id.to_string()
-                        ).increment(1);
+                        )
+                        .increment(1);
                         Ok(InterceptResult::ShortCircuit(Self::rejection_bytes(
                             method, &detail,
                         )))
@@ -347,7 +344,8 @@ impl Facet for SchemaValidationFacet {
                         metrics::counter!("schema_validation_warnings_total",
                             "method" => method.to_string(),
                             "actor_id" => actor_id.to_string()
-                        ).increment(1);
+                        )
+                        .increment(1);
                         Ok(InterceptResult::Continue)
                     }
                     ValidationMode::Permissive => Ok(InterceptResult::Continue),
@@ -399,7 +397,10 @@ mod tests {
     #[test]
     fn test_construction_default_priority() {
         let facet = make_facet("strict", serde_json::Map::new());
-        assert_eq!(facet.get_priority(), SCHEMA_VALIDATION_FACET_DEFAULT_PRIORITY);
+        assert_eq!(
+            facet.get_priority(),
+            SCHEMA_VALIDATION_FACET_DEFAULT_PRIORITY
+        );
         assert_eq!(facet.facet_type(), "schema_validation");
     }
 
@@ -409,7 +410,10 @@ mod tests {
             "method_schemas": { "transfer": "not-valid-json{{" }
         });
         let result = SchemaValidationFacet::new(config, 95);
-        assert!(result.is_err(), "invalid JSON schema must fail at construction");
+        assert!(
+            result.is_err(),
+            "invalid JSON schema must fail at construction"
+        );
         let err = result.unwrap_err();
         assert!(
             format!("{:?}", err).contains("invalid JSON schema"),
@@ -445,7 +449,10 @@ mod tests {
         facet.on_attach("actor-1", json!({})).await.unwrap();
 
         let input = args(json!({"to": "alice", "amount": 100.0}));
-        let result = facet.before_method("transfer", &input, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("transfer", &input, &empty_headers())
+            .await
+            .unwrap();
         assert!(matches!(result, InterceptResult::Continue));
     }
 
@@ -461,7 +468,10 @@ mod tests {
 
         // Missing "amount"
         let input = args(json!({"to": "alice"}));
-        let result = facet.before_method("transfer", &input, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("transfer", &input, &empty_headers())
+            .await
+            .unwrap();
         match result {
             InterceptResult::ShortCircuit(bytes) => {
                 let v: Value = serde_json::from_slice(&bytes).unwrap();
@@ -485,7 +495,10 @@ mod tests {
 
         // 3.14 is NOT an integer
         let input = args(json!({"count": 3.14}));
-        let result = facet.before_method("set_count", &input, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("set_count", &input, &empty_headers())
+            .await
+            .unwrap();
         assert!(
             matches!(result, InterceptResult::ShortCircuit(_)),
             "float 3.14 must fail type:integer"
@@ -512,7 +525,10 @@ mod tests {
 
         // Empty string → rejected
         let input = args(json!({"query": ""}));
-        let result = facet.before_method("search", &input, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("search", &input, &empty_headers())
+            .await
+            .unwrap();
         assert!(matches!(result, InterceptResult::ShortCircuit(_)));
 
         // Non-empty → allowed
@@ -536,13 +552,19 @@ mod tests {
 
         let bad = args(json!({"mode": "turbo"}));
         assert!(matches!(
-            facet.before_method("set_mode", &bad, &empty_headers()).await.unwrap(),
+            facet
+                .before_method("set_mode", &bad, &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::ShortCircuit(_)
         ));
 
         let good = args(json!({"mode": "fast"}));
         assert!(matches!(
-            facet.before_method("set_mode", &good, &empty_headers()).await.unwrap(),
+            facet
+                .before_method("set_mode", &good, &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::Continue
         ));
     }
@@ -559,13 +581,19 @@ mod tests {
 
         let bad = args(json!({"code": "abc-123"}));
         assert!(matches!(
-            facet.before_method("set_code", &bad, &empty_headers()).await.unwrap(),
+            facet
+                .before_method("set_code", &bad, &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::ShortCircuit(_)
         ));
 
         let good = args(json!({"code": "ABC-1234"}));
         assert!(matches!(
-            facet.before_method("set_code", &good, &empty_headers()).await.unwrap(),
+            facet
+                .before_method("set_code", &good, &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::Continue
         ));
     }
@@ -575,7 +603,10 @@ mod tests {
         // No schema registered for "unknown_method" → always pass
         let facet = make_facet("strict", serde_json::Map::new());
         let input = args(json!({"anything": "goes"}));
-        let result = facet.before_method("unknown_method", &input, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("unknown_method", &input, &empty_headers())
+            .await
+            .unwrap();
         assert!(matches!(result, InterceptResult::Continue));
     }
 
@@ -593,7 +624,10 @@ mod tests {
 
         // Missing "amount" — in warn mode this must still Continue
         let input = args(json!({"irrelevant": true}));
-        let result = facet.before_method("transfer", &input, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("transfer", &input, &empty_headers())
+            .await
+            .unwrap();
         assert!(matches!(result, InterceptResult::Continue));
     }
 
@@ -610,7 +644,10 @@ mod tests {
 
         // Missing "amount" — permissive always passes
         let input = args(json!({}));
-        let result = facet.before_method("transfer", &input, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("transfer", &input, &empty_headers())
+            .await
+            .unwrap();
         assert!(matches!(result, InterceptResult::Continue));
     }
 
@@ -623,26 +660,38 @@ mod tests {
         // No schema yet → passes
         let input = args(json!({"x": 1}));
         assert!(matches!(
-            facet.before_method("dynamic", &input, &empty_headers()).await.unwrap(),
+            facet
+                .before_method("dynamic", &input, &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::Continue
         ));
 
         // Register a schema that requires field "x" to be a string
         facet
-            .register_schema("dynamic", r#"{"type":"object","properties":{"x":{"type":"string"}}}"#)
+            .register_schema(
+                "dynamic",
+                r#"{"type":"object","properties":{"x":{"type":"string"}}}"#,
+            )
             .await
             .unwrap();
 
         // Integer 1 now fails
         assert!(matches!(
-            facet.before_method("dynamic", &input, &empty_headers()).await.unwrap(),
+            facet
+                .before_method("dynamic", &input, &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::ShortCircuit(_)
         ));
 
         // String passes
         let input_str = args(json!({"x": "hello"}));
         assert!(matches!(
-            facet.before_method("dynamic", &input_str, &empty_headers()).await.unwrap(),
+            facet
+                .before_method("dynamic", &input_str, &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::Continue
         ));
     }
@@ -678,15 +727,15 @@ mod tests {
     #[tokio::test]
     async fn test_non_json_input_rejected_in_strict() {
         let mut schemas = serde_json::Map::new();
-        schemas.insert(
-            "m".to_string(),
-            json!(r#"{"type":"object"}"#),
-        );
+        schemas.insert("m".to_string(), json!(r#"{"type":"object"}"#));
         let mut facet = make_facet("strict", schemas);
         facet.on_attach("actor-1", json!({})).await.unwrap();
 
         let bad_bytes = b"not json at all {{";
-        let result = facet.before_method("m", bad_bytes, &empty_headers()).await.unwrap();
+        let result = facet
+            .before_method("m", bad_bytes, &empty_headers())
+            .await
+            .unwrap();
         assert!(matches!(result, InterceptResult::ShortCircuit(_)));
     }
 
@@ -708,22 +757,38 @@ mod tests {
 
         // deposit: negative fails
         assert!(matches!(
-            facet.before_method("deposit", &args(json!({"amount": -1})), &empty_headers()).await.unwrap(),
+            facet
+                .before_method("deposit", &args(json!({"amount": -1})), &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::ShortCircuit(_)
         ));
         // deposit: positive passes
         assert!(matches!(
-            facet.before_method("deposit", &args(json!({"amount": 50})), &empty_headers()).await.unwrap(),
+            facet
+                .before_method("deposit", &args(json!({"amount": 50})), &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::Continue
         ));
         // withdraw: over max fails
         assert!(matches!(
-            facet.before_method("withdraw", &args(json!({"amount": 99999})), &empty_headers()).await.unwrap(),
+            facet
+                .before_method(
+                    "withdraw",
+                    &args(json!({"amount": 99999})),
+                    &empty_headers()
+                )
+                .await
+                .unwrap(),
             InterceptResult::ShortCircuit(_)
         ));
         // withdraw: valid passes
         assert!(matches!(
-            facet.before_method("withdraw", &args(json!({"amount": 500})), &empty_headers()).await.unwrap(),
+            facet
+                .before_method("withdraw", &args(json!({"amount": 500})), &empty_headers())
+                .await
+                .unwrap(),
             InterceptResult::Continue
         ));
     }

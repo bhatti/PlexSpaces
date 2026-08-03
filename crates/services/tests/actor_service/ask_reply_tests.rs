@@ -13,15 +13,14 @@
 //! - Error cases (404, invalid args, etc.)
 
 use async_trait::async_trait;
-use plexspaces_common::RequestContextExt;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
 use plexspaces_actor::{
     behavior_factory::BehaviorRegistry, Actor as ActorTrait, ActorContext, ActorId, ActorRegistry,
     BehaviorError, BehaviorType, FacetManager, InitializableServiceLocator, Message,
-    ReplyWaiterRegistry,
     VirtualActorManager,
 };
-use plexspaces_actor::behavior::GenServer;
+use plexspaces_common::RequestContextExt;
 use plexspaces_mailbox::new_message;
 use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
@@ -373,14 +372,6 @@ async fn create_test_actor_service(
     service_locator: Arc<ServiceLocatorImpl>,
     node_id: String,
 ) -> ActorServiceImpl {
-    let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
-    actor_registry
-        .set_reply_waiter_registry(reply_waiter_registry.clone())
-        .await;
-    service_locator
-        .register_service(reply_waiter_registry)
-        .await;
-
     ActorServiceImpl::new(service_locator, node_id)
 }
 
@@ -447,11 +438,21 @@ fn build_ask_request(
     payload: Vec<u8>,
     query_params: HashMap<String, String>,
 ) -> AskReplyRequest {
+    build_ask_request_named("", actor_type, method, payload, query_params)
+}
+
+fn build_ask_request_named(
+    actor_name: &str,
+    actor_type: &str,
+    method: &str,
+    payload: Vec<u8>,
+    query_params: HashMap<String, String>,
+) -> AskReplyRequest {
     AskReplyRequest {
         request_id: ulid::Ulid::new().to_string(),
         namespace: "default".to_string(),
         actor_type: actor_type.to_string(),
-        actor_name: String::new(),
+        actor_name: actor_name.to_string(),
         http_method: method.to_string(),
         payload,
         headers: HashMap::new(),
@@ -468,11 +469,19 @@ fn build_ask_request(
 }
 
 fn build_send_request(actor_type: &str, payload: Vec<u8>) -> SendMessageRequest {
+    build_send_request_named("", actor_type, payload)
+}
+
+fn build_send_request_named(
+    actor_name: &str,
+    actor_type: &str,
+    payload: Vec<u8>,
+) -> SendMessageRequest {
     SendMessageRequest {
         request_id: ulid::Ulid::new().to_string(),
         namespace: "default".to_string(),
         actor_type: actor_type.to_string(),
-        actor_name: String::new(),
+        actor_name: actor_name.to_string(),
         http_method: "POST".to_string(),
         payload,
         headers: HashMap::new(),
@@ -572,8 +581,9 @@ async fn test_ask_reply_activates_virtual_actor_type_with_instance_id() {
 
     let response = ask_reply_request(
         &service,
-        build_ask_request(
-            "virtual-counter:user-1",
+        build_ask_request_named(
+            "user-1",
+            "virtual-counter",
             "GET",
             vec![],
             HashMap::from([("action".to_string(), "get".to_string())]),
@@ -622,8 +632,9 @@ async fn test_ask_reply_shorthand_virtual_actor_increment_applies_once() {
 
     let increment_response = ask_reply_request(
         &service,
-        build_ask_request(
-            "virtual-counter:user-1",
+        build_ask_request_named(
+            "user-1",
+            "virtual-counter",
             "POST",
             br#"{"action":"increment"}"#.to_vec(),
             HashMap::new(),
@@ -637,8 +648,9 @@ async fn test_ask_reply_shorthand_virtual_actor_increment_applies_once() {
 
     let count_response = ask_reply_request(
         &service,
-        build_ask_request(
-            "virtual-counter:user-1",
+        build_ask_request_named(
+            "user-1",
+            "virtual-counter",
             "GET",
             vec![],
             HashMap::from([("action".to_string(), "get".to_string())]),
@@ -691,8 +703,9 @@ async fn test_send_message_activates_virtual_actor_type_with_instance_id() {
 
     let response = send_message_request(
         &service,
-        build_send_request(
-            "virtual-counter:user-2",
+        build_send_request_named(
+            "user-2",
+            "virtual-counter",
             br#"{"action":"increment"}"#.to_vec(),
         ),
         "default",
@@ -734,19 +747,20 @@ async fn test_send_message_post_success() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_send_message_instance_style_target_falls_back_to_type_lookup() {
+async fn test_send_message_instance_style_target() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
+    // Use explicit actor_name + actor_type for gRPC (no colon shorthand).
     let response = send_message_request(
         &service,
-        build_send_request("counter:default", br#"{"action":"increment"}"#.to_vec()),
+        build_send_request_named("counter-0", "counter", br#"{"action":"increment"}"#.to_vec()),
         "default",
     )
     .await
-    .expect("send_message should resolve instance-style target via type lookup")
+    .expect("send_message should route to named instance")
     .into_inner();
 
     assert!(response.success);

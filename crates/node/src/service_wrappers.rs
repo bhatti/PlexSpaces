@@ -42,7 +42,6 @@ use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
 
-
 /// Wrapper that adapts TupleSpace to TupleSpaceProvider trait
 ///
 /// ## Purpose
@@ -289,12 +288,12 @@ impl ChannelService for StubChannelService {
 /// This wrapper adapts ProcessGroupRegistry's API to match ProcessGroupService trait.
 /// It extracts tenant_id from ActorContext's namespace or uses a default tenant.
 pub struct ProcessGroupServiceWrapper {
-    registry: Arc<plexspaces_process_groups::ProcessGroupRegistry>,
+    registry: Arc<plexspaces_actor::process_groups::ProcessGroupRegistry>,
 }
 
 impl ProcessGroupServiceWrapper {
     /// Create a new wrapper
-    pub fn new(registry: Arc<plexspaces_process_groups::ProcessGroupRegistry>) -> Self {
+    pub fn new(registry: Arc<plexspaces_actor::process_groups::ProcessGroupRegistry>) -> Self {
         Self { registry }
     }
 }

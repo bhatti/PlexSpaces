@@ -39,10 +39,15 @@ const MAX_DECOMPRESSED_STATIC_BYTES: usize = 500 * 1024 * 1024;
 /// State shared across deploy HTTP handlers.
 #[derive(Clone)]
 pub struct DeployRouteState {
+    /// Service locator for accessing node-wide services.
     pub service_locator: Arc<dyn ServiceLocator>,
+    /// Node connectivity for inter-node communication.
     pub node_connectivity: Arc<dyn NodeConnectivity>,
+    /// When true, authentication checks are skipped.
     pub auth_disabled: bool,
+    /// JWT key pair for verifying bearer tokens. None when auth is disabled.
     pub jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
+    /// Tenant repository for resolving tenant context from JWT claims. None when auth is disabled.
     pub tenant_repo: Option<Arc<dyn TenantRepository>>,
     /// Shared static file registry — populated on deploy, cleared on undeploy.
     pub static_registry: StaticRegistry,
@@ -96,38 +101,60 @@ async fn handle_deploy(
     let mut app_zip_data: Option<Vec<u8>> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
-        (StatusCode::BAD_REQUEST, format!("Failed to parse multipart: {}", e))
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Failed to parse multipart: {}", e),
+        )
     })? {
         let field_name = field.name().unwrap_or("").to_string();
         match field_name.as_str() {
             "application_id" => {
                 application_id = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read application_id: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read application_id: {}", e),
+                    )
                 })?);
             }
             "name" => {
                 name = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read name: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read name: {}", e),
+                    )
                 })?);
             }
             "version" => {
                 version = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read version: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read version: {}", e),
+                    )
                 })?);
             }
             "behavior_kind" => {
                 behavior_kind = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read behavior_kind: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read behavior_kind: {}", e),
+                    )
                 })?);
             }
             "app_file" => {
                 let bytes = field.bytes().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read app_file: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read app_file: {}", e),
+                    )
                 })?;
                 if bytes.len() > MAX_APP_BODY_SIZE {
                     return Err((
                         StatusCode::PAYLOAD_TOO_LARGE,
-                        format!("app_file {} bytes exceeds maximum {} bytes", bytes.len(), MAX_APP_BODY_SIZE),
+                        format!(
+                            "app_file {} bytes exceeds maximum {} bytes",
+                            bytes.len(),
+                            MAX_APP_BODY_SIZE
+                        ),
                     ));
                 }
                 app_zip_data = Some(bytes.to_vec());
@@ -137,7 +164,10 @@ async fn handle_deploy(
     }
 
     let application_id = application_id.ok_or_else(|| {
-        (StatusCode::BAD_REQUEST, "application_id is required".to_string())
+        (
+            StatusCode::BAD_REQUEST,
+            "application_id is required".to_string(),
+        )
     })?;
 
     // Validate application_id to prevent path traversal through PathBuf::join.
@@ -148,22 +178,29 @@ async fn handle_deploy(
     let version = version.unwrap_or_else(|| "1.0.0".to_string());
 
     let zip_bytes = app_zip_data.ok_or_else(|| {
-        (StatusCode::BAD_REQUEST, "app_file (zip) is required".to_string())
+        (
+            StatusCode::BAD_REQUEST,
+            "app_file (zip) is required".to_string(),
+        )
     })?;
 
     // Extract zip in memory
-    let (wasm_bytes, config_str, static_files) =
-        extract_app_zip(&zip_bytes).map_err(|e| {
-            (StatusCode::BAD_REQUEST, format!("Invalid app zip: {}", e))
-        })?;
+    let (wasm_bytes, config_str, static_files) = extract_app_zip(&zip_bytes)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid app zip: {}", e)))?;
 
     let wasm_bytes = wasm_bytes.ok_or_else(|| {
-        (StatusCode::BAD_REQUEST, "app.zip must contain a .wasm file at the top level".to_string())
+        (
+            StatusCode::BAD_REQUEST,
+            "app.zip must contain a .wasm file at the top level".to_string(),
+        )
     })?;
 
     // Validate WASM magic
     if wasm_bytes.len() < 4 || &wasm_bytes[0..4] != b"\0asm" {
-        return Err((StatusCode::BAD_REQUEST, "app.wasm has invalid WASM magic number".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "app.wasm has invalid WASM magic number".to_string(),
+        ));
     }
 
     // Parse config — static_mount from uploaded TOML is intentionally ignored;
@@ -187,14 +224,19 @@ async fn handle_deploy(
     // but we clean up on gRPC failure.
     let mut registered_static = false;
     if !static_files.is_empty() {
-        let static_dir = persist_static_files(
-            &application_id,
-            &static_files,
-        ).await.map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save static files: {}", e))
-        })?;
+        let static_dir = persist_static_files(&application_id, &static_files)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to save static files: {}", e),
+                )
+            })?;
 
-        s.static_registry.write().await.insert(application_id.clone(), static_dir.clone());
+        s.static_registry
+            .write()
+            .await
+            .insert(application_id.clone(), static_dir.clone());
         registered_static = true;
         tracing::info!(
             application_id = %application_id,
@@ -223,8 +265,11 @@ async fn handle_deploy(
     };
 
     let tenant_id = crate::http_jwt::extract_tenant_id_from_headers(
-        &headers, s.auth_disabled, s.jwt_key_pair.as_deref(),
-    ).map_err(|e| {
+        &headers,
+        s.auth_disabled,
+        s.jwt_key_pair.as_deref(),
+    )
+    .map_err(|e| {
         // On auth failure, clean up static files we already registered
         if registered_static {
             let registry = s.static_registry.clone();
@@ -237,7 +282,10 @@ async fn handle_deploy(
     })?;
 
     if let Some(ref tenant_repo) = s.tenant_repo {
-        match tenant_repo.get_or_create_by_slug(&tenant_id, &tenant_id).await {
+        match tenant_repo
+            .get_or_create_by_slug(&tenant_id, &tenant_id)
+            .await
+        {
             Ok(_) => tracing::info!(tenant_id = %tenant_id, "Tenant ensured on deploy"),
             Err(e) => tracing::warn!(tenant_id = %tenant_id, error = %e, "Failed to ensure tenant"),
         }
@@ -294,7 +342,9 @@ async fn handle_undeploy(
     use tonic::metadata::MetadataValue;
 
     let tenant_id = crate::http_jwt::extract_tenant_id_from_headers(
-        &headers, s.auth_disabled, s.jwt_key_pair.as_deref(),
+        &headers,
+        s.auth_disabled,
+        s.jwt_key_pair.as_deref(),
     )?;
 
     remove_static_files(&application_id, &s.static_registry).await;
@@ -341,7 +391,10 @@ fn validate_app_id(app_id: &str) -> Result<(), String> {
     if app_id.len() > 128 {
         return Err("application_id must not exceed 128 characters".to_string());
     }
-    if !app_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+    if !app_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
         return Err(format!(
             "application_id '{}' contains invalid characters (allowed: a-z, A-Z, 0-9, -, _, .)",
             app_id
@@ -365,8 +418,8 @@ fn extract_app_zip(
     zip_bytes: &[u8],
 ) -> Result<(Option<Vec<u8>>, Option<String>, Vec<(String, Vec<u8>)>), String> {
     let cursor = std::io::Cursor::new(zip_bytes);
-    let mut archive = zip::ZipArchive::new(cursor)
-        .map_err(|e| format!("Not a valid zip: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| format!("Not a valid zip: {}", e))?;
 
     let mut wasm: Option<Vec<u8>> = None;
     let mut config: Option<String> = None;
@@ -374,7 +427,8 @@ fn extract_app_zip(
     let mut total_decompressed: usize = 0;
 
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i)
+        let mut entry = archive
+            .by_index(i)
             .map_err(|e| format!("Failed to read zip entry {}: {}", i, e))?;
 
         if entry.is_dir() {
@@ -398,7 +452,8 @@ fn extract_app_zip(
 
         // Use take() to enforce per-entry decompressed limit as well.
         let mut buf = Vec::new();
-        entry.by_ref()
+        entry
+            .by_ref()
             .take(MAX_DECOMPRESSED_STATIC_BYTES as u64)
             .read_to_end(&mut buf)
             .map_err(|e| format!("Failed to read {}: {}", name, e))?;
@@ -407,8 +462,10 @@ fn extract_app_zip(
             // Accept any top-level *.wasm (e.g. app.wasm, chat_room_actor.wasm)
             wasm = Some(buf);
         } else if name == "app-config.toml" {
-            config = Some(String::from_utf8(buf)
-                .map_err(|_| "app-config.toml is not valid UTF-8".to_string())?);
+            config = Some(
+                String::from_utf8(buf)
+                    .map_err(|_| "app-config.toml is not valid UTF-8".to_string())?,
+            );
         } else if name.starts_with("static/") {
             let rel = name["static/".len()..].to_string();
             if !rel.is_empty() {
@@ -449,7 +506,8 @@ async fn persist_static_files(
     let base_dir = get_wasm_apps_dir();
     let static_dir = PathBuf::from(&base_dir).join(application_id).join("static");
 
-    tokio::fs::create_dir_all(&static_dir).await
+    tokio::fs::create_dir_all(&static_dir)
+        .await
         .map_err(|e| format!("create_dir_all {:?}: {}", static_dir, e))?;
 
     for (rel_path, bytes) in files {
@@ -458,10 +516,12 @@ async fn persist_static_files(
 
         let dest = static_dir.join(rel_path);
         if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent).await
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|e| format!("create_dir {:?}: {}", parent, e))?;
         }
-        tokio::fs::write(&dest, bytes).await
+        tokio::fs::write(&dest, bytes)
+            .await
             .map_err(|e| format!("write {:?}: {}", dest, e))?;
     }
 
@@ -474,10 +534,7 @@ async fn persist_static_files(
     Ok(static_dir)
 }
 
-async fn remove_static_files(
-    application_id: &str,
-    registry: &StaticRegistry,
-) {
+async fn remove_static_files(application_id: &str, registry: &StaticRegistry) {
     // Remove from registry using application_id as the key.
     let removed = {
         let mut map = registry.write().await;
@@ -577,7 +634,8 @@ mod tests {
         zip.start_file("app.wasm", opts).unwrap();
         zip.write_all(b"\0asm\x01\0\0\0").unwrap();
         zip.start_file("app-config.toml", opts).unwrap();
-        zip.write_all(b"name = \"test\"\nversion = \"1.0.0\"\n").unwrap();
+        zip.write_all(b"name = \"test\"\nversion = \"1.0.0\"\n")
+            .unwrap();
         zip.start_file("static/index.html", opts).unwrap();
         zip.write_all(b"<html></html>").unwrap();
 

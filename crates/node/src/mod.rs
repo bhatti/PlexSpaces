@@ -27,18 +27,17 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
-use plexspaces_actor::{
-    ActorId, ActorRegistry,
-    ApplicationManager as ApplicationManagerTrait, ExitReason, InitializableServiceLocator,
-    ProcessResourceSampler, RequestContext, RequestContextExt,
-    ServiceLocator as ServiceLocatorTrait,
-};
 #[cfg(test)]
 use plexspaces_actor::ActorRegistrationParams;
+use plexspaces_actor::{
+    ActorId, ActorRegistry, ApplicationManager as ApplicationManagerTrait, ExitReason,
+    InitializableServiceLocator, ProcessResourceSampler, RequestContext, RequestContextExt,
+    ServiceLocator as ServiceLocatorTrait,
+};
 use plexspaces_application::{ApplicationError, ApplicationManager, ApplicationNode};
 #[cfg(test)]
 use plexspaces_proto::common::v1::Message;
-use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics};
+use plexspaces_proto::node::v1::NodeMetrics;
 use plexspaces_service_traits::ServiceLocatorBase;
 use plexspaces_services::ServiceLocatorImpl;
 use std::time::Duration;
@@ -92,7 +91,6 @@ impl std::fmt::Display for NodeId {
 // MonitorLink is now defined in ActorRegistry (core crate)
 // Use plexspaces_actor::MonitorLink instead
 
-
 // VirtualActorMetadata and MonitorLink are now defined in ActorRegistry (core crate)
 // Re-export for convenience
 pub use plexspaces_actor::{MonitorLink, VirtualActorMetadata};
@@ -123,7 +121,8 @@ pub struct Node {
     /// Created in start() if blob config is provided
     blob_service: Arc<RwLock<Option<Arc<plexspaces_blob::BlobService>>>>,
     /// Embedded object store process (kept alive for node's lifetime when using embedded backend)
-    _embedded_object_store: Arc<RwLock<Option<plexspaces_blob::embedded_object_store::EmbeddedObjectStore>>>,
+    _embedded_object_store:
+        Arc<RwLock<Option<plexspaces_blob::embedded_object_store::EmbeddedObjectStore>>>,
     /// Shutdown trigger for programmatic shutdown (allows shutdown() to stop gRPC server)
     shutdown_tx: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
     /// ServiceLocator for centralized service registration and gRPC client caching
@@ -142,6 +141,9 @@ pub struct Node {
 /// Helper function to create default NodeConfig
 /// (Can't implement Default trait for proto-generated types)
 pub fn default_node_config() -> plexspaces_proto::node::v1::NodeConfig {
+    // heartbeat_interval_ms comes from PLEXSPACES_HEARTBEAT_INTERVAL_MS env var via
+    // config_manager::initialize().  Set zero here so initialize() applies the default
+    // (or the env override) consistently with all other NodeConfig fields.
     plexspaces_proto::node::v1::NodeConfig {
         grpc_connection_pool_size: 2,
         id: "default-node".to_string(),
@@ -149,7 +151,7 @@ pub fn default_node_config() -> plexspaces_proto::node::v1::NodeConfig {
         cluster_seed_nodes: vec![],
         cluster_name: String::new(),
         max_connections: 100,
-        heartbeat_interval_ms: 5000,
+        heartbeat_interval_ms: 0, // resolved by config_manager::initialize()
         clustering_enabled: true,
         metadata: HashMap::new(),
         node_registry: None,         // Use defaults from NodeRegistryConfig
@@ -175,9 +177,6 @@ fn resolve_blob_http_port(config: &plexspaces_proto::node::v1::NodeConfig) -> u1
 
 // Note: NodeMetrics is from proto crate, so we can't add methods to it
 // Use direct field access: metrics.active_actors (u32) instead of usize
-
-// Use proto-generated NodeCapabilities instead of custom struct
-type NodeCapabilities = ProtoNodeCapabilities;
 
 // Helper function to create default NodeMetrics (can't impl Default for external type)
 fn default_node_metrics(node_id: &str, cluster_name: &str) -> NodeMetrics {
@@ -589,6 +588,9 @@ impl Node {
             ActorRegistryError::DependencyUnavailable(m) => NodeError::InvalidArgument(m),
             ActorRegistryError::VisibilityDenied(m) => NodeError::InvalidArgument(m),
             ActorRegistryError::LinkMonitorDenied(m) => NodeError::InvalidArgument(m),
+            ActorRegistryError::MailboxFull { depth, capacity, retry_after_ms } => {
+                NodeError::MailboxFull { depth, capacity, retry_after_ms }
+            }
         }
     }
 
@@ -709,21 +711,23 @@ impl Node {
     #[cfg_attr(test, allow(dead_code))] // Allow dead code in tests (used by tests)
     pub(crate) async fn calculate_node_capacity(&self) -> plexspaces_proto::node::v1::NodeCapacity {
         use plexspaces_proto::{common::v1::ResourceSpec, node::v1::NodeCapacity};
-        use sysinfo::System;
 
-        let mut sys = System::new_all();
-        sys.refresh_all();
-
-        // Total resources
-        let total_memory_bytes = sys.total_memory();
-        let total_cpu_cores = sys.cpus().len() as f64;
-        // Note: sysinfo v0.30 doesn't have a direct disks() method
-        // For now, we'll use a placeholder value. Disk capacity tracking
-        // can be enhanced later with platform-specific APIs or configuration.
-        // Get actual disk capacity using sysinfo
-        use sysinfo::Disks;
-        let disks = Disks::new_with_refreshed_list();
-        let total_disk_bytes: u64 = disks.iter().map(|d| d.total_space()).sum();
+        // Run sysinfo calls in a blocking thread pool — System::new_all() + refresh_all()
+        // + Disks::new_with_refreshed_list() are blocking syscalls that can take seconds
+        // on macOS (process enumeration, I/O) and would starve the Tokio runtime.
+        let (total_memory_bytes, total_cpu_cores, total_disk_bytes) =
+            tokio::task::spawn_blocking(|| {
+                use sysinfo::{Disks, System};
+                let mut sys = System::new_all();
+                sys.refresh_all();
+                let mem = sys.total_memory();
+                let cpus = sys.cpus().len() as f64;
+                let disks = Disks::new_with_refreshed_list();
+                let disk: u64 = disks.iter().map(|d| d.total_space()).sum();
+                (mem, cpus, disk)
+            })
+            .await
+            .unwrap_or((0, 0.0, 0));
 
         // Get GPU count/type if available
         // Note: sysinfo doesn't provide GPU information
@@ -895,7 +899,12 @@ impl Node {
         // Scan for stale object registrations and advance their health lifecycle.
         // Threshold = 3 × heartbeat_interval (matches default max_heartbeat_failures=3).
         // Done inline so no extra background task is needed.
-        self.scan_stale_object_heartbeats(self.config.heartbeat_interval_ms).await;
+        let hb_ms = if self.config.heartbeat_interval_ms > 0 {
+            self.config.heartbeat_interval_ms
+        } else {
+            plexspaces_common::config_manager::DEFAULT_HEARTBEAT_INTERVAL_MS
+        };
+        self.scan_stale_object_heartbeats(hb_ms).await;
 
         Ok(())
     }
@@ -936,10 +945,8 @@ impl Node {
             if reg.object_id.ends_with(&local_node_suffix) || reg.object_id == self.id.as_str() {
                 continue;
             }
-            let tenant_ctx = RequestContext::new_without_auth(
-                reg.tenant_id.clone(),
-                reg.namespace.clone(),
-            );
+            let tenant_ctx =
+                RequestContext::new_without_auth(reg.tenant_id.clone(), reg.namespace.clone());
             match object_registry
                 .record_heartbeat_failure(&tenant_ctx, &reg.object_id)
                 .await
@@ -1044,10 +1051,8 @@ impl Node {
             std::collections::HashMap::new();
 
         for reg in registrations {
-            let ctx = RequestContext::new_without_auth(
-                reg.tenant_id.clone(),
-                reg.namespace.clone(),
-            );
+            let ctx =
+                RequestContext::new_without_auth(reg.tenant_id.clone(), reg.namespace.clone());
 
             if reg.node_id == node_id_str || reg.node_id.is_empty() {
                 // Local: actor_registry presence = alive.
@@ -1135,10 +1140,14 @@ impl Node {
                 }
             };
 
-            let actor_ids: Vec<String> = actor_entries.iter().map(|(id, _, _)| id.clone()).collect();
+            let actor_ids: Vec<String> =
+                actor_entries.iter().map(|(id, _, _)| id.clone()).collect();
             let mut client = ActorServiceClient::new(channel);
             let resp = match client
-                .get_actor_states(tonic::Request::new(GetActorStatesRequest { request_id: ulid::Ulid::new().to_string(), actor_ids }))
+                .get_actor_states(tonic::Request::new(GetActorStatesRequest {
+                    request_id: ulid::Ulid::new().to_string(),
+                    actor_ids,
+                }))
                 .await
             {
                 Ok(r) => r.into_inner(),
@@ -1491,11 +1500,22 @@ impl Node {
 
         // Start heartbeat task with capacity tracking
         let node_for_heartbeat = self.clone();
-        let heartbeat_interval = self.config.heartbeat_interval_ms;
+        // Use config value; fall back to DEFAULT_HEARTBEAT_INTERVAL_MS when the field is zero
+        // (zero means "not set" — this happens when NodeBuilder is used without a ReleaseSpec).
+        let heartbeat_interval = if self.config.heartbeat_interval_ms > 0 {
+            self.config.heartbeat_interval_ms
+        } else {
+            plexspaces_common::config_manager::DEFAULT_HEARTBEAT_INTERVAL_MS
+        };
 
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(heartbeat_interval)).await;
+                // Add 1-3s jitter to spread heartbeat load across nodes and avoid thundering herd.
+                let jitter_ms = {
+                    use rand::Rng;
+                    rand::thread_rng().gen_range(1000..=3000u64)
+                };
+                tokio::time::sleep(tokio::time::Duration::from_millis(heartbeat_interval + jitter_ms)).await;
 
                 // Heartbeat updates this node's own node-registry and object-registry state.
                 // Also scans for stale object registrations inline (no separate background task).
@@ -1522,7 +1542,6 @@ impl Node {
                 node_for_ping.check_actor_liveness().await;
             }
         });
-
 
         // Parse listen address
         let addr = self
@@ -1556,41 +1575,42 @@ impl Node {
 
         // Start the Axum blob REST server only for non-embedded backends (s3, gcp, azure).
         // For "embedded", rustfs itself handles all HTTP on blob_http_port.
-        let _blob_http_handle: Option<tokio::task::JoinHandle<()>> =
-            if let Some(blob_svc) = blob_service.as_ref().filter(|_| blob_backend != "embedded") {
-                use plexspaces_blob::server::http_axum::create_blob_router;
-                let router = create_blob_router(blob_svc.clone());
+        let _blob_http_handle: Option<tokio::task::JoinHandle<()>> = if let Some(blob_svc) =
+            blob_service.as_ref().filter(|_| blob_backend != "embedded")
+        {
+            use plexspaces_blob::server::http_axum::create_blob_router;
+            let router = create_blob_router(blob_svc.clone());
 
-                let grpc_addr: std::net::SocketAddr = self
-                    .config
-                    .listen_addr
-                    .parse()
-                    .unwrap_or_else(|_| "127.0.0.1:9999".parse().unwrap());
-                let http_port = resolve_blob_http_port(&self.config);
-                let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
-                    .parse::<std::net::SocketAddr>()
-                    .unwrap_or_else(|_| "127.0.0.1:10000".parse().unwrap());
+            let grpc_addr: std::net::SocketAddr = self
+                .config
+                .listen_addr
+                .parse()
+                .unwrap_or_else(|_| "127.0.0.1:9999".parse().unwrap());
+            let http_port = resolve_blob_http_port(&self.config);
+            let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
+                .parse::<std::net::SocketAddr>()
+                .unwrap_or_else(|_| "127.0.0.1:10000".parse().unwrap());
 
-                tracing::info!(addr = %http_addr, "Starting blob HTTP server");
+            tracing::info!(addr = %http_addr, "Starting blob HTTP server");
 
-                match tokio::net::TcpListener::bind(http_addr).await {
-                    Ok(listener) => Some(tokio::spawn(async move {
-                        use axum::serve;
-                        if let Err(e) = serve(listener, router).await {
-                            tracing::error!(error = %e, "Blob HTTP server error");
-                        }
-                    })),
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            "Could not bind blob HTTP server; blob HTTP endpoints will be unavailable"
-                        );
-                        None
+            match tokio::net::TcpListener::bind(http_addr).await {
+                Ok(listener) => Some(tokio::spawn(async move {
+                    use axum::serve;
+                    if let Err(e) = serve(listener, router).await {
+                        tracing::error!(error = %e, "Blob HTTP server error");
                     }
+                })),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Could not bind blob HTTP server; blob HTTP endpoints will be unavailable"
+                    );
+                    None
                 }
-            } else {
-                None
-            };
+            }
+        } else {
+            None
+        };
 
         // Create gRPC services
         // Note: ActorServiceImpl will be created with health reporter after HealthService is initialized
@@ -1636,10 +1656,12 @@ impl Node {
             .await;
 
         actor_registry
-            .set_local_listen_addr(plexspaces_common::dialable_node_address(&self.config.listen_addr))
+            .set_local_listen_addr(plexspaces_common::dialable_node_address(
+                &self.config.listen_addr,
+            ))
             .await;
 
-        ActorRegistry::start_temporary_sender_cleanup(actor_registry.clone());
+        ActorRegistry::start_pending_asks_gc(actor_registry.clone());
 
         // Start stale monitor GC background task (default 60s interval).
         plexspaces_actor::start_monitor_gc_task(
@@ -2183,10 +2205,8 @@ impl Node {
         let server_builder = {
             use plexspaces_proto::node::v1::service_link_service_server::ServiceLinkServiceServer;
             use plexspaces_services::service_link_service::ServiceLinkServiceImpl;
-            let sls = ServiceLinkServiceImpl::new(
-                self.service_locator.clone()
-                    as Arc<dyn plexspaces_actor::InitializableServiceLocator>,
-            )
+            let sls = ServiceLinkServiceImpl::new(self.service_locator.clone()
+                as Arc<dyn plexspaces_actor::InitializableServiceLocator>)
             .await;
             // Register in ServiceLocator so dashboard can query live service links
             self.service_locator
@@ -2221,13 +2241,12 @@ impl Node {
         // Add UserService for OAuth login flow, tenant management, and API token management.
         // Also builds the AuthRouteState used by the HTTP auth routes module.
         let (server_builder, auth_route_state) = {
+            use crate::http_routes::AuthRouteState;
             use plexspaces_proto::security::v1::user_service_server::UserServiceServer;
             use plexspaces_services::user_service::{
-                SqlApiTokenRepository, SqlTenantRepository, SqlUserRepository,
-                UserServiceImpl,
-                oidc::build_oidc_state,
+                oidc::build_oidc_state, SqlApiTokenRepository, SqlTenantRepository,
+                SqlUserRepository, UserServiceImpl,
             };
-            use crate::http_routes::AuthRouteState;
 
             let shared_db = self.get_shared_database_config().await;
             let user_pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -2257,57 +2276,62 @@ impl Node {
                     ));
 
                     // Resolve JWT key pair once — used for both OIDC signing and HTTP auth validation.
-                    let jwt_cfg = self.service_locator.get_security_config().await
+                    let jwt_cfg = self
+                        .service_locator
+                        .get_security_config()
+                        .await
                         .and_then(|sc| sc.jwt);
-                    let auth_jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>> = match jwt_cfg {
-                        Some(ref cfg) => {
-                            match plexspaces_grpc_middleware::JwtKeyPair::from_config(
-                                &cfg.private_key_pem,
-                                &cfg.private_key_file,
-                                &cfg.secret,
-                                cfg.auto_generate_key,
-                            ) {
-                                Ok(kp) => {
-                                    Some(Arc::new(kp))
-                                }
-                                Err(e) => {
-                                    tracing::error!(error = %e, "Failed to load JWT key pair from config");
-                                    None
+                    let auth_jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>> =
+                        match jwt_cfg {
+                            Some(ref cfg) => {
+                                match plexspaces_grpc_middleware::JwtKeyPair::from_config(
+                                    &cfg.private_key_pem,
+                                    &cfg.private_key_file,
+                                    &cfg.secret,
+                                    cfg.auto_generate_key,
+                                ) {
+                                    Ok(kp) => Some(Arc::new(kp)),
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "Failed to load JWT key pair from config");
+                                        None
+                                    }
                                 }
                             }
-                        }
-                        None => {
-                            match plexspaces_grpc_middleware::JwtKeyPair::from_env(None) {
-                                Ok(kp) => {
-                                    Some(Arc::new(kp))
-                                }
+                            None => match plexspaces_grpc_middleware::JwtKeyPair::from_env(None) {
+                                Ok(kp) => Some(Arc::new(kp)),
                                 Err(e) => {
                                     tracing::warn!(error = %e, "No JWT key pair available");
                                     None
                                 }
-                            }
-                        }
-                    };
+                            },
+                        };
 
                     // Build OidcState — uses the same key pair for signing session JWTs.
-                    let oidc_cfg = self.service_locator.get_security_config().await
+                    let oidc_cfg = self
+                        .service_locator
+                        .get_security_config()
+                        .await
                         .and_then(|sc| sc.oidc);
-                    let oidc_state = if let (Some(cfg), Some(kp)) = (oidc_cfg, auth_jwt_key_pair.clone()) {
-                        match build_oidc_state(&cfg, user_repo.clone(), tenant_repo.clone(), kp).await {
-                            Ok(state) => {
-                                Some(state)
+                    let oidc_state =
+                        if let (Some(cfg), Some(kp)) = (oidc_cfg, auth_jwt_key_pair.clone()) {
+                            match build_oidc_state(&cfg, user_repo.clone(), tenant_repo.clone(), kp)
+                                .await
+                            {
+                                Ok(state) => Some(state),
+                                Err(e) => {
+                                    tracing::info!(reason = %e, "OIDC not mounted");
+                                    None
+                                }
                             }
-                            Err(e) => {
-                                tracing::info!(reason = %e, "OIDC not mounted");
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
+                        } else {
+                            None
+                        };
 
                     tracing::info!(
-                        jwt = auth_jwt_key_pair.as_ref().map(|kp| format!("{:?}:{}", kp.algorithm(), kp.kid())).unwrap_or_else(|| "none".into()),
+                        jwt = auth_jwt_key_pair
+                            .as_ref()
+                            .map(|kp| format!("{:?}:{}", kp.algorithm(), kp.kid()))
+                            .unwrap_or_else(|| "none".into()),
                         oidc = oidc_state.is_some(),
                         "Auth configured"
                     );
@@ -2335,7 +2359,9 @@ impl Node {
         #[cfg(feature = "dashboard")]
         if let Some(ref auth_state) = auth_route_state {
             if let Some(ref http_dash) = dashboard_service_for_http_opt {
-                http_dash.set_tenant_repo(auth_state.tenant_repo.clone()).await;
+                http_dash
+                    .set_tenant_repo(auth_state.tenant_repo.clone())
+                    .await;
             }
         }
 
@@ -2368,8 +2394,9 @@ impl Node {
             plexspaces_grpc_middleware::http_jwt_auth_snapshot(self.service_locator.clone()
                 as Arc<dyn plexspaces_actor::ServiceLocator + Send + Sync>)
             .await;
-        let token_repo_for_gateway: Option<Arc<dyn plexspaces_services::user_service::ApiTokenRepository>> =
-            auth_route_state.as_ref().map(|s| s.token_repo.clone());
+        let token_repo_for_gateway: Option<
+            Arc<dyn plexspaces_services::user_service::ApiTokenRepository>,
+        > = auth_route_state.as_ref().map(|s| s.token_repo.clone());
         let node_connectivity_for_http =
             node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>;
 
@@ -2389,12 +2416,14 @@ impl Node {
 
         // Register WS transport clients in ServiceLocator for outbound WS routing.
         {
+            use crate::ws_transport_client::{WsActorTransportClient, WsNodeTransportClient};
             use plexspaces_actor::InitializableServiceLocator;
             use plexspaces_actor::{GrpcActorTransportClient, GrpcNodeTransportClient};
-            use crate::ws_transport_client::{WsActorTransportClient, WsNodeTransportClient};
 
-            let grpc_actor = std::sync::Arc::new(GrpcActorTransportClient::new(self.service_locator.clone()));
-            let grpc_node = std::sync::Arc::new(GrpcNodeTransportClient::new(self.service_locator.clone()));
+            let grpc_actor =
+                std::sync::Arc::new(GrpcActorTransportClient::new(self.service_locator.clone()));
+            let grpc_node =
+                std::sync::Arc::new(GrpcNodeTransportClient::new(self.service_locator.clone()));
 
             let ws_actor = std::sync::Arc::new(WsActorTransportClient::new(
                 ws_registry.clone(),
@@ -2407,14 +2436,21 @@ impl Node {
                 grpc_node as std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
             ));
 
-            self.service_locator.register_actor_transport_client(
-                ws_actor as std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
-            ).await;
-            self.service_locator.register_node_transport_client(
-                ws_node as std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
-            ).await;
-            let ws_reg_trait: std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait> = ws_registry.clone();
-            self.service_locator.register_ws_registry(ws_reg_trait).await;
+            self.service_locator
+                .register_actor_transport_client(
+                    ws_actor as std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
+                )
+                .await;
+            self.service_locator
+                .register_node_transport_client(
+                    ws_node as std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
+                )
+                .await;
+            let ws_reg_trait: std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait> =
+                ws_registry.clone();
+            self.service_locator
+                .register_ws_registry(ws_reg_trait)
+                .await;
         }
 
         let static_registry: crate::http_routes::StaticRegistry =
@@ -2442,7 +2478,8 @@ impl Node {
                 dashboard_service_for_http_opt,
                 token_repo_for_gateway,
             );
-            let merged = http_routes.merge(create_dashboard_router().with_state(gateway_state.clone()));
+            let merged =
+                http_routes.merge(create_dashboard_router().with_state(gateway_state.clone()));
             merged.layer(axum::middleware::from_fn_with_state(
                 gateway_state,
                 crate::http_gateway::http_auth_middleware,
@@ -2993,21 +3030,25 @@ impl Node {
             if let Some(ref health_reporter) = *health_reporter_guard {
                 let (drained, duration, completed) =
                     health_reporter.begin_shutdown(Some(timeout)).await;
-                tracing::warn!("🛑 Phase 1: Health Status");
-                tracing::warn!("   ✓ Health set to NOT_SERVING");
-                tracing::warn!(
-                    "   ✓ Requests drained: {} | Duration: {:?} | Completed: {}",
-                    drained,
-                    duration,
-                    completed
-                );
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!("🛑 Phase 1: Health Status");
+                    tracing::trace!("   ✓ Health set to NOT_SERVING");
+                    tracing::trace!(
+                        "   ✓ Requests drained: {} | Duration: {:?} | Completed: {}",
+                        drained,
+                        duration,
+                        completed
+                    );
+                }
             } else {
                 // Fallback: if health reporter not available, set ServiceLocator flag directly
                 self.service_locator.request_shutdown();
-                tracing::warn!("🛑 Phase 1: Health Status");
-                tracing::warn!(
-                    "   ✓ ServiceLocator shutdown flag set (health reporter not available)"
-                );
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!("🛑 Phase 1: Health Status");
+                    tracing::trace!(
+                        "   ✓ ServiceLocator shutdown flag set (health reporter not available)"
+                    );
+                }
             }
         }
 
@@ -3019,7 +3060,9 @@ impl Node {
                 // Send shutdown signal to trigger gRPC server shutdown
                 // Ignore error if already shut down
                 let _ = tx.send(());
-                tracing::warn!("   ✓ gRPC server shutdown signal sent");
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!("   ✓ gRPC server shutdown signal sent");
+                }
             }
         }
 
@@ -3027,19 +3070,23 @@ impl Node {
         {
             let scheduler = self.background_scheduler.read().await;
             if let Some(scheduler) = scheduler.as_ref() {
-                tracing::warn!("🛑 Phase 2: Background Services");
-                tracing::warn!("   ✓ Background scheduler stopped");
                 scheduler.stop();
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!("🛑 Phase 2: Background Services");
+                    tracing::trace!("   ✓ Background scheduler stopped");
+                }
             }
         }
 
         // Stop all applications (use Release order if available, otherwise reverse registration order)
-        tracing::warn!("🛑 Phase 3: Stopping Applications");
         let apps_before =
             ApplicationManagerTrait::list_applications(self.application_manager.as_ref())
                 .await
                 .len();
-        tracing::warn!("   • Stopping {} applications...", apps_before);
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("🛑 Phase 3: Stopping Applications");
+            tracing::trace!("   • Stopping {} applications...", apps_before);
+        }
 
         let stop_start = std::time::Instant::now();
 
@@ -3142,24 +3189,25 @@ impl Node {
         let (_, after_actor_count, after_queue_size, _after_active_reqs, _) =
             self.collect_shutdown_metrics().await;
 
-        tracing::warn!(
-            "   ✓ Applications stopped: {} | Duration: {:?}",
-            apps_stopped,
-            stop_duration
-        );
-        tracing::warn!(
-            "   • Remaining actors: {} (down from {})",
-            after_actor_count,
-            actor_count
-        );
-        tracing::warn!(
-            "   • Remaining mailbox queue size: {} (down from {})",
-            after_queue_size,
-            queue_size
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "   ✓ Applications stopped: {} | Duration: {:?}",
+                apps_stopped,
+                stop_duration
+            );
+            tracing::trace!(
+                "   • Remaining actors: {} (down from {})",
+                after_actor_count,
+                actor_count
+            );
+            tracing::trace!(
+                "   • Remaining mailbox queue size: {} (down from {})",
+                after_queue_size,
+                queue_size
+            );
+        }
 
         // Close network connections via NodeRegistry
-        tracing::warn!("🛑 Phase 4: Network Connections");
         let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
         if let Some(node_registry) = service_locator_trait.get_node_registry().await {
@@ -3169,54 +3217,53 @@ impl Node {
             match node_registry.list_nodes(&ctx, None, 1000, "").await {
                 Ok((nodes, _)) => {
                     let node_count = nodes.len();
-                    tracing::warn!("   • Closing {} connections...", node_count);
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!("🛑 Phase 4: Network Connections");
+                        tracing::trace!("   • Closing {} connections...", node_count);
+                    }
                     for node in nodes {
                         let _ = node_registry.unregister_node(&ctx, &node.node_id).await;
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("   • Could not list nodes: {}", e);
+                    tracing::warn!("shutdown: could not list nodes for cleanup: {}", e);
                 }
             }
-        } else {
-            tracing::warn!("   • NodeRegistry not available");
         }
-        tracing::warn!("   ✓ All network connections closed");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("   ✓ All network connections closed");
+        }
 
-        // Flush TupleSpace pending operations (ensure all writes are persisted)
-        // TupleSpace operations are synchronous, so no explicit flush needed
-        // For external backends, they handle persistence automatically
-        tracing::warn!("🛑 Phase 5: Final Cleanup");
-        tracing::warn!("   ✓ TupleSpace operations flushed");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("🛑 Phase 5: Final Cleanup");
+            tracing::trace!("   ✓ TupleSpace operations flushed");
+        }
 
-        // Final metrics
-        let (final_app_count, final_actor_count, final_queue_size, final_active_reqs, _) =
-            self.collect_shutdown_metrics().await;
-        tracing::warn!("\n📊 Final State:");
-        tracing::warn!(
-            "   • Applications: {} (stopped: {})",
-            final_app_count,
-            apps_stopped
-        );
-        tracing::warn!(
-            "   • Actors: {} (stopped: {})",
-            final_actor_count,
-            actor_count.saturating_sub(final_actor_count)
-        );
-        tracing::warn!(
-            "   • Mailbox Queue Size: {} (drained: {})",
-            final_queue_size,
-            queue_size.saturating_sub(final_queue_size)
-        );
-        tracing::warn!(
-            "   • Messages Routed: {} (during shutdown: {})",
-            final_active_reqs,
-            final_active_reqs.saturating_sub(active_reqs)
-        );
-
-        tracing::warn!("╔════════════════════════════════════════════════════════════════╗");
-        tracing::warn!("║  ✅ Graceful Shutdown Complete                                ║");
-        tracing::warn!("╚════════════════════════════════════════════════════════════════╝\n");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let (final_app_count, final_actor_count, final_queue_size, final_active_reqs, _) =
+                self.collect_shutdown_metrics().await;
+            tracing::trace!("\n📊 Final State:");
+            tracing::trace!(
+                "   • Applications: {} (stopped: {})",
+                final_app_count,
+                apps_stopped
+            );
+            tracing::trace!(
+                "   • Actors: {} (stopped: {})",
+                final_actor_count,
+                actor_count.saturating_sub(final_actor_count)
+            );
+            tracing::trace!(
+                "   • Mailbox Queue Size: {} (drained: {})",
+                final_queue_size,
+                queue_size.saturating_sub(final_queue_size)
+            );
+            tracing::trace!(
+                "   • Messages Routed: {} (during shutdown: {})",
+                final_active_reqs,
+                final_active_reqs.saturating_sub(active_reqs)
+            );
+        }
         if stop_errors.is_empty() {
             Ok(())
         } else {
@@ -3512,3281 +3559,21 @@ pub enum NodeError {
     /// ObjectRegistry operation failed
     #[error("ObjectRegistry error: {0}")]
     ObjectRegistryError(String),
-}
 
-/// Cluster manager for coordinating multiple nodes
-pub struct ClusterManager {
-    /// Local node
-    local_node: Arc<Node>,
-    /// Cluster configuration
-    config: ClusterConfig,
-    /// Cluster state
-    #[allow(dead_code)]
-    state: Arc<RwLock<ClusterState>>,
-}
-
-/// Cluster configuration
-#[derive(Debug, Clone)]
-pub struct ClusterConfig {
-    /// Cluster name
-    pub name: String,
-    /// Seed nodes for discovery
-    pub seed_nodes: Vec<(NodeId, String)>,
-    /// Minimum nodes for quorum
-    pub min_nodes: usize,
-    /// Enable auto-discovery
-    pub auto_discovery: bool,
-}
-
-/// Cluster state
-#[derive(Debug)]
-#[allow(dead_code)]
-struct ClusterState {
-    /// Current leader (if any)
-    leader: Option<NodeId>,
-    /// Cluster members
-    members: HashMap<NodeId, NodeInfo>,
-    /// Cluster epoch
-    epoch: u64,
-}
-
-/// Node information in cluster
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct NodeInfo {
-    id: NodeId,
-    address: String,
-    capabilities: NodeCapabilities,
-    last_seen: tokio::time::Instant,
-}
-
-impl ClusterManager {
-    /// Create a new cluster manager
-    pub fn new(local_node: Arc<Node>, config: ClusterConfig) -> Self {
-        ClusterManager {
-            local_node,
-            config,
-            state: Arc::new(RwLock::new(ClusterState {
-                leader: None,
-                members: HashMap::new(),
-                epoch: 0,
-            })),
-        }
-    }
-
-    /// Join the cluster
-    pub async fn join(&self) -> Result<(), NodeError> {
-        // Connect to seed nodes via NodeRegistry
-        let service_locator = self.local_node.service_locator();
-        if let Some(node_registry) = service_locator.get_node_registry().await {
-            let ctx = service_locator
-                .request_context_for_system_operations()
-                .await;
-            for (node_id, address) in &self.config.seed_nodes {
-                if node_id != self.local_node.id() {
-                    // Register the seed node in NodeRegistry
-                    let registration = plexspaces_proto::node::v1::NodeRegistration {
-                        node_id: node_id.as_str().to_string(),
-                        node_address: address.clone(),
-                        ..Default::default()
-                    };
-                    if let Err(e) = node_registry.register_node(&ctx, registration).await {
-                        tracing::warn!(node_id = %node_id.as_str(), address = %address, error = %e, "Failed to register seed node");
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Leave the cluster
-    pub async fn leave(&self) -> Result<(), NodeError> {
-        Ok(())
-    }
+    /// Actor mailbox is full (backpressure)
+    #[error("Mailbox full: depth={depth}, capacity={capacity}, retry_after_ms={retry_after_ms}")]
+    MailboxFull {
+        /// Current mailbox depth
+        depth: usize,
+        /// Mailbox capacity
+        capacity: usize,
+        /// Suggested retry delay in milliseconds
+        retry_after_ms: u64,
+    },
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use plexspaces_actor::ActorId;
-    use plexspaces_actor::ActorRef;
-    use plexspaces_proto::actor::v1::ActorVisibility;
-    use std::time::Duration;
-
-    fn test_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
-        ActorId::new(name, "gen_server", "default", node_id).expect("test actor IDs must be valid")
-    }
-
-    // Helper functions for tests (defined inline since we can't import from tests/ directory)
-    async fn lookup_actor_ref_helper(
-        node: &Node,
-        actor_id: &ActorId,
-    ) -> Result<Option<ActorRef>, NodeError> {
-        use plexspaces_actor::ActorRegistry;
-        use std::sync::Arc;
-
-        // Get ActorRegistry
-        let actor_registry: Arc<ActorRegistry> = node
-            .service_locator()
-            .actor_registry()
-            .await
-            .ok_or_else(|| NodeError::ConfigError("ActorRegistry not found".to_string()))?;
-
-        // Check if actor exists
-        if let Some(_actor_trait) = actor_registry.lookup_actor(actor_id).await {
-            Ok(Some(ActorRef::remote(
-                actor_id.clone(),
-                "".to_string(), // tenant_id
-                "".to_string(), // TODO: get namespace from context
-                node.id().as_str().to_string(),
-                node.service_locator().clone(),
-                ActorVisibility::ActorVisibilityPublic,
-            )))
-        } else {
-            if actor_id.node_id() != node.id().as_str() {
-                Ok(Some(ActorRef::remote(
-                    actor_id.clone(),
-                    "".to_string(),
-                    "".to_string(),
-                    actor_id.node_id().to_string(),
-                    node.service_locator().clone(),
-                    ActorVisibility::ActorVisibilityPublic,
-                )))
-            } else {
-                Ok(None)
-            }
-        }
-    }
-
-    // Alias for consistency with test files
-    use lookup_actor_ref_helper as lookup_actor_ref;
-
-    use super::*;
-    use plexspaces_mailbox::Mailbox;
-
-    use plexspaces_actor::MessageSender;
-
-    // Import NodeBuilder for tests
-    use crate::NodeBuilder;
-
-    // Helper to get ActorRegistry from service_locator
-    async fn get_actor_registry(node: &Node) -> Arc<ActorRegistry> {
-        // Ensure services are initialized
-        node.initialize_services().await.unwrap();
-        node.actor_registry().await.unwrap()
-    }
-
-    // Helper to register actor with MessageSender (replaces register_local)
-    // Test helper function - registering test actors
-    // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-    async fn register_actor_for_test(node: &Node, actor_id: &ActorId, mailbox: Arc<Mailbox>) {
-        let wrapper = Arc::new(ActorRef::local(
-            actor_id.clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox,
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(node).await;
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_id.clone(),
-                    sender: wrapper,
-                    actor_type: actor_id.actor_type().to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-    }
-
-    #[tokio::test]
-    async fn test_node_creation() {
-        let node = NodeBuilder::new("test-node").build().await;
-        assert_eq!(node.id().as_str(), "test-node");
-    }
-
-    #[tokio::test]
-    async fn test_actor_registration() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_ref = ActorRef::local(
-            test_runtime_actor_id("test-actor", "test-node"),
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register with ActorRegistry first
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering and looking up test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        // Register actor (idempotent - can be called multiple times)
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Should find local actor via ActorRegistry
-        assert!(actor_registry.lookup_actor(actor_ref.id()).await.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_tuplespace_integration() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-    }
-
-    #[tokio::test]
-    async fn test_actor_unregistration() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register with ActorRegistry first
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Update actor registration with config (idempotent - actor already registered)
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor_ref.id().clone(),
-                        sender,
-                        actor_type: "test_actor".to_string(),
-                        config: None,
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-        // Test code - looking up test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        assert!(actor_registry.lookup_actor(actor_ref.id()).await.is_some());
-
-        // Unregister
-        actor_registry
-            .unregister_with_cleanup(actor_ref.id())
-            .await
-            .unwrap();
-        // After unregistering, the local sender should no longer be discoverable.
-        let lookup_result = actor_registry.lookup_actor(actor_ref.id()).await;
-        assert!(
-            lookup_result.is_none(),
-            "Actor should not be found after unregistering"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_duplicate_actor_registration() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
-
-        // First registration should succeed
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor_ref.id().clone(),
-                        sender,
-                        actor_type: "test_actor".to_string(),
-                        config: None,
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-
-        // Second registration should also succeed (idempotent - safe to call multiple times)
-        // This is a production-grade design: register_actor is idempotent
-        // to allow safe retries and prevent errors from duplicate calls
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor_ref.id().clone(),
-                        sender,
-                        actor_type: "test_actor".to_string(),
-                        config: None,
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-    }
-
-    #[tokio::test]
-    async fn test_route_message_local() {
-        use plexspaces_mailbox::mailbox_config_default;
-
-        let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let node = node_arc.as_ref();
-
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register with ActorRegistry (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
-
-        let actor_registry = get_actor_registry(&node).await;
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
-        actor_registry
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Send message via ActorRef directly to local mailbox
-        let message = Message {
-            id: ulid::Ulid::new().to_string(),
-            payload: vec![1, 2, 3],
-            ..Default::default()
-        };
-        actor_ref.tell(&ctx, message).await.unwrap();
-
-        // Verify message was delivered to the mailbox
-        // ActorRef::tell() enqueues directly into the mailbox; routing metrics are
-        // only updated when messages flow through Node::route_message() / routing.rs.
-        let msg = mailbox
-            .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(200)))
-            .await;
-        assert!(msg.is_some(), "message should be delivered to mailbox");
-        assert_eq!(msg.unwrap().payload, vec![1, 2, 3]);
-    }
-
-    #[tokio::test]
-    async fn test_route_message_actor_not_found() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Initialize services
-        node.initialize_services().await.unwrap();
-
-        let message = Message {
-            id: ulid::Ulid::new().to_string(),
-            payload: vec![1, 2, 3],
-            ..Default::default()
-        };
-
-        // Try to send to non-existent actor
-        // lookup_actor_ref returns Ok(None) for local actors that don't exist
-        let tell_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let result =
-            lookup_actor_ref(&node, &test_runtime_actor_id("nonexistent", "test-node")).await;
-        let result = match result {
-            Ok(Some(actor_ref)) => actor_ref
-                .tell(&tell_ctx, message)
-                .await
-                .map_err(|e| NodeError::DeliveryFailed(format!("{}", e))),
-            Ok(None) => {
-                // Local actor not found - try to send anyway to get ActorNotFound error
-                // Or return ActorNotFound directly
-                Err(NodeError::ActorNotFound(
-                    "nonexistent@test-node".to_string(),
-                ))
-            }
-            Err(e) => Err(e),
-        };
-        assert!(result.is_err());
-        match result {
-            Err(NodeError::ActorNotFound(_)) => {} // Expected
-            _ => panic!("Expected ActorNotFound error, got: {:?}", result),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_node_announcement() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-    }
-
-    #[tokio::test]
-    async fn test_cluster_manager_join() {
-        let node = Arc::new(NodeBuilder::new("node1").build().await);
-
-        let cluster_config = ClusterConfig {
-            name: "test-cluster".to_string(),
-            seed_nodes: vec![
-                (NodeId::new("node1"), "localhost:8000".to_string()),
-                (NodeId::new("node2"), "localhost:8001".to_string()),
-            ],
-            min_nodes: 2,
-            auto_discovery: true,
-        };
-
-        let manager = ClusterManager::new(node.clone(), cluster_config);
-
-        // Join cluster
-        manager.join().await.unwrap();
-
-    }
-
-    #[tokio::test]
-    async fn test_cluster_manager_leave() {
-        let node = Arc::new(NodeBuilder::new("node1").build().await);
-
-        let cluster_config = ClusterConfig {
-            name: "test-cluster".to_string(),
-            seed_nodes: vec![],
-            min_nodes: 1,
-            auto_discovery: false,
-        };
-
-        let manager = ClusterManager::new(node.clone(), cluster_config);
-
-        // Join then leave
-        manager.join().await.unwrap();
-        manager.leave().await.unwrap();
-
-    }
-
-    // ============================================================================
-    // spawn_actor() Tests (Erlang-style supervision)
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_spawn_actor_creates_and_returns_ref() {
-        use plexspaces_actor::behavior::MockBehavior;
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-        use std::sync::Arc;
-
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Initialize services (registers all services including ActorFactory)
-        node.initialize_services().await.unwrap();
-
-        // Register a BehaviorRegistry so spawn_actor can create "test" actors
-        {
-            use plexspaces_actor::behavior_factory::BehaviorRegistry;
-            let registry = BehaviorRegistry::new();
-            registry
-                .register_simple("test", || {
-                    Box::pin(async move {
-                        Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>)
-                    })
-                })
-                .await;
-            node.service_locator()
-                .register_behavior_registry(Arc::new(registry))
-                .await;
-        }
-
-        // Get ActorFactory from ServiceLocator using extension trait
-        let service_locator = node.service_locator();
-        use plexspaces_actor::ActorFactory;
-        let actor_factory = service_locator
-            .get_actor_factory()
-            .await
-            .expect("ActorFactoryImpl should be registered after initialize_services()");
-
-        // Test code - spawn with explicit tenant/namespace per Rule #6
-        let spawn_ctx = plexspaces_actor::RequestContext::new_without_auth(
-            "test-tenant".to_string(),
-            "default".to_string(),
-        );
-        // Build actor_id to match spawn spec: name="test-actor", type="test", namespace="default", node="test-node"
-        let actor_id =
-            ActorId::new("test-actor", "test", "default", "test-node").expect("valid actor id");
-        let _message_sender = actor_factory
-            .spawn_actor(
-                &spawn_ctx,
-                &plexspaces_actor::ActorSpawnSpec {
-                    identity: Some(plexspaces_proto::common::v1::ActorIdentity {
-                        name: actor_id.name().to_string(),
-                        actor_type: actor_id.actor_type().to_string(),
-                    }),
-                    namespace: actor_id.namespace().to_string(),
-                    tenant_id: "test-tenant".to_string(),
-                    ..Default::default()
-                },
-                vec![],
-            )
-            .await
-            .unwrap();
-
-        // Verify actor registered in ActorRegistry — lookup by canonical ActorId
-        let actor_registry = get_actor_registry(&node).await;
-        assert!(
-            actor_registry.lookup_actor(&actor_id).await.is_some(),
-            "spawned actor must appear in registry"
-        );
-    }
-
-    // Known issue: Actors don't terminate automatically - they require explicit stop.
-    // Dropping actor_ref doesn't trigger termination notification.
-    // TODO: Implement proper actor lifecycle with explicit stop_actor() method
-    // that triggers termination notifications to monitors.
-
-    #[tokio::test]
-    async fn test_spawn_actor_detects_panic() {
-        use plexspaces_actor::Actor;
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-        use std::sync::Arc;
-        use tokio::sync::mpsc;
-
-        // NOTE: Panics in actor behavior's handle_message() are caught by Rust
-        // and converted to BehaviorError. To truly test panic detection, we'd
-        // need the panic to happen outside the async function (e.g., in actor loop).
-        // For now, this test verifies graceful shutdown detection.
-        //
-        // True panic detection would require:
-        // 1. Panic in tokio::spawn closure (outside process_message)
-        // 2. Or explicit panic!() in actor loop
-        //
-        // This is a known limitation of the current Erlang-simple approach.
-        // Actual panics would be caught by JoinHandle and classified as "panic"
-        // in spawn_actor's watcher task.
-
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Initialize services
-        node.initialize_services().await.unwrap();
-
-        // Register a BehaviorRegistry so spawn_actor can create "test" actors
-        {
-            use plexspaces_actor::behavior_factory::BehaviorRegistry;
-            let registry = BehaviorRegistry::new();
-            registry
-                .register_simple("test", || {
-                    Box::pin(async move {
-                        Ok(Box::new(plexspaces_actor::behavior::MockBehavior::new())
-                            as Box<dyn plexspaces_actor::Actor>)
-                    })
-                })
-                .await;
-            node.service_locator()
-                .register_behavior_registry(Arc::new(registry))
-                .await;
-        }
-
-        // Get ActorFactory from ServiceLocator using extension trait
-        let service_locator = node.service_locator();
-        use plexspaces_actor::ActorFactory;
-        let actor_factory = service_locator
-            .get_actor_factory()
-            .await
-            .expect("ActorFactory should be registered after initialize_services()");
-
-        // Test code - spawn with explicit tenant/namespace per Rule #6
-        let spawn_ctx = plexspaces_actor::RequestContext::new_without_auth(
-            "test-tenant".to_string(),
-            "default".to_string(),
-        );
-        // actor_id must match spawn spec: type="test", namespace="default"
-        let actor_id =
-            ActorId::new("test-actor", "test", "default", "test-node").expect("valid actor id");
-        let _message_sender = actor_factory
-            .spawn_actor(
-                &spawn_ctx,
-                &plexspaces_actor::ActorSpawnSpec {
-                    identity: Some(plexspaces_proto::common::v1::ActorIdentity {
-                        name: actor_id.name().to_string(),
-                        actor_type: actor_id.actor_type().to_string(),
-                    }),
-                    namespace: actor_id.namespace().to_string(),
-                    tenant_id: "test-tenant".to_string(),
-                    ..Default::default()
-                },
-                vec![],
-            )
-            .await
-            .unwrap();
-
-        // Establish monitoring link — supervisor just needs to be registered to receive __DOWN__.
-        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        register_actor_for_test(node.as_ref(), &supervisor_id, {
-            Arc::new(
-                Mailbox::new(
-                    mailbox_config_default(),
-                    format!("sup-{}", ulid::Ulid::new()),
-                )
-                .await
-                .unwrap(),
-            )
-        })
-        .await;
-        node.monitor(&spawn_ctx, &actor_id, &supervisor_id)
-            .await
-            .unwrap();
-
-        // Verify the spawned actor is in the registry (monitoring only works on activated actors)
-        let actor_registry = get_actor_registry(node.as_ref()).await;
-        assert!(
-            actor_registry.lookup_actor(&actor_id).await.is_some(),
-            "spawned actor must appear in registry before monitoring"
-        );
-    }
-
-    // ============================================================================
-    // Remote Messaging Tests (ActorRef::tell() for remote actors, gRPC client pooling)
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_tell_to_remote_node() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-
-        // Create two nodes
-        let node1 = Arc::new(
-            NodeBuilder::new("node1")
-                .with_in_memory_backends()
-                .build()
-                .await,
-        );
-
-        let node2 = Arc::new(
-            NodeBuilder::new("node2")
-                .with_in_memory_backends()
-                .build()
-                .await,
-        );
-
-        // Note: We no longer use register_remote_node - node discovery goes through ObjectRegistry/NodeRegistry
-        // The registration happens below via ObjectRegistry.register()
-
-        // Register actor on node2
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let remote_actor_id = test_runtime_actor_id("test-actor", "node2");
-        let actor_ref = ActorRef::remote(
-            remote_actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            "node2",
-            node2.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register actor with ActorRegistry on node2
-        register_actor_for_test(&node2, actor_ref.id(), mailbox.clone()).await;
-        let actor_registry2 = get_actor_registry(&node2).await;
-        let ctx = node2
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
-        actor_registry2
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "gen_server".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Register node2 in ObjectRegistry on node1 (so node1 can find it)
-        use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-        // Tenant comes from auth, not config
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
-        let registration = ObjectRegistration {
-            object_type: ObjectType::ObjectTypeNode as i32,
-            object_id: "node2".to_string(),
-            grpc_address: "http://localhost:9999".to_string(),
-            object_category: "Node".to_string(),
-            ..Default::default()
-        };
-        let object_registry = node1.service_locator.get_object_registry().await.unwrap();
-        object_registry.register(&ctx, registration).await.unwrap();
-
-        // Try to route message from node1 to actor on node2
-        let message = Message {
-            id: ulid::Ulid::new().to_string(),
-            payload: vec![1, 2, 3],
-            ..Default::default()
-        };
-
-        // This will fail because we don't have a real gRPC server running
-        // But it exercises the remote routing code path via ActorRef::tell()
-        // Initialize services on node1
-        node1.initialize_services().await.unwrap();
-        let tell_ctx = node1
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_ref = lookup_actor_ref(&node1, &remote_actor_id).await;
-        let result = match actor_ref {
-            Ok(Some(actor_ref)) => actor_ref
-                .tell(&tell_ctx, message)
-                .await
-                .map_err(|e| NodeError::DeliveryFailed(format!("{}", e))),
-            Ok(None) => Err(NodeError::ActorNotFound(remote_actor_id.to_string())),
-            Err(e) => Err(e),
-        };
-
-        // Should fail with network error (no server listening)
-        // The error could be NetworkError, DeliveryFailed, or ActorNotFound (if routing fails before network)
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            matches!(
-                err,
-                NodeError::NetworkError(_)
-                    | NodeError::DeliveryFailed(_)
-                    | NodeError::ActorNotFound(_)
-            ),
-            "Expected NetworkError, DeliveryFailed, or ActorNotFound, got: {:?}",
-            err
-        );
-    }
-
-    #[tokio::test]
-    async fn test_find_actor_remote_via_node_id() {
-        let node = NodeBuilder::new("node1").build().await;
-
-        // Register remote node via NodeRegistry so it ends up in the in-memory cache,
-        // which lookup_node checks even when use_shared_db=false.
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let node_registry = node
-            .service_locator
-            .get_node_registry()
-            .await
-            .expect("NodeRegistry should be registered");
-        node_registry
-            .register_node(
-                &ctx,
-                plexspaces_proto::node::v1::NodeRegistration {
-                    node_id: "node2".to_string(),
-                    node_address: "http://localhost:9999".to_string(),
-                    status: plexspaces_proto::node::v1::NodeStatus::NodeStatusReady as i32,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-
-        let result = node.lookup_node_address(&crate::NodeId::new("node2")).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_find_actor_remote_not_found() {
-        let node = NodeBuilder::new("node1").build().await;
-
-        let result = node
-            .lookup_node_address(&crate::NodeId::new("unknown-node"))
-            .await;
-        assert!(result.is_err(), "Should fail for non-existent remote node");
-    }
-
-    #[tokio::test]
-    async fn test_find_actor_via_tuplespace() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-
-        let node1 = NodeBuilder::new("node1").build().await;
-
-        let node2 = NodeBuilder::new("node2").build().await;
-
-        // Register actor on node2 (this writes to node2's TupleSpace)
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let remote_actor_id = test_runtime_actor_id("test-actor", "node2");
-        let actor_ref = ActorRef::remote(
-            remote_actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            "node2",
-            node2.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register actor with ActorRegistry on node2
-        register_actor_for_test(&node2, actor_ref.id(), mailbox.clone()).await;
-        let actor_registry2 = get_actor_registry(&node2).await;
-        let ctx = node2
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
-        actor_registry2
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "gen_server".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Register node2 in NodeRegistry on node1 so remote node resolution can succeed
-        // (lookup_node checks the in-memory cache, populated by register_node).
-        let ctx = node1
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let node_registry1 = node1
-            .service_locator
-            .get_node_registry()
-            .await
-            .expect("NodeRegistry should be registered");
-        node_registry1
-            .register_node(
-                &ctx,
-                plexspaces_proto::node::v1::NodeRegistration {
-                    node_id: "node2".to_string(),
-                    node_address: "http://localhost:9999".to_string(),
-                    status: plexspaces_proto::node::v1::NodeStatus::NodeStatusReady as i32,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-
-        let result = node1
-            .lookup_node_address(&crate::NodeId::new("node2"))
-            .await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_send_to_remote_node_not_found() {
-        let node = NodeBuilder::new("node1").build().await;
-
-        let message = Message {
-            id: ulid::Ulid::new().to_string(),
-            payload: vec![1, 2, 3],
-            ..Default::default()
-        };
-
-        // Lookup returns Ok(Some(remote_ref)) even when node is unregistered;
-        // the failure surfaces at send time (connection refused / gRPC error).
-        let actor_ref =
-            lookup_actor_ref(&node, &test_runtime_actor_id("test-actor", "unknown-node")).await;
-        assert!(
-            actor_ref.is_ok(),
-            "lookup should succeed (returns remote ref)"
-        );
-        let actor_ref = actor_ref.unwrap();
-        assert!(
-            actor_ref.is_some(),
-            "lookup should return a remote actor ref"
-        );
-
-        // Sending to an unregistered node fails at delivery time
-        let tell_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let send_result = actor_ref.unwrap().tell(&tell_ctx, message).await;
-        assert!(send_result.is_err(), "tell to unknown node should fail");
-    }
-
-    // ============================================================================
-    // Monitoring Infrastructure Tests (monitor, handle_actor_termination)
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_monitor_local_actor() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-        use tokio::sync::mpsc;
-
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register a local actor
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let monitored_actor_id = test_runtime_actor_id("monitored-actor", "test-node");
-        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        let actor_ref = ActorRef::local(
-            monitored_actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
-
-        let actor_registry = get_actor_registry(&node).await;
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
-        actor_registry
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "gen_server".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Register supervisor so it has a mailbox to receive __DOWN__ messages.
-        let sup_mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("sup-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        register_actor_for_test(&node, &supervisor_id, sup_mailbox.clone()).await;
-
-        // Monitor the actor
-        let monitor_ref = node
-            .monitor(&ctx, &monitored_actor_id, &supervisor_id)
-            .await
-            .unwrap();
-
-        // Verify monitor_ref is a ULID (26 characters)
-        assert_eq!(monitor_ref.len(), 26);
-
-        // Notify actor down (via ActorRegistry)
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry
-            .handle_actor_termination(
-                &monitored_actor_id,
-                ExitReason::Error("test reason".to_string()),
-            )
-            .await;
-
-        // Supervisor's mailbox should receive __DOWN__ message.
-        let mut down_msg: Option<Message> = None;
-        for _ in 0..10 {
-            if let Some(msg) = sup_mailbox
-                .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
-                .await
-            {
-                if msg.message_type == "__DOWN__" {
-                    down_msg = Some(msg);
-                    break;
-                }
-            }
-        }
-        let msg = down_msg.expect("Supervisor must receive __DOWN__ message");
-        assert_eq!(
-            msg.headers.get("down_from").map(|s| s.as_str()),
-            Some(monitored_actor_id.to_string().as_str())
-        );
-        assert_eq!(
-            msg.headers.get("down_reason").map(|s| s.as_str()),
-            Some("test reason")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_monitor_local_actor_not_found() {
-        use tokio::sync::mpsc;
-
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Initialize services
-        node.initialize_services().await.unwrap();
-
-        // Try to monitor non-existent actor
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let result = node
-            .monitor(
-                &ctx,
-                &test_runtime_actor_id("nonexistent", "test-node"),
-                &test_runtime_actor_id("supervisor", "test-node"),
-            )
-            .await;
-
-        // Should fail with ActorNotFound
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NodeError::ActorNotFound(_)));
-    }
-
-    #[tokio::test]
-    async fn test_monitor_remote_actor_node_not_connected() {
-        let node = Arc::new(NodeBuilder::new("monitor-test-local").build().await);
-
-        // Try to monitor actor on a node that was never registered anywhere
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let result = node
-            .monitor(
-                &ctx,
-                &test_runtime_actor_id("test-actor", "nonexistent-remote-node"),
-                &test_runtime_actor_id("supervisor", "monitor-test-local"),
-            )
-            .await;
-
-        // Should fail with NodeNotConnected
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            NodeError::NodeNotConnected(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_notify_actor_down_no_monitors() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Notify for actor with no monitors (should not panic)
-        let actor_registry = node.actor_registry().await.unwrap();
-        actor_registry
-            .handle_actor_termination(
-                &test_runtime_actor_id("unmonitored-actor", "test-node"),
-                ExitReason::Error("reason".to_string()),
-            )
-            .await;
-
-        // Should succeed (no-op) - handle_actor_termination doesn't return Result, it's void
-    }
-
-    #[tokio::test]
-    async fn test_handle_actor_termination_multiple_monitors() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-        use tokio::sync::mpsc;
-
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register a local actor
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let watched_actor_id = test_runtime_actor_id("watched-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            watched_actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
-
-        let actor_registry = get_actor_registry(&node).await;
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
-        actor_registry
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Register 3 supervisor actors with mailboxes.
-        let sup1_id = test_runtime_actor_id("sup1", "test-node");
-        let sup2_id = test_runtime_actor_id("sup2", "test-node");
-        let sup3_id = test_runtime_actor_id("sup3", "test-node");
-
-        let sup1_mbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("sup1-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let sup2_mbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("sup2-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let sup3_mbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("sup3-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        register_actor_for_test(&node, &sup1_id, sup1_mbox.clone()).await;
-        register_actor_for_test(&node, &sup2_id, sup2_mbox.clone()).await;
-        register_actor_for_test(&node, &sup3_id, sup3_mbox.clone()).await;
-
-        node.monitor(&ctx, &watched_actor_id, &sup1_id)
-            .await
-            .unwrap();
-        node.monitor(&ctx, &watched_actor_id, &sup2_id)
-            .await
-            .unwrap();
-        node.monitor(&ctx, &watched_actor_id, &sup3_id)
-            .await
-            .unwrap();
-
-        // Notify actor down
-        let actor_registry = node.actor_registry().await.unwrap();
-        actor_registry
-            .handle_actor_termination(&watched_actor_id, ExitReason::Error("crashed".to_string()))
-            .await;
-
-        // All 3 supervisor mailboxes should receive __DOWN__ messages.
-        for (sup_mbox, sup_name) in [
-            (&sup1_mbox, "sup1"),
-            (&sup2_mbox, "sup2"),
-            (&sup3_mbox, "sup3"),
-        ] {
-            let mut found = false;
-            for _ in 0..10 {
-                if let Some(msg) = sup_mbox
-                    .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
-                    .await
-                {
-                    if msg.message_type == "__DOWN__" {
-                        assert_eq!(
-                            msg.headers.get("down_reason").map(|s| s.as_str()),
-                            Some("crashed"),
-                            "{} should get 'crashed' reason",
-                            sup_name
-                        );
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            assert!(found, "{} must receive __DOWN__", sup_name);
-        }
-    }
-
-    // ============================================================================
-    // Lifecycle Event Tests (subscribe/unsubscribe/publish)
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_lifecycle_event_subscription() {
-        use tokio::sync::mpsc;
-
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Initialize services
-        node.initialize_services().await.unwrap();
-
-        // Create subscription channel
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        // Subscribe
-        node.subscribe_lifecycle_events(tx).await;
-
-        // Publish a test event
-        let event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: "test-actor@test-node".to_string(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            event_type: Some(plexspaces_proto::actor_lifecycle_event::EventType::Created(
-                plexspaces_proto::v1::actor::ActorCreated {},
-            )),
-        };
-
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry.publish_lifecycle_event(event.clone()).await;
-
-        // Should receive event
-        let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(received.actor_id, "test-actor@test-node");
-    }
-
-    #[tokio::test]
-    async fn test_lifecycle_event_unsubscribe() {
-        use tokio::sync::mpsc;
-
-        let node = Arc::new(
-            NodeBuilder::new("test-node")
-                .with_in_memory_backends()
-                .build()
-                .await,
-        );
-        node.initialize_services().await.unwrap();
-
-        // Create subscription channel
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        // Subscribe
-        node.subscribe_lifecycle_events(tx).await;
-
-        // Publish one event and confirm subscription is active first.
-        let first_event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: "test-actor@test-node".to_string(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            event_type: Some(plexspaces_proto::actor_lifecycle_event::EventType::Created(
-                plexspaces_proto::v1::actor::ActorCreated {},
-            )),
-        };
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry.publish_lifecycle_event(first_event).await;
-        let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), rx.recv())
-            .await
-            .unwrap();
-        assert!(
-            received.is_some(),
-            "subscriber should receive event before unsubscribe"
-        );
-
-        // Unsubscribe
-        node.unsubscribe_lifecycle_events().await;
-
-        // Publish another event after unsubscribe.
-        let event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: "test-actor@test-node".to_string(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            event_type: Some(plexspaces_proto::actor_lifecycle_event::EventType::Created(
-                plexspaces_proto::v1::actor::ActorCreated {},
-            )),
-        };
-
-        actor_registry.publish_lifecycle_event(event).await;
-
-        // After unsubscribe, no new event should be delivered.
-        let after_unsubscribe =
-            tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await;
-        assert!(
-            !matches!(after_unsubscribe, Ok(Some(_))),
-            "subscriber should not receive events after unsubscribe"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_handle_lifecycle_event_terminated() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-        use tokio::sync::mpsc;
-
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register actor and monitor it
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let monitored_actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            monitored_actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
-
-        let actor_registry = get_actor_registry(&node).await;
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
-        actor_registry
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        let sup_mbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("sup-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
-        node.monitor(&ctx, &monitored_actor_id, &supervisor_id)
-            .await
-            .unwrap();
-
-        // Create Terminated event
-        let event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: monitored_actor_id.as_str().to_string(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            event_type: Some(
-                plexspaces_proto::actor_lifecycle_event::EventType::Terminated(
-                    plexspaces_proto::v1::actor::ActorTerminated {
-                        reason: "normal".to_string(),
-                    },
-                ),
-            ),
-        };
-
-        // Handle the event
-        node.handle_lifecycle_event(event).await.unwrap();
-
-        // Supervisor mailbox should receive __DOWN__ message.
-        let mut down: Option<Message> = None;
-        for _ in 0..10 {
-            if let Some(msg) = sup_mbox
-                .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
-                .await
-            {
-                if msg.message_type == "__DOWN__" {
-                    down = Some(msg);
-                    break;
-                }
-            }
-        }
-        let msg = down.expect("Supervisor must receive __DOWN__");
-        assert_eq!(
-            msg.headers.get("down_reason").map(|s| s.as_str()),
-            Some("normal")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_handle_lifecycle_event_failed() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-        use tokio::sync::mpsc;
-
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register actor and monitor it
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let monitored_actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            monitored_actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
-
-        let actor_registry = get_actor_registry(&node).await;
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
-        actor_registry
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        let sup_mbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("sup-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
-        node.monitor(&ctx, &monitored_actor_id, &supervisor_id)
-            .await
-            .unwrap();
-
-        // Create Failed event
-        let event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: monitored_actor_id.as_str().to_string(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            event_type: Some(plexspaces_proto::actor_lifecycle_event::EventType::Failed(
-                plexspaces_proto::v1::actor::ActorFailed {
-                    error: "panic: index out of bounds".to_string(),
-                    stack_trace: String::new(),
-                },
-            )),
-        };
-
-        // Handle the event
-        node.handle_lifecycle_event(event).await.unwrap();
-
-        // Supervisor mailbox should receive __DOWN__ message.
-        let mut down: Option<Message> = None;
-        for _ in 0..10 {
-            if let Some(msg) = sup_mbox
-                .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
-                .await
-            {
-                if msg.message_type == "__DOWN__" {
-                    down = Some(msg);
-                    break;
-                }
-            }
-        }
-        let msg = down.expect("Supervisor must receive __DOWN__");
-        assert_eq!(
-            msg.headers.get("down_reason").map(|s| s.as_str()),
-            Some("panic: index out of bounds")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_handle_lifecycle_event_other() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Create Starting event (non-terminal event)
-        let event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: "test-actor@test-node".to_string(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            event_type: Some(
-                plexspaces_proto::actor_lifecycle_event::EventType::Starting(
-                    plexspaces_proto::v1::actor::ActorStarting {},
-                ),
-            ),
-        };
-
-        // Handle the event (should be no-op for non-terminal events)
-        let result = node.handle_lifecycle_event(event).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_stats_tracking() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-
-        let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let node = node_arc.as_ref();
-
-        // Initial stats
-        let node_metrics = node.metrics().await;
-        assert_eq!(node_metrics.messages_routed, 0);
-        assert_eq!(node_metrics.local_deliveries, 0);
-        assert_eq!(node_metrics.active_actors, 0);
-
-        // Register an actor
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register with ActorRegistry (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
-
-        let actor_registry = get_actor_registry(&node).await;
-        let ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
-        actor_registry
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id,
-                    sender,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // active_actors is only updated when actors are spawned via ActorFactory, not when registered
-        // So we check that the actor is registered instead
-        let actor_registry = get_actor_registry(&node).await;
-        let lookup_result = actor_registry.lookup_actor(actor_ref.id()).await;
-        assert!(lookup_result.is_some(), "Actor should be registered");
-
-        // Send local message via ActorRef directly to mailbox
-        let message = Message {
-            id: ulid::Ulid::new().to_string(),
-            payload: vec![1, 2, 3],
-            ..Default::default()
-        };
-        actor_ref.tell(&ctx, message).await.unwrap();
-
-        // Verify delivery: ActorRef::tell() enqueues into the mailbox.
-        // Routing counters (messages_routed, local_deliveries) are only updated
-        // when messages flow through Node::route_message() / routing.rs — not here.
-        let delivered = mailbox
-            .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(200)))
-            .await;
-        assert!(
-            delivered.is_some(),
-            "message should be delivered to mailbox"
-        );
-
-        // Unregister actor
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry
-            .unregister_with_cleanup(actor_ref.id())
-            .await
-            .unwrap();
-
-        // Check stats updated
-        let node_metrics = node.metrics().await;
-        assert_eq!(node_metrics.active_actors, 0);
-    }
-
-    // ============================================================================
-    // Phase 3: Actor Resource Requirements Tests
-    // ============================================================================
-
-    /// Helper to create an actor config with resource requirements
-    fn create_actor_config_with_resources(
-        cpu_cores: f64,
-        memory_bytes: u64,
-        disk_bytes: u64,
-        gpu_count: u32,
-    ) -> plexspaces_proto::v1::actor::ActorConfig {
-        use plexspaces_proto::{
-            common::v1::ResourceSpec,
-            v1::actor::{
-                ActorConfig, ActorResourceRequirements, NodePlacement, NodePlacementStrategy,
-            },
-        };
-
-        let resource_requirements = ActorResourceRequirements {
-            placement: Some(NodePlacement {
-                strategy: NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
-                cluster: String::new(),
-                node_ids: vec![],
-                required_labels: std::collections::HashMap::new(),
-                avoid_node_ids: vec![],
-                resource_requirements: Some(ResourceSpec {
-                    cpu_cores,
-                    memory_bytes,
-                    disk_bytes,
-                    gpu_count,
-                    gpu_type: String::new(),
-                }),
-                affinity_labels: std::collections::HashMap::new(),
-            }),
-        };
-
-        ActorConfig {
-            mailbox_timeout: None,
-            max_mailbox_size: 1000,
-            enable_persistence: false,
-            checkpoint_interval: None,
-            restart_policy: None,
-            supervision_strategy: 0,
-            properties: std::collections::HashMap::new(),
-            stateless_worker_config: None,
-            data_parallel_config: None,
-            state_management_mode: 0,
-            consistency_level: 0,
-            resource_requirements: Some(resource_requirements),
-            actor_groups: vec![],
-            config_schema_version: 1,
-        }
-    }
-
-    #[tokio::test]
-    async fn test_register_actor_with_config() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        let config =
-            create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
-
-        // Update actor registration with config (idempotent - actor already registered)
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor_ref.id().clone(),
-                        sender,
-                        actor_type: "test_actor".to_string(),
-                        config: Some(config.clone()),
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-
-        // Verify config is stored
-        let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
-        let actor_configs = actor_configs_arc.read().await;
-        assert!(actor_configs.contains_key(actor_ref.id()));
-        let stored_config = actor_configs.get(actor_ref.id()).unwrap();
-        assert_eq!(
-            stored_config
-                .resource_requirements
-                .as_ref()
-                .unwrap()
-                .placement
-                .as_ref()
-                .unwrap()
-                .resource_requirements
-                .as_ref()
-                .unwrap()
-                .cpu_cores,
-            2.0
-        );
-    }
-
-    #[tokio::test]
-    async fn test_register_actor_without_config() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Actor already registered - no need to update config
-        let actor_registry = get_actor_registry(&node).await;
-
-        // Verify config is not stored
-        let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
-        let actor_configs = actor_configs_arc.read().await;
-        assert!(!actor_configs.contains_key(actor_ref.id()));
-    }
-
-    #[tokio::test]
-    async fn test_unregister_actor_removes_config() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        let config = create_actor_config_with_resources(1.0, 1024 * 1024 * 256, 0, 0);
-
-        // Register actor with config
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor_ref.id().clone(),
-                        sender,
-                        actor_type: "test_actor".to_string(),
-                        config: Some(config),
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-
-        // Verify config is stored
-        {
-            let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
-            let actor_configs = actor_configs_arc.read().await;
-            assert!(actor_configs.contains_key(actor_ref.id()));
-        }
-
-        // Unregister actor
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry
-            .unregister_with_cleanup(actor_ref.id())
-            .await
-            .unwrap();
-
-        // Verify config is removed
-        let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
-        let actor_configs = actor_configs_arc.read().await;
-        assert!(!actor_configs.contains_key(actor_ref.id()));
-    }
-
-    #[tokio::test]
-    async fn test_calculate_node_capacity_with_actors() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Register first actor with resources
-        let mailbox1 = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-1-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor1_id = test_runtime_actor_id("actor-1", "test-node");
-        let actor1_ref = ActorRef::local(
-            actor1_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox1.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper1 = Arc::new(ActorRef::local(
-            actor1_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox1.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor1_ref.id().clone(),
-                    sender: wrapper1,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-        let config1 =
-            create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender1) = actor_registry.lookup_actor(&actor1_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor1_ref.id().clone(),
-                        sender: sender1,
-                        actor_type: "test_actor".to_string(),
-                        config: Some(config1),
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-
-        // Register second actor with resources
-        let mailbox2 = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-2-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor2_id = test_runtime_actor_id("actor-2", "test-node");
-        let actor2_ref = ActorRef::local(
-            actor2_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox2.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        let config2 =
-            create_actor_config_with_resources(1.5, 1024 * 1024 * 256, 512 * 1024 * 1024, 1);
-        // Register actor2 with MessageSender first
-        let wrapper2 = Arc::new(ActorRef::local(
-            actor2_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox2.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor2_ref.id().clone(),
-                    sender: wrapper2,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender2) = actor_registry.lookup_actor(&actor2_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor2_ref.id().clone(),
-                        sender: sender2,
-                        actor_type: "test_actor".to_string(),
-                        config: Some(config2),
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-
-        // Calculate capacity
-        let capacity = node.calculate_node_capacity().await;
-
-        // Verify allocated resources are summed correctly
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 3.5); // 2.0 + 1.5
-        assert_eq!(
-            allocated.memory_bytes,
-            1024 * 1024 * 512 + 1024 * 1024 * 256
-        ); // 512MB + 256MB
-        assert_eq!(allocated.disk_bytes, 1024 * 1024 * 1024 + 512 * 1024 * 1024); // 1GB + 512MB
-        assert_eq!(allocated.gpu_count, 1); // 0 + 1
-
-        // Verify available resources are calculated correctly
-        let available = capacity.available.as_ref().unwrap();
-        let total = capacity.total.as_ref().unwrap();
-        assert_eq!(available.cpu_cores, total.cpu_cores - allocated.cpu_cores);
-        assert_eq!(
-            available.memory_bytes,
-            total.memory_bytes - allocated.memory_bytes
-        );
-    }
-
-    #[tokio::test]
-    async fn test_calculate_node_capacity_without_actors() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Calculate capacity with no actors
-        let capacity = node.calculate_node_capacity().await;
-
-        // Verify allocated resources are zero
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 0.0);
-        assert_eq!(allocated.memory_bytes, 0);
-        assert_eq!(allocated.disk_bytes, 0);
-        assert_eq!(allocated.gpu_count, 0);
-
-        // Verify available equals total
-        let available = capacity.available.as_ref().unwrap();
-        let total = capacity.total.as_ref().unwrap();
-        assert_eq!(available.cpu_cores, total.cpu_cores);
-        assert_eq!(available.memory_bytes, total.memory_bytes);
-    }
-
-    #[tokio::test]
-    async fn test_calculate_node_capacity_with_actor_without_resources() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Register actor without resource requirements
-        let mailbox = Arc::new(
-            Mailbox::new(
-                plexspaces_mailbox::mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("actor-1", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-        let mut config = plexspaces_proto::v1::actor::ActorConfig::default();
-        config.resource_requirements = None; // No resource requirements
-        config.config_schema_version = 1;
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor_ref.id().clone(),
-                        sender,
-                        actor_type: "test_actor".to_string(),
-                        config: Some(config),
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-
-        // Calculate capacity
-        let capacity = node.calculate_node_capacity().await;
-
-        // Verify allocated resources are still zero (actor has no requirements)
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 0.0);
-        assert_eq!(allocated.memory_bytes, 0);
-    }
-
-    #[tokio::test]
-    async fn test_calculate_node_capacity_after_unregister() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Register actor with resources
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("actor-1", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 0, 0);
-        let actor_registry = get_actor_registry(&node).await;
-
-        // Register actor first
-        // Tenant comes from auth, not config
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
-        let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
-        actor_registry
-            .register_actor(
-                &ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_id.clone(),
-                    sender: sender.clone(),
-                    actor_type: "test_actor".to_string(),
-                    config: Some(config),
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-
-        // Verify allocated resources
-        let capacity = node.calculate_node_capacity().await;
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 2.0);
-
-        // Unregister actor
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry
-            .unregister_with_cleanup(actor_ref.id())
-            .await
-            .unwrap();
-
-        // Verify allocated resources are back to zero
-        let capacity = node.calculate_node_capacity().await;
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 0.0);
-        assert_eq!(allocated.memory_bytes, 0);
-    }
-
-    #[tokio::test]
-    async fn test_calculate_node_capacity_with_partial_resource_spec() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Create config with only CPU specified (no memory/disk)
-        use plexspaces_proto::{
-            common::v1::ResourceSpec,
-            v1::actor::{ActorConfig, ActorResourceRequirements},
-        };
-
-        let resources = ResourceSpec {
-            cpu_cores: 1.0,
-            memory_bytes: 0,
-            disk_bytes: 0,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        };
-
-        let resource_requirements = ActorResourceRequirements {
-            placement: Some(plexspaces_proto::v1::actor::NodePlacement {
-                strategy: plexspaces_proto::v1::actor::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
-                cluster: String::new(),
-                node_ids: vec![],
-                required_labels: std::collections::HashMap::new(),
-                avoid_node_ids: vec![],
-                resource_requirements: Some(resources),
-                affinity_labels: std::collections::HashMap::new(),
-            }),
-        };
-
-        let mut config = ActorConfig::default();
-        config.resource_requirements = Some(resource_requirements);
-        config.config_schema_version = 1;
-
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-        let mailbox = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_id = test_runtime_actor_id("actor-1", "test-node");
-        let actor_ref = ActorRef::local(
-            actor_id,
-            "".to_string(),
-            "".to_string(),
-            mailbox.clone(),
-            node.service_locator(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-        // Register actor with MessageSender (mailbox is internal)
-
-        use plexspaces_actor::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            "".to_string(), // test tenant
-            "".to_string(), // test namespace
-            mailbox.clone(),
-            node.service_locator().clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - registering test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        actor_registry
-            .register_actor(
-                &internal_ctx,
-                ActorRegistrationParams {
-                    actor_id: actor_ref.id().clone(),
-                    sender: wrapper,
-                    actor_type: "test_actor".to_string(),
-                    config: None,
-                    instance: None,
-                    behavior_kind: None,
-                },
-            )
-            .await;
-        let actor_registry = get_actor_registry(&node).await;
-        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
-            // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry
-                .register_actor(
-                    &ctx,
-                    ActorRegistrationParams {
-                        actor_id: actor_ref.id().clone(),
-                        sender,
-                        actor_type: "test_actor".to_string(),
-                        config: Some(config),
-                        instance: None,
-                        behavior_kind: None,
-                    },
-                )
-                .await;
-        }
-
-        // Calculate capacity
-        let capacity = node.calculate_node_capacity().await;
-        let allocated = capacity.allocated.as_ref().unwrap();
-
-        // Verify only CPU is allocated
-        assert_eq!(allocated.cpu_cores, 1.0);
-        assert_eq!(allocated.memory_bytes, 0);
-        assert_eq!(allocated.disk_bytes, 0);
-    }
-
-    // ============================================================================
-    // Application Lifecycle Tests (Erlang/OTP-style)
-    // ============================================================================
-
-    use async_trait::async_trait;
-    use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-    use plexspaces_common::{RequestContext, RequestContextExt};
-    use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
-
-    fn app_ctx(name: &str) -> RequestContext {
-        RequestContext::new_without_auth(String::new(), name.to_string())
-    }
-
-    // Mock application for testing
-    struct MockTestApplication {
-        name: String,
-        should_fail_start: bool,
-        should_fail_stop: bool,
-        start_called: Arc<RwLock<bool>>,
-        stop_called: Arc<RwLock<bool>>,
-    }
-
-    impl MockTestApplication {
-        fn new(name: &str) -> Self {
-            Self {
-                name: name.to_string(),
-                should_fail_start: false,
-                should_fail_stop: false,
-                start_called: Arc::new(RwLock::new(false)),
-                stop_called: Arc::new(RwLock::new(false)),
-            }
-        }
-
-        fn new_failing_start(name: &str) -> Self {
-            Self {
-                name: name.to_string(),
-                should_fail_start: true,
-                should_fail_stop: false,
-                start_called: Arc::new(RwLock::new(false)),
-                stop_called: Arc::new(RwLock::new(false)),
-            }
-        }
-
-        fn new_failing_stop(name: &str) -> Self {
-            Self {
-                name: name.to_string(),
-                should_fail_start: false,
-                should_fail_stop: true,
-                start_called: Arc::new(RwLock::new(false)),
-                stop_called: Arc::new(RwLock::new(false)),
-            }
-        }
-
-        async fn was_start_called(&self) -> bool {
-            *self.start_called.read().await
-        }
-
-        async fn was_stop_called(&self) -> bool {
-            *self.stop_called.read().await
-        }
-    }
-
-    #[async_trait]
-    impl Application for MockTestApplication {
-        fn name(&self) -> &str {
-            &self.name
-        }
-
-        fn version(&self) -> &str {
-            "0.1.0"
-        }
-
-        async fn start(&mut self, node: Arc<dyn ApplicationNode>) -> Result<(), ApplicationError> {
-            *self.start_called.write().await = true;
-            tracing::warn!("MockApp '{}' starting on node: {}", self.name, node.id());
-            if self.should_fail_start {
-                Err(ApplicationError::StartupFailed("mock failure".to_string()))
-            } else {
-                Ok(())
-            }
-        }
-
-        async fn stop(&mut self) -> Result<(), ApplicationError> {
-            *self.stop_called.write().await = true;
-            tracing::warn!("MockApp '{}' stopping", self.name);
-            if self.should_fail_stop {
-                Err(ApplicationError::ShutdownFailed("mock failure".to_string()))
-            } else {
-                Ok(())
-            }
-        }
-
-        async fn health_check(&self) -> HealthStatus {
-            HealthStatus::HealthStatusHealthy
-        }
-
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
-
-    #[tokio::test]
-    async fn test_register_application() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-
-        // Verify application is registered
-        let state = node.application_manager().get_state("test-app").await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateCreated));
-    }
-
-    #[tokio::test]
-    async fn test_register_duplicate_application() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let app1 = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager()
-            .register(&app_ctx("test-app"), app1)
-            .await
-            .unwrap();
-
-        let app2 = Box::new(MockTestApplication::new("test-app"));
-        let result = node
-            .application_manager()
-            .register(&app_ctx("test-app"), app2)
-            .await;
-
-        // Should fail with duplicate error
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("already registered"));
-    }
-
-    #[tokio::test]
-    async fn test_start_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        let start_called = app.start_called.clone();
-
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("test-app").await.unwrap();
-
-        // Verify application started
-        let state = node.application_manager().get_state("test-app").await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateRunning));
-
-        // Verify start was called
-        assert!(*start_called.read().await);
-    }
-
-    #[tokio::test]
-    async fn test_start_application_failure() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new_failing_start("test-app"));
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        let result = node.application_manager().start("test-app").await;
-
-        // Should fail
-        assert!(result.is_err());
-
-        // State should be Failed
-        let state = node.application_manager().get_state("test-app").await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
-    }
-
-    #[tokio::test]
-    async fn test_stop_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        let stop_called = app.stop_called.clone();
-
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("test-app").await.unwrap();
-        node.application_manager()
-            .stop("test-app", tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-
-        // Verify application stopped
-        let state = node.application_manager().get_state("test-app").await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateStopped));
-
-        // Verify stop was called
-        assert!(*stop_called.read().await);
-    }
-
-    #[tokio::test]
-    async fn test_stop_application_failure() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new_failing_stop("test-app"));
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("test-app").await.unwrap();
-
-        let result = node
-            .application_manager()
-            .stop("test-app", tokio::time::Duration::from_secs(5))
-            .await;
-
-        // Should fail
-        assert!(result.is_err());
-
-        // State should be Failed
-        let state = node.application_manager().get_state("test-app").await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_multiple_applications() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register and start 3 applications
-        let apps = vec![
-            Box::new(MockTestApplication::new("app1")) as Box<dyn Application>,
-            Box::new(MockTestApplication::new("app2")) as Box<dyn Application>,
-            Box::new(MockTestApplication::new("app3")) as Box<dyn Application>,
-        ];
-
-        for app in apps {
-            node.application_manager()
-                .register(&app_ctx(app.name()), app)
-                .await
-                .unwrap();
-        }
-
-        node.application_manager()
-            .ensure_node_context(node.clone())
-            .await;
-        node.application_manager().start("app1").await.unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone())
-            .await;
-        node.application_manager().start("app2").await.unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("app3").await.unwrap();
-
-        // Shutdown all applications
-        node.shutdown(tokio::time::Duration::from_secs(10))
-            .await
-            .unwrap();
-
-        // Verify all applications stopped
-        assert_eq!(
-            node.application_manager().get_state("app1").await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-        assert_eq!(
-            node.application_manager().get_state("app2").await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-        assert_eq!(
-            node.application_manager().get_state("app3").await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-
-        // Verify shutdown flag set
-        assert!(node.is_shutdown_requested().await);
-    }
-
-    #[tokio::test]
-    async fn test_application_node_trait_implementation() {
-        use crate::NodeBuilder;
-        let node = NodeBuilder::new("test-node")
-            .with_listen_addr("0.0.0.0:9999")
-            .build()
-            .await;
-
-        // Test ApplicationNode trait methods (uses trait methods, not Node methods)
-        let node_ref: &dyn ApplicationNode = &node;
-        assert_eq!(node_ref.id(), "test-node");
-        assert_eq!(node_ref.listen_addr(), "0.0.0.0:9999");
-    }
-
-    #[tokio::test]
-    async fn test_start_nonexistent_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        let result = node.application_manager().start("nonexistent").await;
-
-        // Should fail with not found error
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_stop_nonexistent_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let result = node
-            .application_manager()
-            .stop("nonexistent", tokio::time::Duration::from_secs(5))
-            .await;
-
-        // Should fail with not found error
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_application_lifecycle_full_cycle() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("lifecycle-test"));
-        let start_called = app.start_called.clone();
-        let stop_called = app.stop_called.clone();
-
-        // Full lifecycle: register -> start -> stop
-        node.application_manager()
-            .register(&app_ctx("lifecycle-test"), app)
-            .await
-            .unwrap();
-        assert_eq!(
-            node.application_manager().get_state("lifecycle-test").await,
-            Some(ApplicationState::ApplicationStateCreated)
-        );
-
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager()
-            .start("lifecycle-test")
-            .await
-            .unwrap();
-        assert_eq!(
-            node.application_manager().get_state("lifecycle-test").await,
-            Some(ApplicationState::ApplicationStateRunning)
-        );
-        assert!(*start_called.read().await);
-
-        node.application_manager()
-            .stop("lifecycle-test", tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-        assert_eq!(
-            node.application_manager().get_state("lifecycle-test").await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-        assert!(*stop_called.read().await);
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_with_partial_failure() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register 2 apps: one normal, one failing to stop
-        let app1 = Box::new(MockTestApplication::new("good-app")) as Box<dyn Application>;
-        let app2 =
-            Box::new(MockTestApplication::new_failing_stop("bad-app")) as Box<dyn Application>;
-
-        node.application_manager()
-            .register(&app_ctx("good-app"), app1)
-            .await
-            .unwrap();
-        node.application_manager()
-            .register(&app_ctx("bad-app"), app2)
-            .await
-            .unwrap();
-
-        node.application_manager()
-            .ensure_node_context(node.clone())
-            .await;
-        node.application_manager().start("good-app").await.unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("bad-app").await.unwrap();
-
-        // Shutdown should fail due to bad-app
-        let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
-        assert!(result.is_err());
-
-        // good-app should still be stopped
-        assert_eq!(
-            node.application_manager().get_state("good-app").await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-
-        // bad-app should be in Failed state
-        assert_eq!(
-            node.application_manager().get_state("bad-app").await,
-            Some(ApplicationState::ApplicationStateFailed)
-        );
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_request_flag() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Initially not requested
-        assert!(!node.is_shutdown_requested().await);
-
-        // Register and start an app
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("test-app").await.unwrap();
-
-        // Shutdown
-        node.shutdown(tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-
-        // Now shutdown is requested
-        assert!(node.is_shutdown_requested().await);
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_with_no_applications() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Initialize services
-        node.initialize_services().await.unwrap();
-
-        // Shutdown with no apps should succeed
-        let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
-        assert!(result.is_ok());
-
-        // Shutdown flag should be set
-        assert!(node.is_shutdown_requested().await);
-    }
-
-    #[tokio::test]
-    async fn test_application_manager_accessor() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Get application manager reference
-        let manager = node.application_manager();
-
-        // Verify it's the same manager (returns empty list initially)
-        let apps = manager.list_applications().await;
-        assert_eq!(apps.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_multiple_start_attempts() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-
-        // First start succeeds
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("test-app").await.unwrap();
-        assert_eq!(
-            node.application_manager().get_state("test-app").await,
-            Some(ApplicationState::ApplicationStateRunning)
-        );
-
-        // Second start should fail (not in Created state)
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        let result = node.application_manager().start("test-app").await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("state"));
-    }
-
-    #[tokio::test]
-    async fn test_stop_already_stopped_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("test-app").await.unwrap();
-
-        // First stop succeeds
-        node.application_manager()
-            .stop("test-app", tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-        assert_eq!(
-            node.application_manager().get_state("test-app").await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-
-        // Second stop should succeed (already stopped)
-        let result = node
-            .application_manager()
-            .stop("test-app", tokio::time::Duration::from_secs(5))
-            .await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_stops_all_applications() {
-        let node = Arc::new(
-            NodeBuilder::new("test-node")
-                .with_in_memory_backends()
-                .build()
-                .await,
-        );
-
-        // Track which apps were stopped
-        let stopped_apps = Arc::new(RwLock::new(Vec::new()));
-
-        // Create apps that record when they stop
-        struct StopTrackingApp {
-            name: String,
-            stopped_apps: Arc<RwLock<Vec<String>>>,
-        }
-
-        #[async_trait]
-        impl Application for StopTrackingApp {
-            fn name(&self) -> &str {
-                &self.name
-            }
-
-            fn version(&self) -> &str {
-                "0.1.0"
-            }
-
-            async fn start(
-                &mut self,
-                _node: Arc<dyn ApplicationNode>,
-            ) -> Result<(), ApplicationError> {
-                Ok(())
-            }
-
-            async fn stop(&mut self) -> Result<(), ApplicationError> {
-                self.stopped_apps.write().await.push(self.name.clone());
-                Ok(())
-            }
-
-            async fn health_check(&self) -> HealthStatus {
-                HealthStatus::HealthStatusHealthy
-            }
-
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-        }
-
-        // Register and start multiple apps
-        for i in 1..=3 {
-            let app = Box::new(StopTrackingApp {
-                name: format!("app{}", i),
-                stopped_apps: stopped_apps.clone(),
-            }) as Box<dyn Application>;
-            node.application_manager()
-                .register(&app_ctx(&format!("app{}", i)), app)
-                .await
-                .unwrap();
-                node.application_manager()
-                .ensure_node_context(
-                    node.clone() as Arc<dyn plexspaces_application::ApplicationNode>
-                )
-                .await;
-            node.application_manager()
-                .start(&format!("app{}", i))
-                .await
-                .unwrap();
-        }
-
-        // Shutdown
-        node.shutdown(tokio::time::Duration::from_secs(10))
-            .await
-            .unwrap();
-
-        // Verify all apps were stopped (order not guaranteed due to HashMap)
-        let stopped = stopped_apps.read().await;
-        assert_eq!(stopped.len(), 3);
-        assert!(stopped.contains(&"app1".to_string()));
-        assert!(stopped.contains(&"app2".to_string()));
-        assert!(stopped.contains(&"app3".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_stops_manual_applications_with_runtime_only_release_spec() {
-        let node = Arc::new(
-            NodeBuilder::new("test-node")
-                .with_in_memory_backends()
-                .build()
-                .await,
-        );
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        let stop_called = app.stop_called.clone();
-
-        node.application_manager()
-            .register(&app_ctx("test-app"), app)
-            .await
-            .unwrap();
-        node.application_manager()
-            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
-            .await;
-        node.application_manager().start("test-app").await.unwrap();
-
-        node.shutdown(tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-
-        assert_eq!(
-            node.application_manager().get_state("test-app").await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-        assert!(
-            *stop_called.read().await,
-            "shutdown should stop manually registered applications even when the node only carries runtime configuration in ReleaseSpec"
-        );
-    }
-}
+mod tests;
 
 // ============================================================================
 // Linking notes

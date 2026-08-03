@@ -70,24 +70,26 @@ class AbstractionsChannel:
 
 def exercise_services() -> dict:
     mock_host = _get_host()
-    host.kv_put("abstractions/config", "ready")
-    host.ts.write(["abstractions", "task", "t-1"])
-    tuple_value = host.ts.read(["abstractions", "task", None])
-    taken_value = host.ts.take(["abstractions", "task", None])
-    host.blob_upload("abstractions/blob-1", "aGVsbG8=", "text/plain")
-    blob_value = host.blob_download("abstractions/blob-1")
+    host.kv.put("abstractions/config", "ready")
+    mock_host.ts_write(json.dumps(["abstractions", "task", "t-1"]))
+    raw_read = mock_host.ts_read(json.dumps(["abstractions", "task", None]))
+    tuple_value = json.loads(raw_read) if raw_read else None
+    raw_take = mock_host.ts_take(json.dumps(["abstractions", "task", None]))
+    taken_value = json.loads(raw_take) if raw_take else None
+    mock_host.blob_upload("abstractions/blob-1", "aGVsbG8=", "text/plain")
+    blob_value = mock_host.blob_download("abstractions/blob-1")
     host.process_groups.join("abstractions-group")
     members = host.process_groups.members("abstractions-group")
     host.send("abstractions-channel", "publish", {"channel": "alerts", "body": "direct"})
     host.process_groups.broadcast("abstractions-group", "notify", {"ok": True})
     timer_id = host.send_after(250, "tick", {"kind": "timer"})
-    spawned_id = host.spawn("abstractions", "abstractions-actor", {"count": 1})
+    spawned_id = host.spawn("abstractions", "abstractions-actor", args={"count": "1"})
     host.stop(spawned_id)
     return {
-        "kv_keys": json.loads(host.kv_list("abstractions/")),
+        "kv_keys": host.kv.list("abstractions/"),
         "tuple_read": tuple_value,
         "tuple_take": taken_value,
-        "blob_ids": json.loads(host.blob_list("abstractions/")),
+        "blob_ids": json.loads(mock_host.blob_list("abstractions/")),
         "blob_value": blob_value,
         "members": members,
         "last_send": mock_host._sent_messages[-1],

@@ -828,12 +828,12 @@ pub fn create_facets_with_storage(
 #[cfg(feature = "native")]
 pub use plexspaces_journaling::TimerFacet;
 
+#[cfg(feature = "native")]
+pub use plexspaces_facet::VirtualActorLifecycleState;
 /// Re-export VirtualActorFacet for Orleans-style virtual actor lifecycle
 /// Virtual actors are always addressable but activated on-demand
 #[cfg(feature = "native")]
 pub use plexspaces_journaling::{ActivationStrategy, VirtualActorFacet};
-#[cfg(feature = "native")]
-pub use plexspaces_facet::VirtualActorLifecycleState;
 
 /// Re-export DurabilityFacet for durable execution (journaling)
 #[cfg(feature = "native")]

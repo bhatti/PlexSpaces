@@ -164,26 +164,16 @@ impl SqliteKVStore {
                 .execute(&pool).await.map_err(|e| KVError::BackendError(e.to_string()))?;
         }
 
-        // Enable SQLite performance optimizations
-        // WAL mode: Better concurrency for read-heavy workloads
-        sqlx::query("PRAGMA journal_mode=WAL")
-            .execute(&pool)
-            .await?;
-
-        // Cache size: 100MB for better read performance
-        sqlx::query("PRAGMA cache_size=-100000")
-            .execute(&pool)
-            .await?;
-
-        // Synchronous mode: NORMAL is safe with WAL
-        sqlx::query("PRAGMA synchronous=NORMAL")
-            .execute(&pool)
-            .await?;
-
-        // Memory-mapped I/O for faster reads (256MB)
-        sqlx::query("PRAGMA mmap_size=268435456")
-            .execute(&pool)
-            .await?;
+        // Production SQLite PRAGMAs (ref: micrologics.org/blog/sqlite-in-production-*)
+        sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await?;
+        sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await?;
+        sqlx::query("PRAGMA busy_timeout=500").execute(&pool).await?;
+        sqlx::query("PRAGMA cache_size=-64000").execute(&pool).await?;
+        sqlx::query("PRAGMA mmap_size=1073741824").execute(&pool).await?;
+        sqlx::query("PRAGMA journal_size_limit=67108864").execute(&pool).await?;
+        sqlx::query("PRAGMA foreign_keys=ON").execute(&pool).await?;
+        // Disable auto-checkpoint to prevent WAL stalls under high write throughput.
+        sqlx::query("PRAGMA wal_autocheckpoint=0").execute(&pool).await?;
 
         tracing::info!(
             db_path = %path,

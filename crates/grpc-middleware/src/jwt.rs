@@ -264,12 +264,13 @@ pub fn validate_jwt_token_with_keypair(
     validation.validate_exp = true;
     validation.validate_aud = false;
 
-    let token_data = decode::<JwtClaims>(token, key_pair.decoding_key(), &validation).map_err(|e| {
-        format!(
-            "JWT validation failed: {} (token may be expired or invalid).{}",
-            e, AUTH_REQUIRED_HINT
-        )
-    })?;
+    let token_data =
+        decode::<JwtClaims>(token, key_pair.decoding_key(), &validation).map_err(|e| {
+            format!(
+                "JWT validation failed: {} (token may be expired or invalid).{}",
+                e, AUTH_REQUIRED_HINT
+            )
+        })?;
 
     let claims = token_data.claims;
 
@@ -328,10 +329,7 @@ pub fn resolve_tenant_id(
 }
 
 /// Sign a JWT token using a JwtKeyPair. Used for issuing tokens (OIDC callback, API token creation).
-pub fn sign_jwt_with_keypair(
-    key_pair: &JwtKeyPair,
-    claims: &JwtClaims,
-) -> Result<String, String> {
+pub fn sign_jwt_with_keypair(key_pair: &JwtKeyPair, claims: &JwtClaims) -> Result<String, String> {
     use jsonwebtoken::{encode, Header};
 
     let mut header = Header::new(key_pair.algorithm());
@@ -691,7 +689,11 @@ mod tests {
 
         let auth_header = format!("Bearer {}", token);
         let result = validate_bearer_token(secret, Some(&auth_header));
-        assert!(result.is_ok(), "Token validation failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Token validation failed: {:?}",
+            result.err()
+        );
 
         let validated = result.unwrap();
         assert_eq!(validated.sub, "test-user");

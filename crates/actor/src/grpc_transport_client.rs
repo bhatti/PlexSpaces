@@ -35,9 +35,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use plexspaces_proto::actor::v1::actor_service_client::ActorServiceClient;
-use plexspaces_proto::actor::v1::{AskReplyRequest, AskReplyResponse, SendMessageRequest, SendMessageResponse};
+use plexspaces_proto::actor::v1::{
+    AskReplyRequest, AskReplyResponse, SendMessageRequest, SendMessageResponse,
+};
 use plexspaces_proto::node::v1::node_service_client::NodeServiceClient;
-use plexspaces_proto::node::v1::{PingRequest, PingReqRequest, PingReqResponse, PingResponse, SyncMembershipRequest, SyncMembershipResponse};
+use plexspaces_proto::node::v1::{
+    PingReqRequest, PingReqResponse, PingRequest, PingResponse, SyncMembershipRequest,
+    SyncMembershipResponse,
+};
 use plexspaces_service_traits::{ActorTransportClient, NodeTransportClient};
 
 use crate::service_locator_trait::ServiceLocator;
@@ -78,10 +83,10 @@ impl ActorTransportClient for GrpcActorTransportClient {
             .service_locator
             .get_actor_service_client(node_id)
             .await
-            .map_err(|e| tonic::Status::unavailable(format!("Cannot connect to node '{}': {}", node_id, e)))?;
-        ActorServiceClient::new(channel)
-            .send_message(request)
-            .await
+            .map_err(|e| {
+                tonic::Status::unavailable(format!("Cannot connect to node '{}': {}", node_id, e))
+            })?;
+        ActorServiceClient::new(channel).send_message(request).await
     }
 
     async fn ask_reply(
@@ -93,7 +98,9 @@ impl ActorTransportClient for GrpcActorTransportClient {
             .service_locator
             .get_actor_service_client(node_id)
             .await
-            .map_err(|e| tonic::Status::unavailable(format!("Cannot connect to node '{}': {}", node_id, e)))?;
+            .map_err(|e| {
+                tonic::Status::unavailable(format!("Cannot connect to node '{}': {}", node_id, e))
+            })?;
         ActorServiceClient::new(channel).ask_reply(request).await
     }
 }
@@ -162,11 +169,10 @@ impl NodeTransportClient for GrpcNodeTransportClient {
     ) -> Result<PingReqResponse, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.node_channel(node_id, address).await?;
         let mut client = NodeServiceClient::new(channel);
-        let response =
-            tokio::time::timeout(timeout, client.ping_req(tonic::Request::new(request)))
-                .await
-                .map_err(|_| "PingReq timeout")?
-                .map_err(|e| format!("PingReq to '{}' failed: {}", node_id, e))?;
+        let response = tokio::time::timeout(timeout, client.ping_req(tonic::Request::new(request)))
+            .await
+            .map_err(|_| "PingReq timeout")?
+            .map_err(|e| format!("PingReq to '{}' failed: {}", node_id, e))?;
         Ok(response.into_inner())
     }
 

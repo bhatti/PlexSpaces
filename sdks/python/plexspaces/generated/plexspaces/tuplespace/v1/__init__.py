@@ -244,114 +244,133 @@ class Transaction(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class WriteRequest(betterproto.Message):
-    tuples: List["Tuple"] = betterproto.message_field(1)
-    transaction_id: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    tuples: List["Tuple"] = betterproto.message_field(2)
+    transaction_id: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class WriteResponse(betterproto.Message):
-    tuple_ids: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    tuple_ids: List[str] = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ReadRequest(betterproto.Message):
-    template: "Tuple" = betterproto.message_field(1)
-    timeout: timedelta = betterproto.message_field(2)
-    blocking: bool = betterproto.bool_field(3)
-    take: bool = betterproto.bool_field(4)
-    max_results: int = betterproto.int32_field(5)
-    transaction_id: str = betterproto.string_field(6)
-    spatial_filter: "SpatialRegion" = betterproto.message_field(7)
+    request_id: str = betterproto.string_field(1)
+    template: "Tuple" = betterproto.message_field(2)
+    timeout: timedelta = betterproto.message_field(3)
+    blocking: bool = betterproto.bool_field(4)
+    take: bool = betterproto.bool_field(5)
+    max_results: int = betterproto.int32_field(6)
+    transaction_id: str = betterproto.string_field(7)
+    spatial_filter: "SpatialRegion" = betterproto.message_field(8)
 
 
 @dataclass(eq=False, repr=False)
 class ReadResponse(betterproto.Message):
-    tuples: List["Tuple"] = betterproto.message_field(1)
-    has_more: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    tuples: List["Tuple"] = betterproto.message_field(2)
+    has_more: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class CountRequest(betterproto.Message):
-    template: "Tuple" = betterproto.message_field(1)
-    transaction_id: str = betterproto.string_field(2)
-    spatial_filter: "SpatialRegion" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    template: "Tuple" = betterproto.message_field(2)
+    transaction_id: str = betterproto.string_field(3)
+    spatial_filter: "SpatialRegion" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class CountResponse(betterproto.Message):
-    count: int = betterproto.int64_field(1)
+    request_id: str = betterproto.string_field(1)
+    count: int = betterproto.int64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ExistsRequest(betterproto.Message):
-    template: "Tuple" = betterproto.message_field(1)
-    transaction_id: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    template: "Tuple" = betterproto.message_field(2)
+    transaction_id: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class ExistsResponse(betterproto.Message):
-    exists: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    exists: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class SubscribeRequest(betterproto.Message):
-    template: "Tuple" = betterproto.message_field(1)
-    qos: "__common_v1__.QoSLevel" = betterproto.enum_field(2)
-    actions: "ActionType" = betterproto.enum_field(3)
-    callback_url: str = betterproto.string_field(4)
+    request_id: str = betterproto.string_field(1)
+    template: "Tuple" = betterproto.message_field(2)
+    qos: "__common_v1__.QoSLevel" = betterproto.enum_field(3)
+    actions: "ActionType" = betterproto.enum_field(4)
+    callback_url: str = betterproto.string_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class SubscribeResponse(betterproto.Message):
-    subscription: "Subscription" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    subscription: "Subscription" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class UnsubscribeRequest(betterproto.Message):
-    subscription_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    subscription_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class BeginTransactionRequest(betterproto.Message):
-    isolation_level: "IsolationLevel" = betterproto.enum_field(1)
-    timeout: timedelta = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    isolation_level: "IsolationLevel" = betterproto.enum_field(2)
+    timeout: timedelta = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class BeginTransactionResponse(betterproto.Message):
-    transaction: "Transaction" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    transaction: "Transaction" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CommitTransactionRequest(betterproto.Message):
-    transaction_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    transaction_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CommitTransactionResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AbortTransactionRequest(betterproto.Message):
-    transaction_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    transaction_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AbortTransactionResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RenewLeaseRequest(betterproto.Message):
-    tuple_id: str = betterproto.string_field(1)
-    new_ttl: timedelta = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    tuple_id: str = betterproto.string_field(2)
+    new_ttl: timedelta = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class RenewLeaseResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    new_expires_at: datetime = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    new_expires_at: datetime = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -372,7 +391,7 @@ class GetStatsResponse(betterproto.Message):
      - All storage backends (Memory, Redis, PostgreSQL, SQLite) populate these stats
     """
 
-    stats: "StorageStats" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Storage statistics (from tuplespace_storage.proto)
     
@@ -385,6 +404,8 @@ class GetStatsResponse(betterproto.Message):
      - take_operations: Count of take operations
      - avg_latency_ms: Average operation latency in milliseconds
     """
+
+    stats: "StorageStats" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)

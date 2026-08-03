@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Application API
@@ -581,8 +581,15 @@ type ApplicationSpec struct {
 	SeedNodes []string `protobuf:"bytes,14,rep,name=seed_nodes,json=seedNodes,proto3" json:"seed_nodes,omitempty"`
 	// External service links this application expects at deploy time.
 	RequiredServiceLinks []*ApplicationServiceLinkRequirement `protobuf:"bytes,15,rep,name=required_service_links,json=requiredServiceLinks,proto3" json:"required_service_links,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// URL mount path for static files bundled in the app zip.
+	//
+	// When non-empty, the node serves the app's static/ directory at this path.
+	// Example: "apps/chat" → files accessible at http://<node>/apps/chat/
+	// Defaults to "apps/<application_id>" when static files are present but mount is empty.
+	// Set in app-config.toml under [static] mount = "apps/chat"
+	StaticMount   string `protobuf:"bytes,16,opt,name=static_mount,json=staticMount,proto3" json:"static_mount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ApplicationSpec) Reset() {
@@ -718,6 +725,13 @@ func (x *ApplicationSpec) GetRequiredServiceLinks() []*ApplicationServiceLinkReq
 		return x.RequiredServiceLinks
 	}
 	return nil
+}
+
+func (x *ApplicationSpec) GetStaticMount() string {
+	if x != nil {
+		return x.StaticMount
+	}
+	return ""
 }
 
 // Reference to a runtime service link by logical name (see RuntimeConfig.service_links).
@@ -1043,21 +1057,22 @@ func (x *ApplicationRuntimeState) GetEnv() map[string]string {
 type DeployApplicationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Application identifier (unique per node)
-	ApplicationId string `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ApplicationId string `protobuf:"bytes,2,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
 	// Application name
-	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	// Application version
-	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Version string `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
 	// WASM module (if WASM application)
 	// If provided, application code is loaded from WASM.
 	// If not provided, application must be pre-registered (native Rust).
-	WasmModule *wasm.WasmModule `protobuf:"bytes,4,opt,name=wasm_module,json=wasmModule,proto3,oneof" json:"wasm_module,omitempty"`
+	WasmModule *wasm.WasmModule `protobuf:"bytes,5,opt,name=wasm_module,json=wasmModule,proto3,oneof" json:"wasm_module,omitempty"`
 	// Application configuration
 	// Defines supervision tree, dependencies, environment variables, etc.
-	Config *ApplicationSpec `protobuf:"bytes,5,opt,name=config,proto3" json:"config,omitempty"`
+	Config *ApplicationSpec `protobuf:"bytes,6,opt,name=config,proto3" json:"config,omitempty"`
 	// Initial state (optional, for stateful applications)
 	// Passed to application's start() method.
-	InitialState  []byte `protobuf:"bytes,6,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
+	InitialState  []byte `protobuf:"bytes,7,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1090,6 +1105,13 @@ func (x *DeployApplicationRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DeployApplicationRequest.ProtoReflect.Descriptor instead.
 func (*DeployApplicationRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DeployApplicationRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *DeployApplicationRequest) GetApplicationId() string {
@@ -1138,13 +1160,14 @@ func (x *DeployApplicationRequest) GetInitialState() []byte {
 type DeployApplicationResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Success flag
-	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success   bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	// Application ID (may differ from request if auto-generated)
-	ApplicationId string `protobuf:"bytes,2,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	ApplicationId string `protobuf:"bytes,3,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
 	// Application status after deployment
-	Status ApplicationStatus `protobuf:"varint,3,opt,name=status,proto3,enum=plexspaces.application.v1.ApplicationStatus" json:"status,omitempty"`
+	Status ApplicationStatus `protobuf:"varint,4,opt,name=status,proto3,enum=plexspaces.application.v1.ApplicationStatus" json:"status,omitempty"`
 	// Error details (if success=false)
-	Error         *string `protobuf:"bytes,4,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error         *string `protobuf:"bytes,5,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1179,6 +1202,13 @@ func (*DeployApplicationResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *DeployApplicationResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *DeployApplicationResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
@@ -1211,9 +1241,10 @@ func (x *DeployApplicationResponse) GetError() string {
 type UndeployApplicationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Application ID to undeploy
-	ApplicationId string `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ApplicationId string `protobuf:"bytes,2,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
 	// Graceful shutdown timeout (optional, uses app config default if not provided)
-	Timeout       *durationpb.Duration `protobuf:"bytes,2,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
+	Timeout       *durationpb.Duration `protobuf:"bytes,3,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1248,6 +1279,13 @@ func (*UndeployApplicationRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *UndeployApplicationRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *UndeployApplicationRequest) GetApplicationId() string {
 	if x != nil {
 		return x.ApplicationId
@@ -1266,9 +1304,10 @@ func (x *UndeployApplicationRequest) GetTimeout() *durationpb.Duration {
 type UndeployApplicationResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Success flag
-	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success   bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	// Error details (if success=false)
-	Error         *string `protobuf:"bytes,2,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error         *string `protobuf:"bytes,3,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1303,6 +1342,13 @@ func (*UndeployApplicationResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{8}
 }
 
+func (x *UndeployApplicationResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *UndeployApplicationResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
@@ -1321,7 +1367,8 @@ func (x *UndeployApplicationResponse) GetError() string {
 type ListApplicationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Filter by status (optional, empty = all applications)
-	StatusFilter  *ApplicationStatus `protobuf:"varint,1,opt,name=status_filter,json=statusFilter,proto3,enum=plexspaces.application.v1.ApplicationStatus,oneof" json:"status_filter,omitempty"`
+	RequestId     string             `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	StatusFilter  *ApplicationStatus `protobuf:"varint,2,opt,name=status_filter,json=statusFilter,proto3,enum=plexspaces.application.v1.ApplicationStatus,oneof" json:"status_filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1356,6 +1403,13 @@ func (*ListApplicationsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{9}
 }
 
+func (x *ListApplicationsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ListApplicationsRequest) GetStatusFilter() ApplicationStatus {
 	if x != nil && x.StatusFilter != nil {
 		return *x.StatusFilter
@@ -1367,7 +1421,8 @@ func (x *ListApplicationsRequest) GetStatusFilter() ApplicationStatus {
 type ListApplicationsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// List of deployed applications
-	Applications  []*ApplicationInfo `protobuf:"bytes,1,rep,name=applications,proto3" json:"applications,omitempty"`
+	RequestId     string             `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Applications  []*ApplicationInfo `protobuf:"bytes,2,rep,name=applications,proto3" json:"applications,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1400,6 +1455,13 @@ func (x *ListApplicationsResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ListApplicationsResponse.ProtoReflect.Descriptor instead.
 func (*ListApplicationsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListApplicationsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ListApplicationsResponse) GetApplications() []*ApplicationInfo {
@@ -1644,7 +1706,8 @@ func (x *ApplicationMetrics) GetLatencySamples() map[string]uint64 {
 type GetApplicationStatusRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Application ID
-	ApplicationId string `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ApplicationId string `protobuf:"bytes,2,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1679,6 +1742,13 @@ func (*GetApplicationStatusRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{13}
 }
 
+func (x *GetApplicationStatusRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetApplicationStatusRequest) GetApplicationId() string {
 	if x != nil {
 		return x.ApplicationId
@@ -1690,15 +1760,16 @@ func (x *GetApplicationStatusRequest) GetApplicationId() string {
 type GetApplicationStatusResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Application information
-	Application *ApplicationInfo `protobuf:"bytes,1,opt,name=application,proto3,oneof" json:"application,omitempty"`
+	RequestId   string           `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Application *ApplicationInfo `protobuf:"bytes,2,opt,name=application,proto3,oneof" json:"application,omitempty"`
 	// Detailed application state
-	State *ApplicationRuntimeState `protobuf:"bytes,2,opt,name=state,proto3,oneof" json:"state,omitempty"`
+	State *ApplicationRuntimeState `protobuf:"bytes,3,opt,name=state,proto3,oneof" json:"state,omitempty"`
 	// Error if application not found
-	Error *string `protobuf:"bytes,3,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *string `protobuf:"bytes,4,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	// Node ID that served this status response.
-	NodeId string `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId string `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	// Node address that served this status response.
-	NodeAddress   string `protobuf:"bytes,5,opt,name=node_address,json=nodeAddress,proto3" json:"node_address,omitempty"`
+	NodeAddress   string `protobuf:"bytes,6,opt,name=node_address,json=nodeAddress,proto3" json:"node_address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1731,6 +1802,13 @@ func (x *GetApplicationStatusResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetApplicationStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetApplicationStatusResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetApplicationStatusResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *GetApplicationStatusResponse) GetApplication() *ApplicationInfo {
@@ -1772,7 +1850,7 @@ var File_plexspaces_v1_application_application_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\n" +
-	"+plexspaces/v1/application/application.proto\x12\x19plexspaces.application.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a+plexspaces/v1/supervision/supervision.proto\x1a\x1dplexspaces/v1/wasm/wasm.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xd6\a\n" +
+	"+plexspaces/v1/application/application.proto\x12\x19plexspaces.application.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a+plexspaces/v1/supervision/supervision.proto\x1a\x1dplexspaces/v1/wasm/wasm.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xc2\b\n" +
 	"\x0fApplicationSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x18\n" +
@@ -1793,7 +1871,8 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\bmetadata\x18\r \x01(\v2\x1e.plexspaces.common.v1.MetadataR\bmetadata\x12\x1d\n" +
 	"\n" +
 	"seed_nodes\x18\x0e \x03(\tR\tseedNodes\x12\xdf\x01\n" +
-	"\x16required_service_links\x18\x0f \x03(\v2<.plexspaces.application.v1.ApplicationServiceLinkRequirementBk\x92A\\2ZLinks that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys.\xe0A\x01\xbaH\x06\x92\x01\x03\x10\x80\x01R\x14requiredServiceLinks\x1a6\n" +
+	"\x16required_service_links\x18\x0f \x03(\v2<.plexspaces.application.v1.ApplicationServiceLinkRequirementBk\x92A\\2ZLinks that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys.\xe0A\x01\xbaH\x06\x92\x01\x03\x10\x80\x01R\x14requiredServiceLinks\x12j\n" +
+	"\fstatic_mount\x18\x10 \x01(\tBG\x92AA2?URL prefix for serving bundled static files (e.g. 'apps/chat').\xe0A\x01R\vstaticMount\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\r\n" +
@@ -1827,36 +1906,48 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x11\n" +
-	"\x0f_supervisor_pid\"\xae\x02\n" +
-	"\x18DeployApplicationRequest\x12%\n" +
-	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\x12D\n" +
-	"\vwasm_module\x18\x04 \x01(\v2\x1e.plexspaces.wasm.v1.WasmModuleH\x00R\n" +
-	"wasmModule\x88\x01\x01\x12B\n" +
-	"\x06config\x18\x05 \x01(\v2*.plexspaces.application.v1.ApplicationSpecR\x06config\x12#\n" +
-	"\rinitial_state\x18\x06 \x01(\fR\finitialStateB\x0e\n" +
-	"\f_wasm_module\"\xc7\x01\n" +
-	"\x19DeployApplicationResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12%\n" +
-	"\x0eapplication_id\x18\x02 \x01(\tR\rapplicationId\x12D\n" +
-	"\x06status\x18\x03 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusR\x06status\x12\x19\n" +
-	"\x05error\x18\x04 \x01(\tH\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error\"\x89\x01\n" +
-	"\x1aUndeployApplicationRequest\x12%\n" +
-	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x128\n" +
-	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationH\x00R\atimeout\x88\x01\x01B\n" +
+	"\x0f_supervisor_pid\"\xd6\x02\n" +
+	"\x18DeployApplicationRequest\x12&\n" +
 	"\n" +
-	"\b_timeout\"\\\n" +
-	"\x1bUndeployApplicationResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x19\n" +
-	"\x05error\x18\x02 \x01(\tH\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error\"\x83\x01\n" +
-	"\x17ListApplicationsRequest\x12V\n" +
-	"\rstatus_filter\x18\x01 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusH\x00R\fstatusFilter\x88\x01\x01B\x10\n" +
-	"\x0e_status_filter\"j\n" +
-	"\x18ListApplicationsResponse\x12N\n" +
-	"\fapplications\x18\x01 \x03(\v2*.plexspaces.application.v1.ApplicationInfoR\fapplications\"\xe0\x02\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12%\n" +
+	"\x0eapplication_id\x18\x02 \x01(\tR\rapplicationId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\x12D\n" +
+	"\vwasm_module\x18\x05 \x01(\v2\x1e.plexspaces.wasm.v1.WasmModuleH\x00R\n" +
+	"wasmModule\x88\x01\x01\x12B\n" +
+	"\x06config\x18\x06 \x01(\v2*.plexspaces.application.v1.ApplicationSpecR\x06config\x12#\n" +
+	"\rinitial_state\x18\a \x01(\fR\finitialStateB\x0e\n" +
+	"\f_wasm_module\"\xef\x01\n" +
+	"\x19DeployApplicationResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12%\n" +
+	"\x0eapplication_id\x18\x03 \x01(\tR\rapplicationId\x12D\n" +
+	"\x06status\x18\x04 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusR\x06status\x12\x19\n" +
+	"\x05error\x18\x05 \x01(\tH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x06_error\"\xb1\x01\n" +
+	"\x1aUndeployApplicationRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12%\n" +
+	"\x0eapplication_id\x18\x02 \x01(\tR\rapplicationId\x128\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationH\x00R\atimeout\x88\x01\x01B\n" +
+	"\n" +
+	"\b_timeout\"\x84\x01\n" +
+	"\x1bUndeployApplicationResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x19\n" +
+	"\x05error\x18\x03 \x01(\tH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x06_error\"\xab\x01\n" +
+	"\x17ListApplicationsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12V\n" +
+	"\rstatus_filter\x18\x02 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusH\x00R\fstatusFilter\x88\x01\x01B\x10\n" +
+	"\x0e_status_filter\"\x92\x01\n" +
+	"\x18ListApplicationsResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12N\n" +
+	"\fapplications\x18\x02 \x03(\v2*.plexspaces.application.v1.ApplicationInfoR\fapplications\"\xe0\x02\n" +
 	"\x0fApplicationInfo\x12%\n" +
 	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
@@ -1893,15 +1984,19 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\x1aA\n" +
 	"\x13LatencySamplesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"D\n" +
-	"\x1bGetApplicationStatusRequest\x12%\n" +
-	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\"\xbb\x02\n" +
-	"\x1cGetApplicationStatusResponse\x12Q\n" +
-	"\vapplication\x18\x01 \x01(\v2*.plexspaces.application.v1.ApplicationInfoH\x00R\vapplication\x88\x01\x01\x12M\n" +
-	"\x05state\x18\x02 \x01(\v22.plexspaces.application.v1.ApplicationRuntimeStateH\x01R\x05state\x88\x01\x01\x12\x19\n" +
-	"\x05error\x18\x03 \x01(\tH\x02R\x05error\x88\x01\x01\x12\x17\n" +
-	"\anode_id\x18\x04 \x01(\tR\x06nodeId\x12!\n" +
-	"\fnode_address\x18\x05 \x01(\tR\vnodeAddressB\x0e\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"l\n" +
+	"\x1bGetApplicationStatusRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12%\n" +
+	"\x0eapplication_id\x18\x02 \x01(\tR\rapplicationId\"\xe3\x02\n" +
+	"\x1cGetApplicationStatusResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12Q\n" +
+	"\vapplication\x18\x02 \x01(\v2*.plexspaces.application.v1.ApplicationInfoH\x00R\vapplication\x88\x01\x01\x12M\n" +
+	"\x05state\x18\x03 \x01(\v22.plexspaces.application.v1.ApplicationRuntimeStateH\x01R\x05state\x88\x01\x01\x12\x19\n" +
+	"\x05error\x18\x04 \x01(\tH\x02R\x05error\x88\x01\x01\x12\x17\n" +
+	"\anode_id\x18\x05 \x01(\tR\x06nodeId\x12!\n" +
+	"\fnode_address\x18\x06 \x01(\tR\vnodeAddressB\x0e\n" +
 	"\f_applicationB\b\n" +
 	"\x06_stateB\b\n" +
 	"\x06_error*n\n" +

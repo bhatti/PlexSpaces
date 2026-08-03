@@ -357,8 +357,10 @@ async fn stop_vm(vm_id: &str) -> Result<()> {
         .await
         .context("Failed to send shutdown signal")?;
 
-    // Wait a bit for graceful shutdown
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    // Poll for VM to stop (max 2s, 20×100ms)
+    for _ in 0..20 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
 
     // OBSERVABILITY: Log successful VM stop
     tracing::info!(

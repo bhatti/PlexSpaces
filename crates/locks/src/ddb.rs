@@ -376,7 +376,7 @@ impl DynamoDBLockManager {
                                 max_attempts
                             )));
                         }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        tokio::time::sleep(Duration::from_millis(200)).await;
                         continue;
                     }
                     _ => {

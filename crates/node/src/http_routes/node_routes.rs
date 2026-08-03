@@ -22,10 +22,14 @@ use plexspaces_services::node_service::NodeServiceImpl;
 use serde_json::Value;
 use tonic::metadata::MetadataValue;
 
+/// State shared across node HTTP route handlers.
 #[derive(Clone)]
 pub struct NodeRouteState {
+    /// Service locator for accessing node-wide services.
     pub service_locator: Arc<dyn ServiceLocator>,
+    /// When true, authentication checks are skipped.
     pub auth_disabled: bool,
+    /// JWT key pair for verifying bearer tokens. None when auth is disabled.
     pub jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
 }
 
@@ -59,7 +63,11 @@ async fn list_connected_nodes(
         .unwrap_or(100);
     let page_token = params.get("page_token").cloned().unwrap_or_default();
 
-    let tenant_id = crate::http_jwt::extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_key_pair.as_deref())?;
+    let tenant_id = crate::http_jwt::extract_tenant_id_from_headers(
+        &headers,
+        s.auth_disabled,
+        s.jwt_key_pair.as_deref(),
+    )?;
 
     let local_node_id = s
         .service_locator
@@ -109,4 +117,3 @@ async fn list_connected_nodes(
         "total_count": resp.total_count,
     })))
 }
-

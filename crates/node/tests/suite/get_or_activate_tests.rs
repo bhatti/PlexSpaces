@@ -3,9 +3,9 @@
 //
 //! Tests for get_or_activate_actor (automatic activation pattern)
 
+use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_actor::ActorInstance as Actor;
 use plexspaces_actor::{ActorId, ActorRef};
-use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_mailbox::{mailbox_config_default, Mailbox};
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
@@ -23,8 +23,7 @@ async fn test_get_or_activate_actor_new_actor() {
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
     let mailbox = Mailbox::new(
-        mailbox_config_default(),
-        format!("test-mailbox-{}", ulid::Ulid::new()),
+        mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
     )
     .await
     .unwrap();
@@ -72,8 +71,7 @@ async fn test_get_or_activate_actor_existing_actor() {
     // First, spawn an actor
     let behavior1 = Box::new(MockBehavior::new());
     let mailbox1 = Mailbox::new(
-        mailbox_config_default(),
-        format!("test-mailbox-{}", ulid::Ulid::new()),
+        mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
     )
     .await
     .unwrap();
@@ -105,8 +103,7 @@ async fn test_get_or_activate_actor_concurrent_activation() {
     // Spawn the actor once
     let behavior = Box::new(MockBehavior::new());
     let mailbox = Mailbox::new(
-        mailbox_config_default(),
-        format!("test-mailbox-{}", ulid::Ulid::new()),
+        mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
     )
     .await
     .unwrap();

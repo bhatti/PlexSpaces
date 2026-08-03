@@ -21,7 +21,7 @@ else
 fi
 
 APP_ID="ts-chat-agent"
-AGENT_ACTOR="ChatAgentActor:agent-1"
+AGENT_ACTOR="agent-1:ChatAgentActor"
 BASE_URL="http://localhost:$HTTP_PORT"
 
 # JWT support (same pattern as minihermes)

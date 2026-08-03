@@ -21,7 +21,7 @@ else
 fi
 
 APP_ID="rs-chat-agent"
-AGENT_ACTOR="ChatAgentActor:agent-1"
+AGENT_ACTOR="agent-1:ChatAgentActor"
 BASE_URL="http://localhost:$HTTP_PORT"
 
 if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then

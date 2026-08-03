@@ -90,7 +90,8 @@ async fn handle_ask(
     subpath: &str,
     body: Option<axum::body::Bytes>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let tenant_id = effective_tenant_id(&jwt, s.auth_disabled, s.jwt_key_pair.as_deref(), &headers)?;
+    let tenant_id =
+        effective_tenant_id(&jwt, s.auth_disabled, s.jwt_key_pair.as_deref(), &headers)?;
     let path = if subpath.is_empty() {
         format!("/api/v1/actors/{}/{}", namespace, actor_type)
     } else {

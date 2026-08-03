@@ -30,7 +30,7 @@
 //! - Resume paused workflows
 //! - Integration with actor supervision
 
-use plexspaces_actor::{RequestContext, RequestContextExt};
+use plexspaces_actor::RequestContext;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -310,6 +310,7 @@ mod tests {
     use super::*;
     use crate::storage::sql::{make_step, make_workflow_definition};
     use crate::types::{ExecutionStatus, StepType, WorkflowExecutionExt};
+    use plexspaces_actor::RequestContextExt;
     use serde_json::json;
 
     fn test_ctx() -> RequestContext {
@@ -362,7 +363,10 @@ mod tests {
             WorkflowResponse::Started { execution_id } => {
                 assert!(!execution_id.is_empty());
 
-                let execution = storage.get_execution(&test_ctx(), &execution_id).await.unwrap();
+                let execution = storage
+                    .get_execution(&test_ctx(), &execution_id)
+                    .await
+                    .unwrap();
                 assert_eq!(
                     execution.execution_status(),
                     ExecutionStatus::ExecutionStatusCompleted
@@ -466,7 +470,10 @@ mod tests {
 
             match cancel_response {
                 WorkflowResponse::Cancelled => {
-                    let execution = storage.get_execution(&test_ctx(), &execution_id).await.unwrap();
+                    let execution = storage
+                        .get_execution(&test_ctx(), &execution_id)
+                        .await
+                        .unwrap();
                     assert_eq!(
                         execution.execution_status(),
                         ExecutionStatus::ExecutionStatusCancelled
@@ -503,7 +510,13 @@ mod tests {
             .unwrap();
 
         let execution_id = storage
-            .create_execution(&test_ctx(), "signal-workflow", "1.0", json!({}), HashMap::new())
+            .create_execution(
+                &test_ctx(),
+                "signal-workflow",
+                "1.0",
+                json!({}),
+                HashMap::new(),
+            )
             .await
             .unwrap();
 

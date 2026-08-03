@@ -88,6 +88,22 @@ impl SqliteLockManager {
             .await
             .map_err(|e| LockError::BackendError(format!("failed to connect SQLite: {e}")))?;
 
+        // Production SQLite PRAGMAs (ref: micrologics.org/blog/sqlite-in-production-*)
+        for pragma in &[
+            "PRAGMA journal_mode=WAL",
+            "PRAGMA synchronous=NORMAL",
+            "PRAGMA busy_timeout=500",
+            "PRAGMA cache_size=-64000",
+            "PRAGMA mmap_size=1073741824",
+            "PRAGMA journal_size_limit=67108864",
+            // Disable auto-checkpoint: prevents WAL checkpoint from blocking all writers
+            // under sustained high-throughput load. App restarts flush WAL on next open.
+            "PRAGMA wal_autocheckpoint=0",
+        ] {
+            sqlx::query(pragma).execute(&pool).await
+                .map_err(|e| LockError::BackendError(format!("PRAGMA failed: {e}")))?;
+        }
+
         // Initialize schema lazily with tenant/namespace support
         sqlx::query(
             r#"

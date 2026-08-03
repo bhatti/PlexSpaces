@@ -457,8 +457,8 @@ graph TB
 - **Parallel Map**: Uses Erlang `pmap` pattern - sends query to all shards simultaneously, collects individual results
 - **Scatter-Gather**: Aggregates results using strategies (Concat, Merge/Sum) with fault tolerance
 - **Unified Implementation**: Both operations use `parallel_operation_unified()` helper for consistent behavior
-- **Temporary Sender Pattern**: Uses single temporary sender ActorRef with per-shard correlation IDs for reply routing
-- **ReplyWaiterRegistry**: Centralized registry for async reply waiting (not used for routing, only waiting)
+- **Temporary Sender Pattern**: Uses per-shard ULID correlation IDs registered in `PendingAsks` for reply routing
+- **PendingAsks**: DashMap of ULID-keyed oneshot channels; no actor object created per ask (zero per-ask allocation)
 
 **Example**: See [Event Analytics Example](../examples/rust/embedded/event_analytics/) for a complete demonstration of shard groups with hash-based routing and scatter-gather queries using SDK patterns (`#[gen_server_actor]`, SDK spawn helpers, `GenServerRef.cast()`/`call()`).
 
@@ -466,7 +466,7 @@ graph TB
 - **ActorRegistry as Routing Authority**: `ActorRegistry::tell()`/`ask()`/`ask_with_sender()` centralize all routing logic
 - **Location Transparency**: `ActorId::is_on_node()` determines locality by comparing node_id suffix
 - **RequestContext Required**: All routing functions require RequestContext for tenant/namespace isolation
-- **Ask Pattern**: Uses temporary sender ActorRef + ReplyWaiterRegistry for request-reply semantics
+- **Ask Pattern**: Uses temporary sender ActorId + `PendingAsks` (DashMap of oneshot channels) for request-reply semantics
 - **Error Reply Propagation**: Handler failures produce `message_type: "error_reply"` — conveyed through gRPC via `AskReplyResponse.success=false` and reconstructed on the caller side, giving immediate failure notification (Erlang/Orleans semantics) without caller timeout
 
 ### Component Interaction Diagram

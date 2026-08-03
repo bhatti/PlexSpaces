@@ -282,16 +282,19 @@ pub trait GenServer: Actor {
                             correlation_id: correlation_id.clone(),
                             ..Default::default()
                         };
-                        let from_actor_id = ctx.self_ref()
+                        let from_actor_id = ctx
+                            .self_ref()
                             .map(|r| r.id().clone())
                             .or_else(|| crate::ActorId::from_canonical(&target_actor_id).ok());
                         if let Some(actor_id) = from_actor_id {
-                            let _ = ctx.send_reply(
-                                Some(&correlation_id),
-                                &sender_id,
-                                actor_id,
-                                error_reply,
-                            ).await;
+                            let _ = ctx
+                                .send_reply(
+                                    Some(&correlation_id),
+                                    &sender_id,
+                                    actor_id,
+                                    error_reply,
+                                )
+                                .await;
                         }
                         // Actor survives — matches Erlang where a failed handle_call
                         // returns {reply, {error, Reason}, State} and the process continues.
@@ -452,10 +455,7 @@ where
     E: Clone + Send + Sync + 'static,
 {
     /// Create new FSM behavior with initial state and transition function
-    pub fn new(
-        initial_state: S,
-        transition_fn: TransitionFn<S, E>,
-    ) -> Self {
+    pub fn new(initial_state: S, transition_fn: TransitionFn<S, E>) -> Self {
         GenStateMachineBehavior {
             current_state: initial_state,
             transition_fn,

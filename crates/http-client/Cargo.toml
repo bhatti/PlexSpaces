@@ -11,7 +11,7 @@ description = "Resilient outbound HTTP client for PlexSpaces service links (retr
 
 [dependencies]
 plexspaces-proto = { workspace = true }
-plexspaces-circuit-breaker = { workspace = true }
+plexspaces-common = { path = "../common" }
 plexspaces-actor = { path = "../actor" }
 
 tokio = { workspace = true }

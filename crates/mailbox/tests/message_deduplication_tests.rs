@@ -31,7 +31,7 @@ fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: Strin
 async fn test_message_id_deduplication() {
     // Test: Duplicate message IDs should be skipped
     let config = mailbox_config_default();
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()))
+    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -69,7 +69,7 @@ async fn test_message_id_deduplication() {
 async fn test_idempotency_key_deduplication() {
     // Test: Messages with same idempotency key should be deduplicated
     let config = mailbox_config_default();
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()))
+    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -108,7 +108,7 @@ async fn test_idempotency_key_deduplication() {
 async fn test_idempotency_key_different_keys() {
     // Test: Different idempotency keys should not be deduplicated
     let config = mailbox_config_default();
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()))
+    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -138,8 +138,8 @@ async fn test_idempotency_key_different_keys() {
 async fn test_lru_cache_eviction() {
     // Test: LRU cache should evict old entries when full
     let mut config = mailbox_config_default();
-    config.message_id_cache_size = 2; // Small cache size for testing
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()))
+    // Note: message dedup cache size is now controlled via IdempotencyConfig, not MailboxConfig.
+    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 

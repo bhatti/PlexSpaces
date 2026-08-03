@@ -49,8 +49,7 @@ use tracing::{debug, info, trace, warn};
 
 use plexspaces_actor::{
     mask_release_spec, overlay_node_operational_counters_from_exposition, ConnectNodesResult,
-    NodeConnectivity, NodeRegistryTrait, ProcessResourceSampler, RequestContext,
-    ServiceLocator,
+    NodeConnectivity, NodeRegistryTrait, ProcessResourceSampler, RequestContext, ServiceLocator,
 };
 use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, node_service_server::NodeService as NodeServiceTrait,
@@ -1056,7 +1055,6 @@ impl NodeServiceTrait for NodeServiceImpl {
 impl NodeServiceImpl {
     const UNKNOWN_NODE_ID_PREFIX: &'static str = "_unknown_";
 
-
     async fn local_node_address_keys(&self) -> Vec<String> {
         let mut keys = Vec::new();
         let push_addr = |keys: &mut Vec<String>, addr: &str| {
@@ -1160,8 +1158,10 @@ impl NodeServiceImpl {
         node_addresses: Vec<String>,
     ) -> Result<ConnectNodesResult, String> {
         let n = node_addresses.len() as u64;
-        let timeout_secs = (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS)
-            .clamp(Self::CONNECT_TIMEOUT_MIN_SECS, Self::CONNECT_TIMEOUT_MAX_SECS);
+        let timeout_secs = (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS).clamp(
+            Self::CONNECT_TIMEOUT_MIN_SECS,
+            Self::CONNECT_TIMEOUT_MAX_SECS,
+        );
         self.connect_to_nodes_impl(node_addresses, timeout_secs)
             .await
     }
@@ -1352,8 +1352,10 @@ impl NodeConnectivity for NodeServiceImpl {
     ) -> Result<ConnectNodesResult, String> {
         let timeout = timeout_secs.unwrap_or_else(|| {
             let n = node_addresses.len() as u64;
-            (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS)
-                .clamp(Self::CONNECT_TIMEOUT_MIN_SECS, Self::CONNECT_TIMEOUT_MAX_SECS)
+            (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS).clamp(
+                Self::CONNECT_TIMEOUT_MIN_SECS,
+                Self::CONNECT_TIMEOUT_MAX_SECS,
+            )
         });
         self.connect_to_nodes_impl(node_addresses, timeout).await
     }
@@ -1482,8 +1484,7 @@ mod tests {
         assert!(total.cpu_cores > 0.0);
         assert!(total.memory_bytes > 0);
         assert!(available.cpu_cores >= 0.0);
-        #[allow(unused_comparisons)]
-        { assert!(available.memory_bytes >= 0); }
+        // available.memory_bytes is u64, always >= 0
     }
 
     #[tokio::test]

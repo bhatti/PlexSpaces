@@ -43,9 +43,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use plexspaces_proto::actor::v1::{AskReplyRequest, AskReplyResponse, SendMessageRequest, SendMessageResponse};
-use plexspaces_proto::node::v1::{PingRequest, PingReqRequest, PingReqResponse, PingResponse, SyncMembershipRequest, SyncMembershipResponse};
-use plexspaces_proto::transport::ws::v1::{WsFrame, ws_frame};
+use plexspaces_proto::actor::v1::{
+    AskReplyRequest, AskReplyResponse, SendMessageRequest, SendMessageResponse,
+};
+use plexspaces_proto::node::v1::{
+    PingReqRequest, PingReqResponse, PingRequest, PingResponse, SyncMembershipRequest,
+    SyncMembershipResponse,
+};
+use plexspaces_proto::transport::ws::v1::{ws_frame, WsFrame};
 use plexspaces_service_traits::{ActorTransportClient, NodeTransportClient};
 use tokio::sync::{oneshot, RwLock};
 use ulid::Ulid;
@@ -69,6 +74,7 @@ pub struct PendingAsks {
 }
 
 impl PendingAsks {
+    /// Create a new empty `PendingAsks` registry.
     pub fn new() -> Self {
         Self {
             by_request: RwLock::new(HashMap::new()),
@@ -77,12 +83,21 @@ impl PendingAsks {
     }
 
     /// Register a pending ask for the given node. Returns the receiver end.
-    pub async fn register(&self, node_id: String, request_id: String) -> oneshot::Receiver<AskReplyResponse> {
+    pub async fn register(
+        &self,
+        node_id: String,
+        request_id: String,
+    ) -> oneshot::Receiver<AskReplyResponse> {
         let (tx, rx) = oneshot::channel();
         // Update by_request first, then by_node. Both are separate locks; order is
         // insert-before-index so a concurrent resolve never finds a dangling index entry.
-        self.by_request.write().await.insert(request_id.clone(), (node_id.clone(), tx));
-        self.by_node.write().await
+        self.by_request
+            .write()
+            .await
+            .insert(request_id.clone(), (node_id.clone(), tx));
+        self.by_node
+            .write()
+            .await
             .entry(node_id)
             .or_default()
             .push(request_id);
@@ -104,7 +119,12 @@ impl PendingAsks {
     /// O(k) where k = number of in-flight asks for this node.
     /// Asks for other connected nodes are not affected.
     pub async fn cancel_for_node(&self, node_id: &str, error_message: &str) {
-        let req_ids = self.by_node.write().await.remove(node_id).unwrap_or_default();
+        let req_ids = self
+            .by_node
+            .write()
+            .await
+            .remove(node_id)
+            .unwrap_or_default();
         if req_ids.is_empty() {
             return;
         }
@@ -130,6 +150,7 @@ impl PendingAsks {
         }
     }
 
+    /// Returns the number of pending ask requests.
     pub async fn len(&self) -> usize {
         self.by_request.read().await.len()
     }
@@ -165,6 +186,7 @@ pub struct WsActorTransportClient {
 }
 
 impl WsActorTransportClient {
+    /// Create a new `WsActorTransportClient` with a WebSocket registry, pending-ask tracker, and gRPC fallback.
     pub fn new(
         ws_registry: Arc<WsRegistry>,
         pending_asks: Arc<PendingAsks>,
@@ -204,10 +226,9 @@ impl ActorTransportClient for WsActorTransportClient {
                 request_id: request_id.clone(),
                 payload: Some(ws_frame::Payload::Tell(inner)),
             };
-            sender
-                .send(frame)
-                .await
-                .map_err(|_| tonic::Status::unavailable(format!("WS session to '{}' closed", node_id)))?;
+            sender.send(frame).await.map_err(|_| {
+                tonic::Status::unavailable(format!("WS session to '{}' closed", node_id))
+            })?;
 
             // Fire-and-forget: return immediate success
             Ok(tonic::Response::new(SendMessageResponse {
@@ -238,7 +259,10 @@ impl ActorTransportClient for WsActorTransportClient {
         if let Some(sender) = self.ws_registry.get_sender(node_id).await {
             // Register before sending so the response can't arrive before we register.
             // node_id is stored with the entry so cancel_for_node() only cancels this session.
-            let rx = self.pending_asks.register(node_id.to_string(), request_id.clone()).await;
+            let rx = self
+                .pending_asks
+                .register(node_id.to_string(), request_id.clone())
+                .await;
 
             let timeout_duration = inner
                 .timeout
@@ -254,7 +278,10 @@ impl ActorTransportClient for WsActorTransportClient {
                 // Session closed between registry lookup and send — clean up so the
                 // pending entry doesn't leak until the disconnect cancel_for_node runs.
                 self.pending_asks.remove(&request_id).await;
-                return Err(tonic::Status::unavailable(format!("WS session to '{}' closed", node_id)));
+                return Err(tonic::Status::unavailable(format!(
+                    "WS session to '{}' closed",
+                    node_id
+                )));
             }
 
             match tokio::time::timeout(timeout_duration, rx).await {
@@ -296,6 +323,7 @@ pub struct WsNodeTransportClient {
 }
 
 impl WsNodeTransportClient {
+    /// Create a new `WsNodeTransportClient` with a WebSocket registry, pending-ask tracker (unused), and gRPC fallback.
     pub fn new(
         ws_registry: Arc<WsRegistry>,
         _pending_asks: Arc<PendingAsks>,
@@ -361,9 +389,9 @@ impl NodeTransportClient for WsNodeTransportClient {
 mod tests {
     use super::*;
     use plexspaces_proto::actor::v1::{AskReplyRequest, SendMessageRequest};
-    use plexspaces_proto::node::v1::{NodeRole, PingRequest};
+    use plexspaces_proto::node::v1::NodeRole;
     use plexspaces_proto::transport::ws::v1::ws_frame;
-    use plexspaces_service_traits::{ActorTransportClient, NodeTransportClient};
+    use plexspaces_service_traits::ActorTransportClient;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -400,83 +428,13 @@ mod tests {
         }
     }
 
-    struct MockGrpcNodeFallback;
-
-    #[async_trait]
-    impl NodeTransportClient for MockGrpcNodeFallback {
-        async fn ping(
-            &self,
-            node_id: &str,
-            _address: &str,
-            request: PingRequest,
-            _timeout: Duration,
-        ) -> Result<PingResponse, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(PingResponse {
-                node_id: node_id.to_string(),
-                sequence_number: request.sequence_number,
-                updates: Vec::new(),
-                request_id: ulid::Ulid::new().to_string(),
-                ..Default::default()
-            })
-        }
-
-        async fn ping_req(
-            &self,
-            _node_id: &str,
-            _address: &str,
-            _request: PingReqRequest,
-            _timeout: Duration,
-        ) -> Result<PingReqResponse, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(PingReqResponse {
-                request_id: ulid::Ulid::new().to_string(),
-                ..Default::default()
-            })
-        }
-
-        async fn sync_membership(
-            &self,
-            _node_id: &str,
-            _address: &str,
-            _request: SyncMembershipRequest,
-            _timeout: Duration,
-        ) -> Result<SyncMembershipResponse, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(SyncMembershipResponse {
-                request_id: ulid::Ulid::new().to_string(),
-                members: Vec::new(),
-                updates_applied: 0,
-            })
-        }
-    }
-
     // ─── Helper ───────────────────────────────────────────────────────────
 
     fn make_ws_transport(
         registry: Arc<WsRegistry>,
         pending: Arc<PendingAsks>,
     ) -> WsActorTransportClient {
-        WsActorTransportClient::new(
-            registry,
-            pending,
-            Arc::new(MockGrpcActorFallback),
-        )
-    }
-
-    fn register_node_in_registry(
-        registry: &Arc<WsRegistry>,
-        node_id: &str,
-    ) -> mpsc::Receiver<WsFrame> {
-        let (tx, rx) = mpsc::channel(16);
-        let session = crate::ws_registry::WsSession {
-            node_id: node_id.to_string(),
-            sender: tx,
-            role: NodeRole::NodeRoleThin,
-            tenant_id: "tenant-1".to_string(),
-            connected_at: std::time::Instant::now(),
-            last_heartbeat: std::time::Instant::now(),
-        };
-        // Can't call async here — use blocking variant via a runtime handle
-        tokio::runtime::Handle::current().block_on(registry.register(session));
-        rx
+        WsActorTransportClient::new(registry, pending, Arc::new(MockGrpcActorFallback))
     }
 
     #[tokio::test]
@@ -608,9 +566,15 @@ mod tests {
         let pending = Arc::new(PendingAsks::new());
 
         // node-a has two in-flight asks, node-b has one
-        let rx_a1 = pending.register("node-a".to_string(), "id-a1".to_string()).await;
-        let rx_a2 = pending.register("node-a".to_string(), "id-a2".to_string()).await;
-        let rx_b1 = pending.register("node-b".to_string(), "id-b1".to_string()).await;
+        let rx_a1 = pending
+            .register("node-a".to_string(), "id-a1".to_string())
+            .await;
+        let rx_a2 = pending
+            .register("node-a".to_string(), "id-a2".to_string())
+            .await;
+        let rx_b1 = pending
+            .register("node-b".to_string(), "id-b1".to_string())
+            .await;
         assert_eq!(pending.len().await, 3);
 
         // Resolve one ask from node-a normally

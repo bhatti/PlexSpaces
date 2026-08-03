@@ -39,7 +39,7 @@ use crate::ActorFactory;
 use crate::JournalStorage;
 use crate::KeyValueStore;
 use crate::RequestContext;
-use crate::{ActorRegistry, ReplyWaiterRegistry, Service, VirtualActorManager};
+use crate::{ActorRegistry, Service, VirtualActorManager};
 
 /// Readonly service locator — runtime code depends only on this trait.
 ///
@@ -57,9 +57,6 @@ pub trait ServiceLocator: plexspaces_service_traits::ServiceLocatorBase {
 
     /// Get VirtualActorManager
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>>;
-
-    /// Get ReplyWaiterRegistry
-    async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>>;
 
     /// Get ChannelService
     async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>>;

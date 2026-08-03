@@ -1044,7 +1044,13 @@ impl LruCache {
             }
         }
         self.order.push_back(key.clone());
-        self.entries.insert(key, LruEntry { value, inserted_at: std::time::Instant::now() });
+        self.entries.insert(
+            key,
+            LruEntry {
+                value,
+                inserted_at: std::time::Instant::now(),
+            },
+        );
     }
 
     fn remove(&mut self, key: &str) {

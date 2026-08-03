@@ -34,16 +34,16 @@
 //! - **ULID for tuple IDs**: Sortable, time-based identifiers
 //! - **Error mapping**: gRPC status codes from TupleSpace errors
 
+#[cfg(test)]
+use plexspaces_proto::tuplespace::v1::tuple_field::Value as ProtoValue;
 use plexspaces_proto::{
     tuplespace::v1::{
-        tuple_space_service_server::TupleSpaceService,
-        CountRequest, CountResponse, ExistsRequest, ExistsResponse, ReadRequest, ReadResponse,
-        Tuple as ProtoTuple, TupleField as ProtoTupleField, WriteRequest, WriteResponse,
+        tuple_space_service_server::TupleSpaceService, CountRequest, CountResponse, ExistsRequest,
+        ExistsResponse, ReadRequest, ReadResponse, Tuple as ProtoTuple,
+        TupleField as ProtoTupleField, WriteRequest, WriteResponse,
     },
     v1::common::Empty,
 };
-#[cfg(test)]
-use plexspaces_proto::tuplespace::v1::tuple_field::Value as ProtoValue;
 use plexspaces_tuplespace::{
     proto_field_to_tuple_field, proto_template_to_pattern, proto_tuple_to_tuple,
     tuple_field_to_proto_field, tuple_to_proto_tuple, Pattern, Tuple, TupleField, TupleSpaceError,
@@ -195,7 +195,10 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         metrics::histogram!("plexspaces_node_tuplespace_write_duration_seconds")
             .record(elapsed.as_secs_f64());
 
-        Ok(Response::new(WriteResponse { request_id: req.request_id.clone(), tuple_ids }))
+        Ok(Response::new(WriteResponse {
+            request_id: req.request_id.clone(),
+            tuple_ids,
+        }))
     }
 
     /// Read tuples from the TupleSpace (non-destructive)
@@ -405,7 +408,10 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
             .await
             .map_err(Self::tuplespace_error_to_status)?;
 
-        Ok(Response::new(ExistsResponse { request_id: req.request_id.clone(), exists: count > 0 }))
+        Ok(Response::new(ExistsResponse {
+            request_id: req.request_id.clone(),
+            exists: count > 0,
+        }))
     }
 
     // See docs/BARRIER_REFACTORING_PLAN.md for migration guide and examples.
@@ -996,9 +1002,7 @@ mod tests {
 
     async fn make_test_service() -> TupleSpaceServiceImpl {
         use crate::service_locator::ServiceLocatorImpl;
-        use plexspaces_actor::{
-            service_wrappers::TupleSpaceProviderWrapper, RequestContextExt,
-        };
+        use plexspaces_actor::{service_wrappers::TupleSpaceProviderWrapper, RequestContextExt};
 
         let sl = Arc::new(ServiceLocatorImpl::new());
         sl.register_security_config(plexspaces_proto::node::v1::SecurityConfig {

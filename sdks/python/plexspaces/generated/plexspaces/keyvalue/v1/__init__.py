@@ -46,10 +46,11 @@ class KeyValueStoreErrorCode(betterproto.Enum):
 class GetRequest(betterproto.Message):
     """Get request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key to get"""
 
-    namespace: str = betterproto.string_field(2)
+    key: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -60,10 +61,11 @@ class GetRequest(betterproto.Message):
 class GetResponse(betterproto.Message):
     """Get response"""
 
-    value: bytes = betterproto.bytes_field(1)
+    request_id: str = betterproto.string_field(1)
     """Value if key exists"""
 
-    exists: bool = betterproto.bool_field(2)
+    value: bytes = betterproto.bytes_field(2)
+    exists: bool = betterproto.bool_field(3)
     """Whether key exists"""
 
 
@@ -71,13 +73,14 @@ class GetResponse(betterproto.Message):
 class PutRequest(betterproto.Message):
     """Put request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key to put"""
 
-    value: bytes = betterproto.bytes_field(2)
+    key: str = betterproto.string_field(2)
+    value: bytes = betterproto.bytes_field(3)
     """Value to store"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -88,18 +91,21 @@ class PutRequest(betterproto.Message):
 class PutResponse(betterproto.Message):
     """Put response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Success flag"""
+
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteRequest(betterproto.Message):
     """Delete request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key to delete"""
 
-    namespace: str = betterproto.string_field(2)
+    key: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -110,18 +116,21 @@ class DeleteRequest(betterproto.Message):
 class DeleteResponse(betterproto.Message):
     """Delete response"""
 
-    deleted: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether key was deleted (false if key didn't exist)"""
+
+    deleted: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ExistsRequest(betterproto.Message):
     """Exists request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key to check"""
 
-    namespace: str = betterproto.string_field(2)
+    key: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -132,18 +141,21 @@ class ExistsRequest(betterproto.Message):
 class ExistsResponse(betterproto.Message):
     """Exists response"""
 
-    exists: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether key exists"""
+
+    exists: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListRequest(betterproto.Message):
     """List request"""
 
-    prefix: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Prefix to list keys with"""
 
-    namespace: str = betterproto.string_field(2)
+    prefix: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -154,18 +166,21 @@ class ListRequest(betterproto.Message):
 class ListResponse(betterproto.Message):
     """List response"""
 
-    keys: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """List of keys matching prefix"""
+
+    keys: List[str] = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class MultiGetRequest(betterproto.Message):
     """MultiGet request"""
 
-    keys: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Keys to get"""
 
-    namespace: str = betterproto.string_field(2)
+    keys: List[str] = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -176,8 +191,10 @@ class MultiGetRequest(betterproto.Message):
 class MultiGetResponse(betterproto.Message):
     """MultiGet response"""
 
-    entries: List["KeyValueEntry"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Values (same order as request, None for missing keys)"""
+
+    entries: List["KeyValueEntry"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
@@ -198,10 +215,11 @@ class KeyValueEntry(betterproto.Message):
 class MultiPutRequest(betterproto.Message):
     """MultiPut request"""
 
-    pairs: List["KeyValuePair"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key-value pairs to put"""
 
-    namespace: str = betterproto.string_field(2)
+    pairs: List["KeyValuePair"] = betterproto.message_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -223,24 +241,27 @@ class KeyValuePair(betterproto.Message):
 class MultiPutResponse(betterproto.Message):
     """MultiPut response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Success flag"""
+
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class PutWithTtlRequest(betterproto.Message):
     """PutWithTtl request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key to put"""
 
-    value: bytes = betterproto.bytes_field(2)
+    key: str = betterproto.string_field(2)
+    value: bytes = betterproto.bytes_field(3)
     """Value to store"""
 
-    ttl: timedelta = betterproto.message_field(3)
+    ttl: timedelta = betterproto.message_field(4)
     """Time-to-live"""
 
-    namespace: str = betterproto.string_field(4)
+    namespace: str = betterproto.string_field(5)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -251,21 +272,24 @@ class PutWithTtlRequest(betterproto.Message):
 class PutWithTtlResponse(betterproto.Message):
     """PutWithTtl response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Success flag"""
+
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RefreshTtlRequest(betterproto.Message):
     """RefreshTtl request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key to refresh"""
 
-    ttl: timedelta = betterproto.message_field(2)
+    key: str = betterproto.string_field(2)
+    ttl: timedelta = betterproto.message_field(3)
     """New TTL"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -276,18 +300,21 @@ class RefreshTtlRequest(betterproto.Message):
 class RefreshTtlResponse(betterproto.Message):
     """RefreshTtl response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Success flag"""
+
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetTtlRequest(betterproto.Message):
     """GetTtl request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key to check"""
 
-    namespace: str = betterproto.string_field(2)
+    key: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -298,10 +325,11 @@ class GetTtlRequest(betterproto.Message):
 class GetTtlResponse(betterproto.Message):
     """GetTtl response"""
 
-    ttl: timedelta = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """TTL remaining if key exists with TTL"""
 
-    exists: bool = betterproto.bool_field(2)
+    ttl: timedelta = betterproto.message_field(2)
+    exists: bool = betterproto.bool_field(3)
     """Whether key exists"""
 
 
@@ -309,16 +337,17 @@ class GetTtlResponse(betterproto.Message):
 class CasRequest(betterproto.Message):
     """Cas request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key for CAS operation"""
 
-    expected_value: bytes = betterproto.bytes_field(2)
+    key: str = betterproto.string_field(2)
+    expected_value: bytes = betterproto.bytes_field(3)
     """Expected value (None means key must not exist)"""
 
-    new_value: bytes = betterproto.bytes_field(3)
+    new_value: bytes = betterproto.bytes_field(4)
     """New value"""
 
-    namespace: str = betterproto.string_field(4)
+    namespace: str = betterproto.string_field(5)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -329,21 +358,24 @@ class CasRequest(betterproto.Message):
 class CasResponse(betterproto.Message):
     """Cas response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether swap succeeded"""
+
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class IncrementRequest(betterproto.Message):
     """Increment request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key for counter"""
 
-    delta: int = betterproto.int64_field(2)
+    key: str = betterproto.string_field(2)
+    delta: int = betterproto.int64_field(3)
     """Delta to add"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -354,21 +386,24 @@ class IncrementRequest(betterproto.Message):
 class IncrementResponse(betterproto.Message):
     """Increment response"""
 
-    value: int = betterproto.int64_field(1)
+    request_id: str = betterproto.string_field(1)
     """New value after increment"""
+
+    value: int = betterproto.int64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DecrementRequest(betterproto.Message):
     """Decrement request"""
 
-    key: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Key for counter"""
 
-    delta: int = betterproto.int64_field(2)
+    key: str = betterproto.string_field(2)
+    delta: int = betterproto.int64_field(3)
     """Delta to subtract"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -379,18 +414,21 @@ class DecrementRequest(betterproto.Message):
 class DecrementResponse(betterproto.Message):
     """Decrement response"""
 
-    value: int = betterproto.int64_field(1)
+    request_id: str = betterproto.string_field(1)
     """New value after decrement"""
+
+    value: int = betterproto.int64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ClearPrefixRequest(betterproto.Message):
     """ClearPrefix request"""
 
-    prefix: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Prefix to clear"""
 
-    namespace: str = betterproto.string_field(2)
+    prefix: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -401,18 +439,21 @@ class ClearPrefixRequest(betterproto.Message):
 class ClearPrefixResponse(betterproto.Message):
     """ClearPrefix response"""
 
-    deleted_count: int = betterproto.uint64_field(1)
+    request_id: str = betterproto.string_field(1)
     """Number of keys deleted"""
+
+    deleted_count: int = betterproto.uint64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CountPrefixRequest(betterproto.Message):
     """CountPrefix request"""
 
-    prefix: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Prefix to count"""
 
-    namespace: str = betterproto.string_field(2)
+    prefix: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
@@ -423,32 +464,37 @@ class CountPrefixRequest(betterproto.Message):
 class CountPrefixResponse(betterproto.Message):
     """CountPrefix response"""
 
-    count: int = betterproto.uint64_field(1)
+    request_id: str = betterproto.string_field(1)
     """Number of keys with prefix"""
+
+    count: int = betterproto.uint64_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStatsRequest(betterproto.Message):
     """GetStats request"""
 
-    namespace: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Namespace for tenant isolation (optional; empty string = default).
      Tenant-id comes from auth (JWT/mTLS), not from this request.
     """
+
+    namespace: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStatsResponse(betterproto.Message):
     """GetStats response"""
 
-    total_keys: int = betterproto.uint64_field(1)
+    request_id: str = betterproto.string_field(1)
     """Total number of keys"""
 
-    total_size_bytes: int = betterproto.uint64_field(2)
+    total_keys: int = betterproto.uint64_field(2)
+    total_size_bytes: int = betterproto.uint64_field(3)
     """Total size in bytes (approximate)"""
 
-    backend_type: str = betterproto.string_field(3)
+    backend_type: str = betterproto.string_field(4)
     """Backend type (e.g., "InMemory", "SQLite", "Redis", "PostgreSQL")"""
 
 

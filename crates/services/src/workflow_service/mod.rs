@@ -23,6 +23,8 @@
 //! Delegates to WorkflowStorage for metadata operations and WorkflowExecutor
 //! for execution operations.
 
+use plexspaces_actor::ServiceLocator as ServiceLocatorTrait;
+use plexspaces_common::RequestContext;
 use plexspaces_proto::v1::common::Empty;
 use plexspaces_proto::workflow::v1::{
     workflow_service_server::WorkflowService, CancelExecutionRequest, CreateDefinitionRequest,
@@ -32,8 +34,6 @@ use plexspaces_proto::workflow::v1::{
     QueryExecutionRequest, QueryExecutionResponse, SignalExecutionRequest, StartExecutionRequest,
     StartExecutionResponse, UpdateDefinitionRequest, UpdateDefinitionResponse,
 };
-use plexspaces_actor::ServiceLocator as ServiceLocatorTrait;
-use plexspaces_common::RequestContext;
 use plexspaces_workflow::executor::WorkflowExecutor;
 use plexspaces_workflow::storage::WorkflowStorage;
 use plexspaces_workflow::types::*;
@@ -51,8 +51,14 @@ pub struct WorkflowServiceImpl {
 
 impl WorkflowServiceImpl {
     /// Create new WorkflowService implementation
-    pub fn new(storage: Arc<WorkflowStorage>, service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
-        Self { storage, service_locator }
+    pub fn new(
+        storage: Arc<WorkflowStorage>,
+        service_locator: Arc<dyn ServiceLocatorTrait>,
+    ) -> Self {
+        Self {
+            storage,
+            service_locator,
+        }
     }
 
     /// Extract RequestContext from gRPC request metadata
@@ -232,12 +238,20 @@ impl WorkflowService for WorkflowServiceImpl {
             "Starting workflow execution"
         );
 
-        let execution_id =
-            WorkflowExecutor::start_execution(&self.storage, &ctx, &req.definition_id, version, input)
-                .await
-                .map_err(Self::workflow_error_to_status)?;
+        let execution_id = WorkflowExecutor::start_execution(
+            &self.storage,
+            &ctx,
+            &req.definition_id,
+            version,
+            input,
+        )
+        .await
+        .map_err(Self::workflow_error_to_status)?;
 
-        Ok(Response::new(StartExecutionResponse { request_id: req.request_id.clone(), execution_id }))
+        Ok(Response::new(StartExecutionResponse {
+            request_id: req.request_id.clone(),
+            execution_id,
+        }))
     }
 
     async fn get_execution(
@@ -358,7 +372,8 @@ impl WorkflowService for WorkflowServiceImpl {
             .map(|v| {
                 // Convert prost_types::Value to serde_json::Value
                 match v.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => {
+                    Some(prost_types::value::Kind::StringValue(s)) =>
+                    {
                         #[allow(clippy::unnecessary_lazy_evaluations)]
                         serde_json::from_str(&s).unwrap_or_else(|_| Value::String(s))
                     }
@@ -737,7 +752,10 @@ mod tests {
         let execution_id = start_response.into_inner().execution_id;
 
         // Get execution
-        let get_req = Request::new(GetExecutionRequest { execution_id, request_id: ulid::Ulid::new().to_string() });
+        let get_req = Request::new(GetExecutionRequest {
+            execution_id,
+            request_id: ulid::Ulid::new().to_string(),
+        });
 
         let result = service.get_execution(get_req).await;
         assert!(result.is_ok());
@@ -831,7 +849,10 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify status is cancelled
-        let get_req = Request::new(GetExecutionRequest { execution_id, request_id: ulid::Ulid::new().to_string() });
+        let get_req = Request::new(GetExecutionRequest {
+            execution_id,
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let exec = service.get_execution(get_req).await.unwrap().into_inner();
         // ExecutionStatusCancelled = 5
         assert_eq!(
@@ -975,9 +996,7 @@ mod tests {
         assert!(result.is_ok());
 
         let response = result.unwrap().into_inner();
-        // Step executions may be empty for simple workflows
-        #[allow(unused_comparisons)]
-        let _ = response.step_executions.len() >= 0;
+        // Step executions may be empty for simple workflows; len() is always valid
     }
 
     #[tokio::test]

@@ -40,15 +40,16 @@ pub mod actor_state_checker;
 pub mod actor_state_handle;
 pub mod blob_service;
 pub mod channel_service;
-pub mod service_link_access;
 pub mod elastic_pool;
 pub mod health;
+pub mod idempotency_store;
 pub mod journal_storage;
 pub mod message_sender;
 pub mod metrics;
 pub mod node_connectivity;
 pub mod object_registry;
 pub mod outbound_http;
+pub mod service_link_access;
 pub mod service_locator_base;
 pub mod transport_client;
 pub mod tuplespace_provider;
@@ -62,13 +63,13 @@ pub use actor_ref::ActorRef;
 pub use actor_state_checker::ActorStateChecker;
 pub use actor_state_handle::ActorStateHandle;
 pub use blob_service::BlobServiceTrait;
-pub use service_link_access::ServiceLinkAccess;
 pub use channel_service::{ChannelService, ProcessGroupService};
 pub use elastic_pool::{ElasticPoolService, PoolServiceError};
 pub use health::{
     run_health_check, HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker,
     HealthReporter,
 };
+pub use idempotency_store::{IdempotencyError, IdempotencyOutcome, IdempotencyResult, IdempotencyStore};
 pub use journal_storage::{JournalError, JournalResult, JournalStorage};
 pub use message_sender::MessageSender;
 pub use metrics::MetricsServiceAccess;
@@ -78,6 +79,7 @@ pub use outbound_http::{
     HttpHeader, OutboundHttpClient, OutboundHttpClientError, OutboundHttpRequest,
     OutboundHttpResponse,
 };
+pub use service_link_access::ServiceLinkAccess;
 pub use service_locator_base::{ActorFactory, ActorService, ServiceLocatorBase};
 pub use transport_client::{ActorTransportClient, NodeTransportClient};
 pub use tuplespace_provider::TupleSpaceProvider;

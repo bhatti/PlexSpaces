@@ -788,8 +788,6 @@ mod tests {
         id: String,
         addr: String,
         spawned_actors: Arc<RwLock<Vec<String>>>,
-        #[allow(dead_code)]
-        stopped_actors: Arc<RwLock<Vec<String>>>,
         service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     }
 
@@ -810,18 +808,12 @@ mod tests {
                 id: id_str.clone(),
                 addr: "0.0.0.0:8000".to_string(),
                 spawned_actors: Arc::new(RwLock::new(Vec::new())),
-                stopped_actors: Arc::new(RwLock::new(Vec::new())),
                 service_locator,
             }
         }
 
         async fn get_spawned_actors(&self) -> Vec<String> {
             self.spawned_actors.read().await.clone()
-        }
-
-        #[allow(dead_code)]
-        async fn get_stopped_actors(&self) -> Vec<String> {
-            self.stopped_actors.read().await.clone()
         }
     }
 

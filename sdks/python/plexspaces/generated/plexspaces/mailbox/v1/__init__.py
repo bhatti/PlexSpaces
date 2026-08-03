@@ -16,6 +16,7 @@ from typing import (
 import betterproto
 
 from ...channel import v1 as __channel_v1__
+from ...common import v1 as __common_v1__
 
 
 class MailboxType(betterproto.Enum):
@@ -94,6 +95,12 @@ class MailboxError(betterproto.Enum):
      ## Purpose
      Defines error types for mailbox operations.
      Used in error responses and for error handling in mailbox service.
+     Mailbox error types
+
+     ## Client handling
+     - MAILBOX_ERROR_FULL: transient; retry after `retry-after-ms` gRPC trailer (default 100 ms).
+       Maps to gRPC RESOURCE_EXHAUSTED (code 8) which is in the default retry list.
+     - All other errors: non-retryable unless otherwise noted.
     """
 
     UNSPECIFIED = 0
@@ -101,10 +108,14 @@ class MailboxError(betterproto.Enum):
     """Mailbox not found"""
 
     FULL = 2
-    """Mailbox is full (backpressure triggered)"""
+    """
+    Mailbox is full (in-memory channel at capacity).
+     Transient — retry after the `retry-after-ms` value in gRPC trailing metadata.
+     Maps to gRPC RESOURCE_EXHAUSTED (code 8).
+    """
 
     TIMEOUT = 3
-    """Message timeout (message expired)"""
+    """Message timeout (message expired before delivery)"""
 
     INVALID_CONFIG = 4
     """Invalid configuration"""
@@ -118,42 +129,67 @@ class MailboxError(betterproto.Enum):
 
 @dataclass(eq=False, repr=False)
 class MailboxConfig(betterproto.Message):
-    """Mailbox configuration"""
+    """
+    Mailbox configuration
+
+     ## Bounded-queue semantics
+     When `capacity` > 0 and the in-memory channel is used, the mailbox is bounded.
+     Calls to `tell()` or `ask()` that arrive when the queue is full receive
+     gRPC status `RESOURCE_EXHAUSTED` (code 8) with `retry_after_ms` set in the
+     trailing metadata so clients know how long to back off.
+
+     Persistent backends (Redis, Kafka, SQS) are inherently unbounded by default;
+     set `capacity` there only if the backend supports it.
+
+     ## Environment variable overrides
+     All numeric limits can be overridden at runtime via environment variables:
+
+       PLEXSPACES_MAILBOX_CAPACITY          → capacity
+       PLEXSPACES_MAILBOX_MAX_CAPACITY      → max_capacity (hard upper bound)
+       PLEXSPACES_MAILBOX_RETRY_AFTER_MS    → retry_after_ms (backpressure hint)
+
+     These are read once at node startup. Useful in k8s/Docker via the env: block.
+    """
 
     mailbox_type: "MailboxType" = betterproto.enum_field(1)
     """Type of mailbox"""
 
     capacity: int = betterproto.uint32_field(2)
-    """Maximum queue capacity (0 = unlimited for UNBOUNDED)"""
+    """
+    Maximum queue capacity for in-memory channels (0 = use max_capacity or default 10,000).
+     Ignored for persistent backends (Redis, Kafka, SQS).
+     Override via env: PLEXSPACES_MAILBOX_CAPACITY
+    """
 
-    backpressure_strategy: "BackpressureStrategy" = betterproto.enum_field(3)
+    max_capacity: int = betterproto.uint32_field(3)
+    """
+    Hard upper bound on queue depth (applies to in-memory channels only).
+     0 = use the node default (10,000). Cannot exceed 10,000,000.
+     When this limit is reached, `tell()` and `ask()` return RESOURCE_EXHAUSTED.
+     Override via env: PLEXSPACES_MAILBOX_MAX_CAPACITY
+    """
+
+    backpressure_strategy: "BackpressureStrategy" = betterproto.enum_field(4)
     """Backpressure strategy when queue is full"""
 
-    message_timeout: timedelta = betterproto.message_field(4)
+    retry_after_ms: int = betterproto.uint32_field(5)
+    """
+    How long (ms) to suggest callers wait before retrying after RESOURCE_EXHAUSTED.
+     Sent in the `retry-after-ms` gRPC trailing metadata field.
+     Default 0 → 100 ms. Override via env: PLEXSPACES_MAILBOX_RETRY_AFTER_MS
+    """
+
+    message_timeout: timedelta = betterproto.message_field(6)
     """Message timeout (how long messages wait before being dropped)"""
 
-    enable_priority: bool = betterproto.bool_field(5)
+    enable_priority: bool = betterproto.bool_field(7)
     """Enable priority-based processing"""
 
-    enable_deduplication: bool = betterproto.bool_field(6)
-    """Enable message deduplication"""
+    enable_deduplication: bool = betterproto.bool_field(8)
+    """Enable message deduplication (requires idempotency_key on messages)"""
 
-    deduplication_window: timedelta = betterproto.message_field(7)
+    deduplication_window: timedelta = betterproto.message_field(9)
     """Deduplication window"""
-
-    message_id_cache_size: int = betterproto.uint32_field(8)
-    """
-    Maximum cache size for message ID deduplication (default: 10000)
-     LRU cache with fixed size - evicts least recently used when full
-     Range: 100 to 1,000,000 entries
-    """
-
-    idempotency_cache_size: int = betterproto.uint32_field(9)
-    """
-    Maximum cache size for idempotency key deduplication (default: 10000)
-     LRU cache with fixed size - evicts least recently used when full
-     Range: 100 to 1,000,000 entries
-    """
 
     ordering_strategy: "OrderingStrategy" = betterproto.enum_field(10)
     """Ordering strategy (how messages are ordered)"""
@@ -161,20 +197,46 @@ class MailboxConfig(betterproto.Message):
     channel_provider: "__channel_v1__.ChannelProvider" = betterproto.enum_field(11)
     """
     Channel provider implementation (defaults to IN_MEMORY if not specified)
-     This directly specifies which channel provider to use for the mailbox.
-     The provider must be available/configured, otherwise mailbox creation will fail.
     """
 
     channel_config: "__channel_v1__.ChannelConfig" = betterproto.message_field(12)
-    """
-    Channel-specific configuration (optional, backend-specific)
-     Only used if channel_provider is specified. If not provided, provider uses defaults.
-    """
+    """Channel-specific configuration (optional, backend-specific)"""
 
     metadata: Dict[str, str] = betterproto.map_field(
         13, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Metadata"""
+
+    idempotency: "__common_v1__.IdempotencyConfig" = betterproto.message_field(14)
+    """
+    Idempotency store configuration for this mailbox.
+     When set, overrides the node-level IdempotencyConfig for this specific mailbox.
+     Omit to inherit node-level settings (recommended).
+    """
+
+
+@dataclass(eq=False, repr=False)
+class MailboxFullDetail(betterproto.Message):
+    """
+    Error detail attached to RESOURCE_EXHAUSTED responses when a mailbox is full.
+     Sent as a trailing metadata value (key: "mailbox-full-bin") serialized as proto bytes.
+     Clients should wait at least `retry_after_ms` milliseconds before retrying.
+    """
+
+    retry_after_ms: int = betterproto.uint32_field(1)
+    """
+    Suggested back-off before retrying, in milliseconds.
+     0 means use a sensible default (e.g. 100 ms with jitter).
+    """
+
+    actor_id: str = betterproto.string_field(2)
+    """Actor whose mailbox is full."""
+
+    current_depth: int = betterproto.uint32_field(3)
+    """Current queue depth at the time of the error."""
+
+    max_capacity: int = betterproto.uint32_field(4)
+    """Configured max capacity."""
 
 
 @dataclass(eq=False, repr=False)
@@ -214,29 +276,35 @@ class MailboxStats(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class UpdateMailboxConfigRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    config: "MailboxConfig" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    config: "MailboxConfig" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class PurgeMailboxRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class PurgeMailboxResponse(betterproto.Message):
-    messages_purged: int = betterproto.uint32_field(1)
+    request_id: str = betterproto.string_field(1)
+    messages_purged: int = betterproto.uint32_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListMailboxesRequest(betterproto.Message):
-    namespace: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Optional filter"""
+
+    namespace: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListMailboxesResponse(betterproto.Message):
-    mailboxes: List["MailboxInfo"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    mailboxes: List["MailboxInfo"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)

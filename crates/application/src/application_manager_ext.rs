@@ -27,6 +27,9 @@ use plexspaces_proto::application::v1::ApplicationSpec;
 use std::sync::Arc;
 
 /// Extension trait for ApplicationManager with node-specific functionality
+// async_fn_in_trait is acceptable here: this trait is only implemented for Arc<ApplicationManager>
+// within this crate and is never used across crate boundaries as a generic bound, so the missing
+// auto-trait (Send) constraint is not a concern in practice.
 #[allow(async_fn_in_trait)]
 pub trait ApplicationManagerExt {
     /// Get ApplicationSpec from application (if available)

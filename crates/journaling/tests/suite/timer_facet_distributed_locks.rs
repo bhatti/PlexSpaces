@@ -132,6 +132,9 @@ mod distributed_lock_tests {
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id(actor_id, "node-1"),
+                String::new(),
+                String::new(),
+                None,
             )
             .await
             .expect("Failed to create mailbox"),
@@ -153,6 +156,9 @@ mod distributed_lock_tests {
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
+                String::new(),
+                String::new(),
+                None,
             )
             .await
             .expect("Failed to create mailbox"),
@@ -188,6 +194,9 @@ mod distributed_lock_tests {
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
+                String::new(),
+                String::new(),
+                None,
             )
             .await
             .expect("Failed to create mailbox"),
@@ -230,6 +239,9 @@ mod distributed_lock_tests {
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor-1", "node-1"),
+                String::new(),
+                String::new(),
+                None,
             )
             .await
             .expect("Failed to create mailbox"),
@@ -247,6 +259,9 @@ mod distributed_lock_tests {
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor-1", "node-2"),
+                String::new(),
+                String::new(),
+                None,
             )
             .await
             .expect("Failed to create mailbox"),
@@ -293,6 +308,9 @@ mod distributed_lock_tests {
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
+                String::new(),
+                String::new(),
+                None,
             )
             .await
             .expect("Failed to create mailbox"),

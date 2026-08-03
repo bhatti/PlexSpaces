@@ -538,7 +538,9 @@ impl ApplicationManagerImpl {
                 Self::emit_tracked_counts(name, actor_count, supervisor_count, 0);
 
                 // Log metrics
-                if (actor_count > 0 || supervisor_count > 0) && tracing::enabled!(tracing::Level::DEBUG) {
+                if (actor_count > 0 || supervisor_count > 0)
+                    && tracing::enabled!(tracing::Level::DEBUG)
+                {
                     tracing::debug!(
                         application = %name,
                         actor_count = actor_count,
@@ -1252,16 +1254,20 @@ impl ApplicationManagerImpl {
         } else {
             instance.deployed_at.elapsed().unwrap_or_default().as_secs()
         };
-        let metrics = instance.metrics.clone().map(|mut m| {
-            m.uptime_seconds = current_uptime;
-            m
-        }).or_else(|| {
-            Some(Self::default_application_metrics(
-                instance.tracked_actor_count,
-                instance.tracked_supervisor_count,
-                current_uptime,
-            ))
-        });
+        let metrics = instance
+            .metrics
+            .clone()
+            .map(|mut m| {
+                m.uptime_seconds = current_uptime;
+                m
+            })
+            .or_else(|| {
+                Some(Self::default_application_metrics(
+                    instance.tracked_actor_count,
+                    instance.tracked_supervisor_count,
+                    current_uptime,
+                ))
+            });
 
         // Record metrics for application info retrieval
         let name_clone = name.to_string();
@@ -2138,9 +2144,8 @@ mod tests {
         );
         assert!(app_info.metrics.is_some());
         let metrics = app_info.metrics.unwrap();
-        #[allow(unused_comparisons)]
-        let _ = metrics.uptime_seconds >= 0; // May be 0 if very fast, but should be calculated
-                                              // tracked_actor_count is 0, so "total" key is absent (only inserted when count > 0)
+        // uptime_seconds is a u64, always >= 0; no assertion needed
+        // tracked_actor_count is 0, so "total" key is absent (only inserted when count > 0)
         assert_eq!(metrics.actor_counts.get("total"), None);
     }
 

@@ -36,16 +36,17 @@ if TYPE_CHECKING:
 class GetSummaryRequest(betterproto.Message):
     """Dashboard summary request"""
 
-    tenant_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(3)
     """Filter by node ID (optional)"""
 
-    cluster_id: str = betterproto.string_field(3)
+    cluster_id: str = betterproto.string_field(4)
     """Filter by cluster ID (optional)"""
 
-    since: datetime = betterproto.message_field(4)
+    since: datetime = betterproto.message_field(5)
     """Show data since this timestamp (default: now - 24 hours)"""
 
 
@@ -53,40 +54,42 @@ class GetSummaryRequest(betterproto.Message):
 class GetSummaryResponse(betterproto.Message):
     """Dashboard summary response"""
 
-    total_clusters: int = betterproto.uint32_field(1)
+    request_id: str = betterproto.string_field(1)
     """Total number of clusters"""
 
-    total_nodes: int = betterproto.uint32_field(2)
+    total_clusters: int = betterproto.uint32_field(2)
+    total_nodes: int = betterproto.uint32_field(3)
     """Total number of nodes"""
 
-    total_tenants: int = betterproto.uint32_field(3)
+    total_tenants: int = betterproto.uint32_field(4)
     """Total number of tenants (admin only, or filtered by tenant_id)"""
 
-    total_applications: int = betterproto.uint32_field(4)
+    total_applications: int = betterproto.uint32_field(5)
     """Total number of applications (filtered by tenant if auth enabled)"""
 
     actors_by_type: Dict[str, int] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_UINT32
+        6, betterproto.TYPE_STRING, betterproto.TYPE_UINT32
     )
     """Actors by type (aggregated across all nodes)"""
 
-    since: datetime = betterproto.message_field(6)
+    since: datetime = betterproto.message_field(7)
     """Timestamp range for this summary"""
 
-    until: datetime = betterproto.message_field(7)
+    until: datetime = betterproto.message_field(8)
 
 
 @dataclass(eq=False, repr=False)
 class GetNodesRequest(betterproto.Message):
     """Get nodes request"""
 
-    tenant_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by tenant ID (optional)"""
 
-    cluster_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(2)
+    cluster_id: str = betterproto.string_field(3)
     """Filter by cluster ID (optional)"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(3)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(4)
     """Pagination"""
 
 
@@ -94,18 +97,20 @@ class GetNodesRequest(betterproto.Message):
 class GetNodesResponse(betterproto.Message):
     """Get nodes response"""
 
-    nodes: List["__node_v1__.Node"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    nodes: List["__node_v1__.Node"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetNodeDashboardRequest(betterproto.Message):
     """Get node dashboard request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node ID (required)"""
 
-    since: datetime = betterproto.message_field(2)
+    node_id: str = betterproto.string_field(2)
+    since: datetime = betterproto.message_field(3)
     """Show data since this timestamp (default: now - 24 hours)"""
 
 
@@ -113,20 +118,21 @@ class GetNodeDashboardRequest(betterproto.Message):
 class GetNodeDashboardResponse(betterproto.Message):
     """Get node dashboard response"""
 
-    node: "__node_v1__.Node" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node information"""
 
-    node_metrics: "__node_v1__.NodeMetrics" = betterproto.message_field(2)
+    node: "__node_v1__.Node" = betterproto.message_field(2)
+    node_metrics: "__node_v1__.NodeMetrics" = betterproto.message_field(3)
     """Node metrics"""
 
-    system_metrics: "__metrics_v1__.SystemMetrics" = betterproto.message_field(3)
+    system_metrics: "__metrics_v1__.SystemMetrics" = betterproto.message_field(4)
     """System metrics (if available)"""
 
-    summary: "NodeSummaryMetrics" = betterproto.message_field(4)
+    summary: "NodeSummaryMetrics" = betterproto.message_field(5)
     """Summary metrics for this node"""
 
     dependency_health: "__system_v1__.DetailedHealthCheck" = betterproto.message_field(
-        5
+        6
     )
     """Dependency health status (external dependencies)"""
 
@@ -151,19 +157,20 @@ class NodeSummaryMetrics(betterproto.Message):
 class GetApplicationsRequest(betterproto.Message):
     """Get applications request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """Filter by namespace (optional)"""
 
-    name_pattern: str = betterproto.string_field(4)
+    name_pattern: str = betterproto.string_field(5)
     """Filter by application name/ID pattern (optional)"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(5)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(6)
     """Pagination"""
 
 
@@ -171,44 +178,46 @@ class GetApplicationsRequest(betterproto.Message):
 class GetApplicationsResponse(betterproto.Message):
     """Get applications response"""
 
+    request_id: str = betterproto.string_field(1)
     applications: List["__application_v1__.ApplicationInfo"] = (
-        betterproto.message_field(1)
+        betterproto.message_field(2)
     )
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetActorsRequest(betterproto.Message):
     """Get actors request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """Filter by namespace (optional)"""
 
-    actor_id_pattern: str = betterproto.string_field(4)
+    actor_id_pattern: str = betterproto.string_field(5)
     """Filter by actor ID pattern (optional)"""
 
-    actor_group: str = betterproto.string_field(5)
+    actor_group: str = betterproto.string_field(6)
     """Filter by actor group (optional)"""
 
-    actor_type: str = betterproto.string_field(6)
+    actor_type: str = betterproto.string_field(7)
     """Filter by actor type (optional)"""
 
-    status: str = betterproto.string_field(7)
+    status: str = betterproto.string_field(8)
     """Filter by status: "running" or "terminated" (optional)"""
 
-    since: datetime = betterproto.message_field(8)
+    since: datetime = betterproto.message_field(9)
     """Show data since this timestamp (default: now - 24 hours)"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(9)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(10)
     """Pagination"""
 
-    behavior_kind: str = betterproto.string_field(10)
+    behavior_kind: str = betterproto.string_field(11)
     """Filter by runtime behavior kind (optional)"""
 
 
@@ -259,27 +268,29 @@ class ActorInfo(betterproto.Message):
 class GetActorsResponse(betterproto.Message):
     """Get actors response"""
 
-    actors: List["ActorInfo"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    actors: List["ActorInfo"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetWorkflowsRequest(betterproto.Message):
     """Get workflows request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional, empty = all nodes)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    definition_id: str = betterproto.string_field(3)
+    definition_id: str = betterproto.string_field(4)
     """Filter by definition ID (optional)"""
 
-    status: "__workflow_v1__.ExecutionStatus" = betterproto.enum_field(4)
+    status: "__workflow_v1__.ExecutionStatus" = betterproto.enum_field(5)
     """Filter by status (optional)"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(5)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(6)
     """Pagination"""
 
 
@@ -298,18 +309,20 @@ class WorkflowInfo(betterproto.Message):
 class GetWorkflowsResponse(betterproto.Message):
     """Get workflows response"""
 
-    workflows: List["WorkflowInfo"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    workflows: List["WorkflowInfo"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetDependencyHealthRequest(betterproto.Message):
     """Get dependency health request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional, empty = all nodes)"""
 
-    include_non_critical: bool = betterproto.bool_field(2)
+    node_id: str = betterproto.string_field(2)
+    include_non_critical: bool = betterproto.bool_field(3)
     """Include non-critical dependencies (default: true)"""
 
 
@@ -317,10 +330,11 @@ class GetDependencyHealthRequest(betterproto.Message):
 class GetDependencyHealthResponse(betterproto.Message):
     """Get dependency health response"""
 
-    health_check: "__system_v1__.DetailedHealthCheck" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Detailed health check with dependency breakdown"""
 
-    node_id: str = betterproto.string_field(2)
+    health_check: "__system_v1__.DetailedHealthCheck" = betterproto.message_field(2)
+    node_id: str = betterproto.string_field(3)
     """Node ID this health check is for (empty if aggregated)"""
 
 
@@ -330,21 +344,22 @@ class GetDashboardMetricsRequest(betterproto.Message):
     Dashboard metrics request (local node; same recorder as MetricsService gRPC).
     """
 
-    namespace: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Optional `namespace` label filter (application / actor namespace)"""
 
-    name_pattern: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(2)
+    name_pattern: str = betterproto.string_field(3)
     """Name glob; empty or "*" matches all metric names"""
 
     label_filter: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Additional label equality filters (AND)"""
 
-    include_definitions: bool = betterproto.bool_field(4)
+    include_definitions: bool = betterproto.bool_field(5)
     """Include metric definitions (metadata)"""
 
-    include_prometheus_text: bool = betterproto.bool_field(5)
+    include_prometheus_text: bool = betterproto.bool_field(6)
     """
     Include full Prometheus exposition text (for Prometheus-compatible UIs)
     """
@@ -352,62 +367,66 @@ class GetDashboardMetricsRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class GetDashboardMetricsResponse(betterproto.Message):
-    metrics: List["__metrics_v1__.Metric"] = betterproto.message_field(1)
-    definitions: List["__metrics_v1__.MetricDefinition"] = betterproto.message_field(2)
-    prometheus_text: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    metrics: List["__metrics_v1__.Metric"] = betterproto.message_field(2)
+    definitions: List["__metrics_v1__.MetricDefinition"] = betterproto.message_field(3)
+    prometheus_text: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class GetObjectsRequest(betterproto.Message):
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional, empty = local node)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """Filter by namespace (optional)"""
 
-    object_type: str = betterproto.string_field(4)
+    object_type: str = betterproto.string_field(5)
     """
     Filter by object type string: "ACTOR", "TUPLESPACE", "SERVICE", "VM", "APPLICATION", "WORKFLOW", "NODE" (optional)
     """
 
-    health_status: str = betterproto.string_field(5)
+    health_status: str = betterproto.string_field(6)
     """
     Filter by health status string: "HEALTHY", "DEGRADED", "DEAD" (optional)
     """
 
-    id_pattern: str = betterproto.string_field(6)
+    id_pattern: str = betterproto.string_field(7)
     """Filter by object ID pattern (optional)"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(7)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(8)
     """Pagination"""
 
 
 @dataclass(eq=False, repr=False)
 class GetObjectsResponse(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
     objects: List["__object_registry_v1__.ObjectRegistration"] = (
-        betterproto.message_field(1)
+        betterproto.message_field(2)
     )
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetKeyValuesRequest(betterproto.Message):
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional, empty = local node)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """Filter by namespace (optional)"""
 
-    prefix: str = betterproto.string_field(4)
+    prefix: str = betterproto.string_field(5)
     """Key prefix filter (optional)"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(5)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(6)
     """Pagination"""
 
 
@@ -429,22 +448,24 @@ class KeyValueDashboardEntry(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class GetKeyValuesResponse(betterproto.Message):
-    entries: List["KeyValueDashboardEntry"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    entries: List["KeyValueDashboardEntry"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetTupleSpacesRequest(betterproto.Message):
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional, empty = local node)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """Filter by namespace (optional)"""
 
-    pattern: str = betterproto.string_field(4)
+    pattern: str = betterproto.string_field(5)
     """Optional pattern string to match against tuples (default: wildcard)"""
 
 
@@ -467,105 +488,115 @@ class TupleSpaceSummary(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class GetTupleSpacesResponse(betterproto.Message):
-    spaces: List["TupleSpaceSummary"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    spaces: List["TupleSpaceSummary"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetBlobsRequest(betterproto.Message):
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by node ID (optional, empty = local node)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Filter by tenant ID (optional, from auth context if not provided)"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """Filter by namespace (optional)"""
 
-    kind: str = betterproto.string_field(4)
+    kind: str = betterproto.string_field(5)
     """Filter by blob kind (optional)"""
 
-    prefix: str = betterproto.string_field(5)
+    prefix: str = betterproto.string_field(6)
     """Filter by blob name prefix (optional)"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(6)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(7)
     """Pagination"""
 
 
 @dataclass(eq=False, repr=False)
 class GetBlobsResponse(betterproto.Message):
-    blobs: List["__storage_v1__.BlobMetadata"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Reuses existing BlobMetadata proto from storage package"""
 
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    blobs: List["__storage_v1__.BlobMetadata"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetBlobPresignedUrlRequest(betterproto.Message):
-    blob_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Blob ID (required)"""
 
-    node_id: str = betterproto.string_field(2)
+    blob_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(3)
     """Node ID where the blob lives (optional, empty = local node)"""
 
-    tenant_id: str = betterproto.string_field(3)
+    tenant_id: str = betterproto.string_field(4)
     """
     Tenant ID for authorization (optional, from auth context if not provided)
     """
 
-    namespace: str = betterproto.string_field(4)
+    namespace: str = betterproto.string_field(5)
     """Namespace for authorization (optional)"""
 
 
 @dataclass(eq=False, repr=False)
 class GetBlobPresignedUrlResponse(betterproto.Message):
-    url: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Presigned download URL (empty if not available)"""
 
-    expires_at: datetime = betterproto.message_field(2)
+    url: str = betterproto.string_field(2)
+    expires_at: datetime = betterproto.message_field(3)
     """URL expiration timestamp"""
 
-    error: str = betterproto.string_field(3)
+    error: str = betterproto.string_field(4)
     """Error message if presigned URLs are not configured or blob not found"""
 
 
 @dataclass(eq=False, repr=False)
 class GetServiceLinksRequest(betterproto.Message):
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node ID (optional, empty = local node)"""
 
-    tenant_id: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Tenant ID (optional, used for filtering if auth enabled)"""
 
 
 @dataclass(eq=False, repr=False)
 class GetServiceLinksResponse(betterproto.Message):
-    service_links: List["__node_v1__.ServiceLinkConfig"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Reuses existing ServiceLinkConfig proto from node/outbound package"""
+
+    service_links: List["__node_v1__.ServiceLinkConfig"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetMetricsTableRequest(betterproto.Message):
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node ID (optional, empty = local node)"""
 
-    namespace: str = betterproto.string_field(2)
+    node_id: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """Optional namespace label filter"""
 
-    name_pattern: str = betterproto.string_field(3)
+    name_pattern: str = betterproto.string_field(4)
     """Name glob; empty or "*" matches all metric names"""
 
     label_filter: Dict[str, str] = betterproto.map_field(
-        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Additional label equality filters (AND)"""
 
 
 @dataclass(eq=False, repr=False)
 class GetMetricsTableResponse(betterproto.Message):
-    metrics: List["__metrics_v1__.Metric"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """All matching metrics with current values"""
 
-    definitions: List["__metrics_v1__.MetricDefinition"] = betterproto.message_field(2)
+    metrics: List["__metrics_v1__.Metric"] = betterproto.message_field(2)
+    definitions: List["__metrics_v1__.MetricDefinition"] = betterproto.message_field(3)
     """Metric definitions (metadata: description, unit, type)"""
 
 

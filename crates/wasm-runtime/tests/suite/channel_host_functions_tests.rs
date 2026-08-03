@@ -249,19 +249,19 @@ async fn test_send_to_queue_host_function() {
         limits,
         10_000_000_000, // max_fuel
         Some(channel_service),
-        None,  // message_sender
-        None,  // tuplespace_provider
-        None,  // keyvalue_store
-        None,  // process_group_registry
-        None,  // lock_manager
-        None,  // object_registry
-        None,  // journal_storage
-        None,  // blob_service
-        None,  // elastic_pool_service
-        None,  // outbound_http_client
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
-        None,  // shared_timer_pool
+        None,          // message_sender
+        None,          // tuplespace_provider
+        None,          // keyvalue_store
+        None,          // process_group_registry
+        None,          // lock_manager
+        None,          // object_registry
+        None,          // journal_storage
+        None,          // blob_service
+        None,          // elastic_pool_service
+        None,          // outbound_http_client
+        false,         // durability_enabled
+        None,          // global_reinstantiation_semaphore
+        None,          // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
         String::new(), // node_grpc_address
@@ -312,19 +312,19 @@ async fn test_publish_to_topic_host_function() {
         limits,
         10_000_000_000, // max_fuel
         Some(channel_service),
-        None,  // message_sender
-        None,  // tuplespace_provider
-        None,  // keyvalue_store
-        None,  // process_group_registry
-        None,  // lock_manager
-        None,  // object_registry
-        None,  // journal_storage
-        None,  // blob_service
-        None,  // elastic_pool_service
-        None,  // outbound_http_client
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
-        None,  // shared_timer_pool
+        None,          // message_sender
+        None,          // tuplespace_provider
+        None,          // keyvalue_store
+        None,          // process_group_registry
+        None,          // lock_manager
+        None,          // object_registry
+        None,          // journal_storage
+        None,          // blob_service
+        None,          // elastic_pool_service
+        None,          // outbound_http_client
+        false,         // durability_enabled
+        None,          // global_reinstantiation_semaphore
+        None,          // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
         String::new(), // node_grpc_address
@@ -385,9 +385,9 @@ async fn test_send_to_queue_without_channel_service() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");

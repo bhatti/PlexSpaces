@@ -4,30 +4,21 @@
 // Integration tests for temporary sender pattern in ActorRef::ask()
 // Tests all scenarios: outside sender, local actor, remote actor, chained asks
 
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::{
-    Actor, ActorContext, ActorId, ActorRegistry, ActorRegistrationParams, ActorService,
+    Actor, ActorContext, ActorId, ActorRegistrationParams, ActorRegistry, ActorService,
     BehaviorError, BehaviorType, Message, MessageSender, RequestContextExt,
 };
 use plexspaces_actor::{ActorBuilder, ActorRef};
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::{actor_service_server::ActorServiceServer, ActorVisibility};
 use plexspaces_services::actor_service::ActorServiceImpl;
+use plexspaces_test_utils::messages::create_test_message;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info};
-use ulid::Ulid;
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> Message {
-    Message {
-        id: Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
-}
 
 fn genserver_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
     ActorId::new(
@@ -236,15 +227,12 @@ async fn create_test_registry_with_node(
             ctx: &plexspaces_actor::RequestContext,
             opts: plexspaces_actor::DiscoverOptions,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            self.inner
-                .discover(ctx, opts)
-                .await
-                .map_err(|e| {
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        e.to_string(),
-                    )) as Box<dyn std::error::Error + Send + Sync>
-                })
+            self.inner.discover(ctx, opts).await.map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
         }
 
         async fn unregister(
@@ -588,7 +576,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let mailbox_counter = Arc::new(
-        Mailbox::new(mailbox_config, counter_id.to_string())
+        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
@@ -740,7 +728,7 @@ async fn test_chained_asks_multi_node() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let mailbox_counter = Arc::new(
-        Mailbox::new(mailbox_config, counter_id.to_string())
+        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
@@ -890,7 +878,7 @@ async fn test_concurrent_asks_multi_node() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let mailbox_counter = Arc::new(
-        Mailbox::new(mailbox_config, counter_id.to_string())
+        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );

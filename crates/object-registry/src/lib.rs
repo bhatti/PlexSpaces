@@ -152,8 +152,8 @@ use tokio::sync::RwLock;
 use tracing::instrument;
 
 // Re-export commonly used types
-pub use plexspaces_actor::DiscoverOptions;
 pub use config::{create_repository_from_shared_db, create_repository_from_storage_config};
+pub use plexspaces_actor::DiscoverOptions;
 
 #[cfg(feature = "sql-backend")]
 pub use repository::{PostgresObjectRegistryRepository, SqliteObjectRegistryRepository};
@@ -231,12 +231,7 @@ impl AliasLruCache {
         let expired = self
             .map
             .get(key)
-            .map(|(_, ts)| {
-                SystemTime::now()
-                    .duration_since(*ts)
-                    .unwrap_or_default()
-                    >= self.ttl
-            })
+            .map(|(_, ts)| SystemTime::now().duration_since(*ts).unwrap_or_default() >= self.ttl)
             .unwrap_or(true);
 
         if expired {
@@ -325,10 +320,7 @@ impl ObjectRegistryImpl {
     pub fn new(repository: Arc<dyn ObjectRegistryRepository>) -> Self {
         Self {
             repository,
-            alias_cache: RwLock::new(AliasLruCache::new(
-                10_000,
-                Duration::from_secs(30),
-            )),
+            alias_cache: RwLock::new(AliasLruCache::new(10_000, Duration::from_secs(30))),
         }
     }
 
@@ -993,7 +985,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         let obj_type = object_type
             .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.lookup(ctx, obj_type, object_id).await.map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })
     }
 
@@ -1025,11 +1018,10 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         Vec<plexspaces_actor::actor_context::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
-        self.discover(ctx, opts)
-            .await
-            .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
-            })
+        self.discover(ctx, opts).await.map_err(|e| {
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn unregister(
@@ -1041,7 +1033,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.unregister(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1055,7 +1048,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.list_tenant_ids_by_object_type(ctx, object_type, offset, limit)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1067,7 +1061,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.count_tenant_ids_by_object_type(ctx, object_type)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1080,7 +1075,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.heartbeat(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1088,10 +1084,13 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         &self,
         ctx: &RequestContext,
         alias: &str,
-    ) -> Result<Option<plexspaces_actor::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<
+        Option<plexspaces_actor::actor_context::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         self.lookup_by_alias(ctx, alias).await.map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })
     }
 
@@ -1104,7 +1103,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.register_with_unique_alias(ctx, registration, enforce_unique)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1116,7 +1116,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.record_heartbeat_failure(ctx, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1128,7 +1129,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.mark_objects_dead_by_node(ctx, node_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1141,7 +1143,8 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.find_stale_heartbeats_raw(ctx, threshold_seconds, limit)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 }
@@ -1888,10 +1891,8 @@ mod tests {
             .await
             .unwrap();
         for reg in &stale {
-            let tenant_ctx = RequestContext::new_without_auth(
-                reg.tenant_id.clone(),
-                reg.namespace.clone(),
-            );
+            let tenant_ctx =
+                RequestContext::new_without_auth(reg.tenant_id.clone(), reg.namespace.clone());
             registry
                 .record_heartbeat_failure(&tenant_ctx, &reg.object_id)
                 .await

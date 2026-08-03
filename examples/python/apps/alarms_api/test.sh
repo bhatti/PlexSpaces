@@ -20,7 +20,7 @@ HTTP_PORT="${1:-${HTTP_PORT:-8091}}"
 HTTP_HOST="${HTTP_HOST:-127.0.0.1}"
 
 APP_ID="py-alarms-api"
-QUEUE_ACTOR="RequestQueueActor:queue-1"
+QUEUE_ACTOR="queue-1:RequestQueueActor"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

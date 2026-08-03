@@ -108,10 +108,8 @@ impl UserRepository for SqlUserRepository {
             Ok((user, false))
         } else {
             let user_id = ulid::Ulid::new().to_string();
-            let roles_json =
-                serde_json::to_string(&req.roles).unwrap_or_else(|_| "[]".into());
-            let groups_json =
-                serde_json::to_string(&req.groups).unwrap_or_else(|_| "[]".into());
+            let roles_json = serde_json::to_string(&req.roles).unwrap_or_else(|_| "[]".into());
+            let groups_json = serde_json::to_string(&req.groups).unwrap_or_else(|_| "[]".into());
 
             sqlx::query(
                 r#"INSERT INTO users (user_id, email, tenant_id, display_name, admin, roles_json, groups_json, avatar_url, provider, provider_sub, last_login)
@@ -144,7 +142,7 @@ impl UserRepository for SqlUserRepository {
                 avatar_url: req.avatar_url.clone(),
                 provider: req.provider.clone(),
                 provider_sub: req.provider_sub.clone(),
-                };
+            };
 
             Ok((user, true))
         }
@@ -157,12 +155,11 @@ impl UserRepository for SqlUserRepository {
         limit: i32,
     ) -> Result<(Vec<User>, i32), UserRepositoryError> {
         let (total, rows) = if let Some(tid) = tenant_filter {
-            let total: i32 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE tenant_id = ?")
-                    .bind(tid)
-                    .fetch_one(&self.pool)
-                    .await
-                    .map_err(|e| UserRepositoryError::Database(e.to_string()))?;
+            let total: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE tenant_id = ?")
+                .bind(tid)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| UserRepositoryError::Database(e.to_string()))?;
 
             let rows = sqlx::query(
                 "SELECT * FROM users WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -181,14 +178,12 @@ impl UserRepository for SqlUserRepository {
                 .await
                 .map_err(|e| UserRepositoryError::Database(e.to_string()))?;
 
-            let rows = sqlx::query(
-                "SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            )
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| UserRepositoryError::Database(e.to_string()))?;
+            let rows = sqlx::query("SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?")
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| UserRepositoryError::Database(e.to_string()))?;
 
             (total, rows)
         };
@@ -235,10 +230,8 @@ impl UserRepository for SqlUserRepository {
             user.avatar_url = req.avatar_url.clone();
         }
 
-        let roles_json =
-            serde_json::to_string(&user.roles).unwrap_or_else(|_| "[]".into());
-        let groups_json =
-            serde_json::to_string(&user.groups).unwrap_or_else(|_| "[]".into());
+        let roles_json = serde_json::to_string(&user.roles).unwrap_or_else(|_| "[]".into());
+        let groups_json = serde_json::to_string(&user.groups).unwrap_or_else(|_| "[]".into());
 
         sqlx::query(
             r#"UPDATE users SET display_name = ?, admin = ?, roles_json = ?, groups_json = ?, avatar_url = ?, updated_at = strftime('%s', 'now')

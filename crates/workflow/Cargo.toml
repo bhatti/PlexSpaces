@@ -22,7 +22,7 @@ plexspaces-facet = { path = "../facet" }
 # Async runtime
 tokio = { workspace = true }
 futures = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

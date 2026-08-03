@@ -33,7 +33,7 @@ use std::time::SystemTime;
 /// Typed actor message (enum-based for type safety)
 ///
 /// ## Usage
-/// ```rust,no_run
+/// ```rust,ignore
 /// use plexspaces_mailbox::Message;
 /// # let msg = Message::new(b"data".to_vec());
 /// match msg.as_typed() {

@@ -72,6 +72,23 @@ impl SqliteObjectRegistryRepository {
             .await
             .map_err(|e| RepositoryError::Connection(e.to_string()))?;
 
+        // Production SQLite PRAGMAs (ref: micrologics.org/blog/sqlite-in-production-*)
+        for pragma in &[
+            "PRAGMA journal_mode=WAL",
+            "PRAGMA synchronous=NORMAL",
+            "PRAGMA busy_timeout=500",
+            "PRAGMA cache_size=-64000",
+            "PRAGMA mmap_size=1073741824",
+            "PRAGMA journal_size_limit=67108864",
+            // Disable auto-checkpoint to prevent WAL stalls under high write throughput.
+            "PRAGMA wal_autocheckpoint=0",
+        ] {
+            sqlx::query(pragma)
+                .execute(&pool)
+                .await
+                .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        }
+
         Self::run_migrations(&pool).await?;
 
         Ok(Self { pool })
@@ -256,12 +273,10 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
                     .unwrap_or(registration.health_status);
                 registration.health_status = health_status;
 
-                let failure_count: i64 =
-                    row.try_get("heartbeat_failure_count").unwrap_or(0);
+                let failure_count: i64 = row.try_get("heartbeat_failure_count").unwrap_or(0);
                 registration.heartbeat_failure_count = failure_count as u32;
 
-                let max_failures: i64 =
-                    row.try_get("max_heartbeat_failures").unwrap_or(3);
+                let max_failures: i64 = row.try_get("max_heartbeat_failures").unwrap_or(3);
                 if max_failures > 0 {
                     registration.max_heartbeat_failures = max_failures as u32;
                 }
@@ -1680,7 +1695,12 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
             let health_status: i32 = row.try_get("health_status").unwrap_or(1);
             let failure_count: i32 = row.try_get("heartbeat_failure_count").unwrap_or(0);
             let max_failures: i32 = row.try_get("max_heartbeat_failures").unwrap_or(3);
-            results.push(Self::merge_indexed_row(blob, health_status, failure_count, max_failures)?);
+            results.push(Self::merge_indexed_row(
+                blob,
+                health_status,
+                failure_count,
+                max_failures,
+            )?);
         }
         Ok(results)
     }
@@ -1934,12 +1954,20 @@ mod tests {
         let reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
         repo.put(&ctx, &reg).await.unwrap();
 
-        let c1 = repo.increment_heartbeat_failures(&ctx, "actor-1").await.unwrap();
+        let c1 = repo
+            .increment_heartbeat_failures(&ctx, "actor-1")
+            .await
+            .unwrap();
         assert_eq!(c1, 1);
-        let c2 = repo.increment_heartbeat_failures(&ctx, "actor-1").await.unwrap();
+        let c2 = repo
+            .increment_heartbeat_failures(&ctx, "actor-1")
+            .await
+            .unwrap();
         assert_eq!(c2, 2);
 
-        repo.reset_heartbeat_failures(&ctx, "actor-1").await.unwrap();
+        repo.reset_heartbeat_failures(&ctx, "actor-1")
+            .await
+            .unwrap();
 
         let found = repo.get(&ctx, "actor-1").await.unwrap().unwrap();
         assert_eq!(found.heartbeat_failure_count, 0);

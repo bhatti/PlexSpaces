@@ -131,13 +131,19 @@ impl SimpleHostImpl {
     /// Build a RequestContext for process group operations.
     /// The namespace comes directly from the validated structured actor ID.
     fn pg_context(&self) -> RequestContext {
-        RequestContext::new_without_auth(self.tenant_id.clone(), self.actor_id.namespace().to_string())
+        RequestContext::new_without_auth(
+            self.tenant_id.clone(),
+            self.actor_id.namespace().to_string(),
+        )
     }
 
     /// Build a RequestContext from the actor's runtime tenant/namespace context.
     /// Used by host functions that previously accepted tenant-id/namespace as WIT params.
     fn make_context(&self) -> RequestContext {
-        RequestContext::new_without_auth(self.tenant_id.clone(), self.actor_id.namespace().to_string())
+        RequestContext::new_without_auth(
+            self.tenant_id.clone(),
+            self.actor_id.namespace().to_string(),
+        )
     }
 
     fn decode_proto<M>(payload: &[u8], type_name: &str) -> Result<M, String>
@@ -220,7 +226,11 @@ impl plexspaces::actor::host_logging::Host for SimpleHostImpl {
 impl plexspaces::actor::host_actor::Host for SimpleHostImpl {
     /// Send a message to another actor (fire-and-forget at the WIT boundary).
     async fn send(&mut self, to: String, msg_type: String, payload: Vec<u8>) -> Result<(), String> {
-        if self.host_functions.is_replaying.load(std::sync::atomic::Ordering::Acquire) {
+        if self
+            .host_functions
+            .is_replaying
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
             tracing::debug!(
                 actor_id = %self.actor_id, to = %to, msg_type = %msg_type,
                 "send: suppressed during journal replay"
@@ -275,7 +285,11 @@ impl plexspaces::actor::host_actor::Host for SimpleHostImpl {
         payload: Vec<u8>,
         timeout_ms: u64,
     ) -> Result<Vec<u8>, String> {
-        if self.host_functions.is_replaying.load(std::sync::atomic::Ordering::Acquire) {
+        if self
+            .host_functions
+            .is_replaying
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
             tracing::debug!(
                 actor_id = %self.actor_id, to = %to, msg_type = %msg_type,
                 "ask: suppressed during journal replay"
@@ -348,13 +362,7 @@ impl plexspaces::actor::host_actor::Host for SimpleHostImpl {
         );
         match self
             .host_functions
-            .spawn_actor(
-                &self_id,
-                &module_ref,
-                role,
-                args,
-                requested_name,
-            )
+            .spawn_actor(&self_id, &module_ref, role, args, requested_name)
             .await
         {
             Ok(spawned_id) => {
@@ -459,7 +467,11 @@ impl plexspaces::actor::host_actor::Host for SimpleHostImpl {
         // During journal replay, suppress timer scheduling to prevent reentrance traps.
         // The WASM component model forbids re-entering a component instance; timers that
         // fire during replay would attempt to deliver messages while the instance is busy.
-        if self.host_functions.is_replaying.load(std::sync::atomic::Ordering::Acquire) {
+        if self
+            .host_functions
+            .is_replaying
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
             let suppressed_id = format!("timer-replay-suppressed-{}", ulid::Ulid::new());
             tracing::debug!(
                 actor_id = %self.actor_id, timer_id = %suppressed_id,
@@ -530,13 +542,13 @@ impl plexspaces::actor::host_actor::Host for SimpleHostImpl {
                     .await
                 {
                     Ok(()) => Ok(()),
-                    Err(plexspaces_process_groups::ProcessGroupError::GroupNotFound(_)) => {
+                    Err(plexspaces_actor::process_groups::ProcessGroupError::GroupNotFound(_)) => {
                         // Auto-create group and retry join (Erlang pg semantics)
                         if let Err(e) = registry.create_group(&ctx, &group_name).await {
                             // Ignore GroupAlreadyExists (race condition with another actor)
                             if !matches!(
                                 e,
-                                plexspaces_process_groups::ProcessGroupError::GroupAlreadyExists(_)
+                                plexspaces_actor::process_groups::ProcessGroupError::GroupAlreadyExists(_)
                             ) {
                                 return Err(format!("Failed to create group: {}", e));
                             }
@@ -711,7 +723,12 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
         }
     }
 
-    async fn kv_put_with_ttl(&mut self, key: String, value: Vec<u8>, ttl_seconds: u64) -> Result<(), String> {
+    async fn kv_put_with_ttl(
+        &mut self,
+        key: String,
+        value: Vec<u8>,
+        ttl_seconds: u64,
+    ) -> Result<(), String> {
         let ctx = RequestContext::new_without_auth(String::new(), self.actor_id.to_string());
         self.host_functions.put_keyvalue_with_ttl(&ctx, &key, value, ttl_seconds).await
             .map_err(|e| { tracing::warn!(actor_id = %self.actor_id, key = %key, error = %e, "wasm kv_put_with_ttl failed"); e })
@@ -724,9 +741,18 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
     }
 
     /// Compare-and-swap: empty expected bytes means "key must not exist".
-    async fn kv_cas(&mut self, key: String, expected: Vec<u8>, new_value: Vec<u8>) -> Result<bool, String> {
+    async fn kv_cas(
+        &mut self,
+        key: String,
+        expected: Vec<u8>,
+        new_value: Vec<u8>,
+    ) -> Result<bool, String> {
         let ctx = RequestContext::new_without_auth(String::new(), self.actor_id.to_string());
-        let expected_opt = if expected.is_empty() { None } else { Some(expected) };
+        let expected_opt = if expected.is_empty() {
+            None
+        } else {
+            Some(expected)
+        };
         self.host_functions.cas_keyvalue(&ctx, &key, expected_opt, new_value).await
             .map_err(|e| { tracing::warn!(actor_id = %self.actor_id, key = %key, error = %e, "wasm kv_cas failed"); e })
     }
@@ -744,10 +770,19 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
         let keys: Vec<String> = serde_json::from_slice(&keys_json)
             .map_err(|e| format!("kv_multi_get: invalid keys JSON: {}", e))?;
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-        let values = self.host_functions.multi_get_keyvalue(&ctx, &key_refs).await
-            .map_err(|e| { tracing::warn!(actor_id = %self.actor_id, error = %e, "wasm kv_multi_get failed"); e })?;
-        let result: Vec<Option<String>> = values.into_iter()
-            .map(|v| v.map(|b| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b)))
+        let values = self
+            .host_functions
+            .multi_get_keyvalue(&ctx, &key_refs)
+            .await
+            .map_err(|e| {
+                tracing::warn!(actor_id = %self.actor_id, error = %e, "wasm kv_multi_get failed");
+                e
+            })?;
+        let result: Vec<Option<String>> = values
+            .into_iter()
+            .map(|v| {
+                v.map(|b| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b))
+            })
             .collect();
         serde_json::to_vec(&result)
             .map_err(|e| format!("kv_multi_get: response serialize failed: {}", e))
@@ -758,7 +793,8 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
         let ctx = RequestContext::new_without_auth(String::new(), self.actor_id.to_string());
         let map: std::collections::HashMap<String, String> = serde_json::from_slice(&entries_json)
             .map_err(|e| format!("kv_multi_put: invalid entries JSON: {}", e))?;
-        let pairs: Vec<(String, Vec<u8>)> = map.into_iter()
+        let pairs: Vec<(String, Vec<u8>)> = map
+            .into_iter()
             .map(|(k, v64)| {
                 let k_err = k.clone();
                 base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &v64)
@@ -766,9 +802,15 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
                     .map_err(|e| format!("kv_multi_put: base64 decode for key {:?}: {}", k_err, e))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let pair_refs: Vec<(&str, Vec<u8>)> = pairs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-        self.host_functions.multi_put_keyvalue(&ctx, &pair_refs).await
-            .map_err(|e| { tracing::warn!(actor_id = %self.actor_id, error = %e, "wasm kv_multi_put failed"); e })
+        let pair_refs: Vec<(&str, Vec<u8>)> =
+            pairs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        self.host_functions
+            .multi_put_keyvalue(&ctx, &pair_refs)
+            .await
+            .map_err(|e| {
+                tracing::warn!(actor_id = %self.actor_id, error = %e, "wasm kv_multi_put failed");
+                e
+            })
     }
 
     // ========================================================================
@@ -788,7 +830,9 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
     async fn alarm_set(&mut self, timestamp_ms: u64) -> Result<(), String> {
         let actor_id = self.actor_id.to_string();
         // Persist to JournalStorage so the alarm survives actor deactivation/restart.
-        self.host_functions.alarm_set(&actor_id, timestamp_ms).await?;
+        self.host_functions
+            .alarm_set(&actor_id, timestamp_ms)
+            .await?;
         // Also schedule an in-process send_after so the actor fires without waiting for
         // a scanner (reuses the existing send_after infrastructure, no duplication).
         let now_ms = std::time::SystemTime::now()
@@ -803,7 +847,10 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             // CAS-delete: atomically remove the alarm only if it still matches our timestamp.
             // Returns false if alarm was superseded by a newer alarm_set call.
-            match host_functions.alarm_delete_if_matches(&hf_alarm_id, timestamp_ms).await {
+            match host_functions
+                .alarm_delete_if_matches(&hf_alarm_id, timestamp_ms)
+                .await
+            {
                 Ok(true) => { /* we own this alarm, proceed with delivery */ }
                 Ok(false) => {
                     tracing::debug!(actor_id = %hf_alarm_id, timestamp_ms, "alarm superseded, skipping delivery");
@@ -814,7 +861,10 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
                     return;
                 }
             }
-            if let Err(e) = host_functions.send_message(&hf_alarm_id, &hf_alarm_id, "__alarm__", &[]).await {
+            if let Err(e) = host_functions
+                .send_message(&hf_alarm_id, &hf_alarm_id, "__alarm__", &[])
+                .await
+            {
                 tracing::warn!(actor_id = %hf_alarm_id, error = %e, "alarm delivery failed");
             }
         });
@@ -826,13 +876,15 @@ impl plexspaces::actor::host_kv::Host for SimpleHostImpl {
     }
 
     async fn alarm_get(&mut self) -> Result<u64, String> {
-        self.host_functions.alarm_get(&self.actor_id.to_string()).await
+        self.host_functions.alarm_get(self.actor_id.as_ref()).await
     }
 
     async fn alarm_delete(&mut self) -> Result<(), String> {
         // Remove from JournalStorage. The in-flight send_after task checks alarm_get before
         // firing, so the alarm will not be delivered after this call.
-        self.host_functions.alarm_delete(&self.actor_id.to_string()).await
+        self.host_functions
+            .alarm_delete(self.actor_id.as_ref())
+            .await
     }
 }
 
@@ -941,7 +993,6 @@ impl plexspaces::actor::host_ts::Host for SimpleHostImpl {
             }
         }
     }
-
 }
 
 /// Distributed locks — host-locks interface
@@ -1104,7 +1155,6 @@ impl plexspaces::actor::host_locks::Host for SimpleHostImpl {
             }
         }
     }
-
 }
 
 /// Blob storage — host-blob interface
@@ -1300,7 +1350,6 @@ impl plexspaces::actor::host_blob::Host for SimpleHostImpl {
             }
         }
     }
-
 }
 
 /// Elastic pool — host-pool interface
@@ -1581,7 +1630,6 @@ impl plexspaces::actor::host_shard::Host for SimpleHostImpl {
             Err(err) => Err(err.to_string()),
         }
     }
-
 }
 
 /// Outbound HTTP — host-http interface
@@ -1754,7 +1802,10 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         metrics::counter!("plexspaces_wasm_channel_subscribe_total", "channel" => channel_name.clone()).increment(1);
         // Push-based pub/sub streaming is not supported for actor-world components.
         // WASM actors receive channel messages via channel_receive (queue polling model).
-        Err("not-implemented: use channel_receive for message consumption in actor-world".to_string())
+        Err(
+            "not-implemented: use channel_receive for message consumption in actor-world"
+                .to_string(),
+        )
     }
 
     async fn channel_unsubscribe(
@@ -1762,7 +1813,10 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         _subscription_id: String,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_channel_unsubscribe_total").increment(1);
-        Err("not-implemented: use channel_receive for message consumption in actor-world".to_string())
+        Err(
+            "not-implemented: use channel_receive for message consumption in actor-world"
+                .to_string(),
+        )
     }
 
     async fn channel_create(
@@ -1820,8 +1874,8 @@ pub fn is_simple_actor_component(component: &wasmtime::component::Component) -> 
 mod tests {
     use super::*;
     use crate::simple_component_host::plexspaces::actor::host_actor::Host as HostActorTrait;
-    use crate::simple_component_host::plexspaces::actor::host_shard::Host as HostShardTrait;
     use crate::simple_component_host::plexspaces::actor::host_http::Host as HostHttpTrait;
+    use crate::simple_component_host::plexspaces::actor::host_shard::Host as HostShardTrait;
     use async_trait::async_trait;
     use plexspaces_actor::{OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse};
     use plexspaces_proto::actor::v1::{
@@ -2619,7 +2673,11 @@ mod tests {
         hf.is_replaying
             .store(true, std::sync::atomic::Ordering::Release);
 
-        let mut host = SimpleHostImpl::new(ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(), hf.clone(), None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(),
+            hf.clone(),
+            None,
+        );
 
         let result = host
             .send_after(1000, "timer_fire".to_string(), b"payload".to_vec())
@@ -2635,7 +2693,11 @@ mod tests {
 
         // No timer handle should have been spawned
         let handles = hf.timer_handles.lock().unwrap();
-        assert_eq!(handles.len(), 0, "No timers should be spawned during replay");
+        assert_eq!(
+            handles.len(),
+            0,
+            "No timers should be spawned during replay"
+        );
     }
 
     #[cfg(feature = "component-model")]
@@ -2648,13 +2710,24 @@ mod tests {
         hf.is_replaying
             .store(true, std::sync::atomic::Ordering::Release);
 
-        let mut host = SimpleHostImpl::new(ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(), hf.clone(), None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(),
+            hf.clone(),
+            None,
+        );
 
         let result = host
-            .send("other-actor".to_string(), "event".to_string(), b"data".to_vec())
+            .send(
+                "other-actor".to_string(),
+                "event".to_string(),
+                b"data".to_vec(),
+            )
             .await;
 
-        assert!(result.is_ok(), "send should succeed (suppressed) during replay");
+        assert!(
+            result.is_ok(),
+            "send should succeed (suppressed) during replay"
+        );
     }
 
     #[cfg(feature = "component-model")]
@@ -2665,7 +2738,11 @@ mod tests {
         let sender = Arc::new(MockMessageSender) as Arc<dyn crate::MessageSender>;
         let hf = Arc::new(HostFunctions::with_message_sender(sender));
 
-        let mut host = SimpleHostImpl::new(ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(), hf.clone(), None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(),
+            hf.clone(),
+            None,
+        );
 
         let result = host
             .send_after(50, "timer_fire".to_string(), b"payload".to_vec())

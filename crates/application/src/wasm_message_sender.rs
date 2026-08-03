@@ -830,64 +830,6 @@ mod tests {
         sent_messages: Arc<tokio::sync::Mutex<Vec<(String, String)>>>,
     }
 
-    #[allow(dead_code)]
-    struct NoopObjectRegistry;
-
-    #[async_trait]
-    impl ObjectRegistryTrait for NoopObjectRegistry {
-        async fn lookup(
-            &self,
-            _ctx: &plexspaces_actor::RequestContext,
-            _object_id: &str,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(None)
-        }
-
-        async fn lookup_full(
-            &self,
-            _ctx: &plexspaces_actor::RequestContext,
-            _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-            _object_id: &str,
-        ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(None)
-        }
-
-        async fn register(
-            &self,
-            _ctx: &plexspaces_actor::RequestContext,
-            _registration: ObjectRegistration,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            Ok(())
-        }
-
-        async fn discover(
-            &self,
-            _ctx: &plexspaces_actor::RequestContext,
-            _opts: plexspaces_actor::DiscoverOptions,
-        ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(Vec::new())
-        }
-
-        async fn unregister(
-            &self,
-            _ctx: &plexspaces_actor::RequestContext,
-            _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-            _object_id: &str,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            Ok(())
-        }
-
-        async fn heartbeat(
-            &self,
-            _ctx: &plexspaces_actor::RequestContext,
-            _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-            _object_id: &str,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            Ok(())
-        }
-    }
-
     #[async_trait]
     impl ActorServiceTrait for RecordingActorService {
         async fn spawn_actor(

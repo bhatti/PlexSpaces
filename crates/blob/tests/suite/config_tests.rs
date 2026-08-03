@@ -69,7 +69,10 @@ fn test_config_get_access_key_from_env() {
 
     let config = make_config("embedded", "test", "http://localhost:9000", "");
     assert_eq!(config.get_access_key_id(), Some("test-key".to_string()));
-    assert_eq!(config.get_secret_access_key(), Some("test-secret".to_string()));
+    assert_eq!(
+        config.get_secret_access_key(),
+        Some("test-secret".to_string())
+    );
 
     env::remove_var("BLOB_ACCESS_KEY_ID");
     env::remove_var("BLOB_SECRET_ACCESS_KEY");
@@ -82,5 +85,8 @@ fn test_config_get_access_key_from_config() {
     config.secret_access_key = "config-secret".to_string();
 
     assert_eq!(config.get_access_key_id(), Some("config-key".to_string()));
-    assert_eq!(config.get_secret_access_key(), Some("config-secret".to_string()));
+    assert_eq!(
+        config.get_secret_access_key(),
+        Some("config-secret".to_string())
+    );
 }

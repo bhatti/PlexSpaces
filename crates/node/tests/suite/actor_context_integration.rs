@@ -23,17 +23,9 @@ use plexspaces_actor::ActorInstance;
 use plexspaces_actor::{ActorId, BehaviorType, RequestContextExt};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{default_node_config, Node, NodeId};
+use plexspaces_test_utils::messages::create_test_message;
 
 use super::test_helpers::{lookup_actor_ref, spawn_actor_helper};
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
-    plexspaces_actor::Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
-}
 
 /// Test behavior that uses ActorContext
 struct ContextAwareBehavior {
@@ -91,7 +83,7 @@ async fn test_node_spawns_actor_with_full_context() {
     mailbox_config.capacity = 1000;
     let actor_name = "test-actor";
     let actor_id = ActorId::new(actor_name, "gen_server", "default", node.id().as_str()).unwrap();
-    let mailbox = Mailbox::new(mailbox_config, actor_id.to_string())
+    let mailbox = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
     let actor = ActorInstance::new(
@@ -178,7 +170,7 @@ async fn test_actor_context_has_node_id() {
 
     let behavior = Box::new(ContextAwareBehavior::new());
     let actor_id = ActorId::new("test-actor-2", "gen_server", "default", "test-node-2").unwrap();
-    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
     let actor = ActorInstance::new(

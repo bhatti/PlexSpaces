@@ -23,9 +23,9 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 APP_ID="cloudflare-guild-chat-ts"
-CHAT_ACTOR="ChatRoomActor:room-1"
-RL_ACTOR="RateLimiterActor:rl-1"
-ALARM_ACTOR="AlarmDemoActor:alarm-1"
+CHAT_ACTOR="room-1:ChatRoomActor"
+RL_ACTOR="rl-1:RateLimiterActor"
+ALARM_ACTOR="alarm-1:AlarmDemoActor"
 NUM_USERS=5
 BATCH_MSGS=200
 BATCH_RATE_CHECKS=5000
@@ -117,9 +117,9 @@ if [ "$_deployed" -eq 0 ]; then
 fi
 
 echo -e "${GREEN}Deployed $APP_ID${NC}"
-echo "  - ChatRoomActor:    ChatRoomActor:room-1"
-echo "  - RateLimiterActor: RateLimiterActor:rl-1"
-echo "  - AlarmDemoActor:   AlarmDemoActor:alarm-1"
+echo "  - ChatRoomActor:    room-1:ChatRoomActor"
+echo "  - RateLimiterActor: rl-1:RateLimiterActor"
+echo "  - AlarmDemoActor:   alarm-1:AlarmDemoActor"
 echo ""
 sleep 2
 

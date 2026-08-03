@@ -139,11 +139,7 @@ pub trait TraceExporter: Send + Sync {
     ///
     /// Called exactly once per actor lifecycle, from `on_terminate_start`.
     /// Errors are logged but do not affect actor termination.
-    async fn export(
-        &self,
-        ctx: &RequestContext,
-        trace: &ExecutionTrace,
-    ) -> Result<(), FacetError>;
+    async fn export(&self, ctx: &RequestContext, trace: &ExecutionTrace) -> Result<(), FacetError>;
 }
 
 // ─── NoopTraceExporter ───────────────────────────────────────────────────────
@@ -199,11 +195,7 @@ impl KvTraceExporter {
 
 #[async_trait]
 impl TraceExporter for KvTraceExporter {
-    async fn export(
-        &self,
-        ctx: &RequestContext,
-        trace: &ExecutionTrace,
-    ) -> Result<(), FacetError> {
+    async fn export(&self, ctx: &RequestContext, trace: &ExecutionTrace) -> Result<(), FacetError> {
         // 1. Serialise and write the full trace.
         let trace_json = serde_json::to_vec(trace).map_err(|e| {
             FacetError::InterceptionFailed(format!(
@@ -295,21 +287,35 @@ mod tests {
 
         fn get_json<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Option<T> {
             let data = self.data.lock().unwrap();
-            data.get(key)
-                .and_then(|b| serde_json::from_slice(b).ok())
+            data.get(key).and_then(|b| serde_json::from_slice(b).ok())
         }
     }
 
     #[async_trait]
     impl KeyValueStore for MemKv {
-        async fn get(&self, _: &RequestContext, key: &str) -> Result<Option<Vec<u8>>, KeyValueStoreError> {
+        async fn get(
+            &self,
+            _: &RequestContext,
+            key: &str,
+        ) -> Result<Option<Vec<u8>>, KeyValueStoreError> {
             Ok(self.data.lock().unwrap().get(key).cloned())
         }
-        async fn put(&self, _: &RequestContext, key: &str, value: Vec<u8>) -> Result<(), KeyValueStoreError> {
+        async fn put(
+            &self,
+            _: &RequestContext,
+            key: &str,
+            value: Vec<u8>,
+        ) -> Result<(), KeyValueStoreError> {
             self.data.lock().unwrap().insert(key.to_string(), value);
             Ok(())
         }
-        async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, _: std::time::Duration) -> Result<(), KeyValueStoreError> {
+        async fn put_with_ttl(
+            &self,
+            ctx: &RequestContext,
+            key: &str,
+            value: Vec<u8>,
+            _: std::time::Duration,
+        ) -> Result<(), KeyValueStoreError> {
             self.put(ctx, key, value).await
         }
         async fn delete(&self, _: &RequestContext, key: &str) -> Result<(), KeyValueStoreError> {
@@ -319,10 +325,27 @@ mod tests {
         async fn exists(&self, _: &RequestContext, key: &str) -> Result<bool, KeyValueStoreError> {
             Ok(self.data.lock().unwrap().contains_key(key))
         }
-        async fn list_keys(&self, _: &RequestContext, prefix: &str) -> Result<Vec<String>, KeyValueStoreError> {
-            Ok(self.data.lock().unwrap().keys().filter(|k| k.starts_with(prefix)).cloned().collect())
+        async fn list_keys(
+            &self,
+            _: &RequestContext,
+            prefix: &str,
+        ) -> Result<Vec<String>, KeyValueStoreError> {
+            Ok(self
+                .data
+                .lock()
+                .unwrap()
+                .keys()
+                .filter(|k| k.starts_with(prefix))
+                .cloned()
+                .collect())
         }
-        async fn cas(&self, _: &RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> Result<bool, KeyValueStoreError> {
+        async fn cas(
+            &self,
+            _: &RequestContext,
+            key: &str,
+            expected: Option<Vec<u8>>,
+            new_value: Vec<u8>,
+        ) -> Result<bool, KeyValueStoreError> {
             let mut data = self.data.lock().unwrap();
             if data.get(key).cloned() == expected {
                 data.insert(key.to_string(), new_value);
@@ -331,22 +354,48 @@ mod tests {
                 Ok(false)
             }
         }
-        async fn increment(&self, _: &RequestContext, key: &str, delta: i64) -> Result<i64, KeyValueStoreError> {
+        async fn increment(
+            &self,
+            _: &RequestContext,
+            key: &str,
+            delta: i64,
+        ) -> Result<i64, KeyValueStoreError> {
             let mut data = self.data.lock().unwrap();
-            let v: i64 = data.get(key).and_then(|b| std::str::from_utf8(b).ok()).and_then(|s| s.parse().ok()).unwrap_or(0) + delta;
+            let v: i64 = data
+                .get(key)
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0)
+                + delta;
             data.insert(key.to_string(), v.to_string().into_bytes());
             Ok(v)
         }
-        async fn get_ttl(&self, _: &RequestContext, _key: &str) -> Result<Option<std::time::Duration>, KeyValueStoreError> {
+        async fn get_ttl(
+            &self,
+            _: &RequestContext,
+            _key: &str,
+        ) -> Result<Option<std::time::Duration>, KeyValueStoreError> {
             Ok(None)
         }
-        async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> Result<Vec<Option<Vec<u8>>>, KeyValueStoreError> {
+        async fn multi_get(
+            &self,
+            ctx: &RequestContext,
+            keys: &[&str],
+        ) -> Result<Vec<Option<Vec<u8>>>, KeyValueStoreError> {
             let mut results = Vec::with_capacity(keys.len());
-            for k in keys { results.push(self.get(ctx, k).await?); }
+            for k in keys {
+                results.push(self.get(ctx, k).await?);
+            }
             Ok(results)
         }
-        async fn multi_put(&self, ctx: &RequestContext, pairs: &[(&str, Vec<u8>)]) -> Result<(), KeyValueStoreError> {
-            for (k, v) in pairs { self.put(ctx, k, v.clone()).await?; }
+        async fn multi_put(
+            &self,
+            ctx: &RequestContext,
+            pairs: &[(&str, Vec<u8>)],
+        ) -> Result<(), KeyValueStoreError> {
+            for (k, v) in pairs {
+                self.put(ctx, k, v.clone()).await?;
+            }
             Ok(())
         }
     }
@@ -449,7 +498,9 @@ mod tests {
         exporter.export(&ctx(), &trace).await.unwrap();
 
         // Index should be at "trace_index:actor-abc"
-        let index: Vec<String> = kv.get_json("trace_index:actor-abc").expect("index not found");
+        let index: Vec<String> = kv
+            .get_json("trace_index:actor-abc")
+            .expect("index not found");
         assert_eq!(index, vec!["trace-001"]);
     }
 
@@ -459,8 +510,14 @@ mod tests {
         let exporter = KvTraceExporter::new(kv.clone());
 
         // Export two traces for the same actor
-        exporter.export(&ctx(), &make_trace("t1", "actor-abc", 1)).await.unwrap();
-        exporter.export(&ctx(), &make_trace("t2", "actor-abc", 2)).await.unwrap();
+        exporter
+            .export(&ctx(), &make_trace("t1", "actor-abc", 1))
+            .await
+            .unwrap();
+        exporter
+            .export(&ctx(), &make_trace("t2", "actor-abc", 2))
+            .await
+            .unwrap();
 
         let index: Vec<String> = kv.get_json("trace_index:actor-abc").unwrap();
         assert_eq!(index.len(), 2);
@@ -473,8 +530,14 @@ mod tests {
         let kv = MemKv::new();
         let exporter = KvTraceExporter::new(kv.clone());
 
-        exporter.export(&ctx(), &make_trace("t1", "actor-A", 1)).await.unwrap();
-        exporter.export(&ctx(), &make_trace("t2", "actor-B", 1)).await.unwrap();
+        exporter
+            .export(&ctx(), &make_trace("t1", "actor-A", 1))
+            .await
+            .unwrap();
+        exporter
+            .export(&ctx(), &make_trace("t2", "actor-B", 1))
+            .await
+            .unwrap();
 
         let idx_a: Vec<String> = kv.get_json("trace_index:actor-A").unwrap();
         let idx_b: Vec<String> = kv.get_json("trace_index:actor-B").unwrap();
@@ -488,14 +551,24 @@ mod tests {
         let exporter = KvTraceExporter::new(kv.clone());
 
         let mut trace = make_trace("t1", "actor-x", 1);
-        trace.metadata.insert("eval_run_id".into(), "run-007".into());
-        trace.metadata.insert("scenario_id".into(), "sc-math-01".into());
+        trace
+            .metadata
+            .insert("eval_run_id".into(), "run-007".into());
+        trace
+            .metadata
+            .insert("scenario_id".into(), "sc-math-01".into());
 
         exporter.export(&ctx(), &trace).await.unwrap();
 
         let stored: ExecutionTrace = kv.get_json("trace:t1").unwrap();
-        assert_eq!(stored.metadata.get("eval_run_id").map(|s| s.as_str()), Some("run-007"));
-        assert_eq!(stored.metadata.get("scenario_id").map(|s| s.as_str()), Some("sc-math-01"));
+        assert_eq!(
+            stored.metadata.get("eval_run_id").map(|s| s.as_str()),
+            Some("run-007")
+        );
+        assert_eq!(
+            stored.metadata.get("scenario_id").map(|s| s.as_str()),
+            Some("sc-math-01")
+        );
     }
 
     #[tokio::test]

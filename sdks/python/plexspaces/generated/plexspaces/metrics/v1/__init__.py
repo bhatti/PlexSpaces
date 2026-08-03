@@ -109,59 +109,69 @@ class SummaryValueQuantile(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class ExportPrometheusRequest(betterproto.Message):
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class ExportPrometheusResponse(betterproto.Message):
-    content: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Prometheus text format"""
+
+    content: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetMetricsRequest(betterproto.Message):
-    name_pattern: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by metric name pattern (e.g., "plexspaces_actor_*")"""
 
+    name_pattern: str = betterproto.string_field(2)
     label_filter: Dict[str, str] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Filter by labels"""
 
 
 @dataclass(eq=False, repr=False)
 class GetMetricsResponse(betterproto.Message):
-    metrics: List["Metric"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    metrics: List["Metric"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListMetricDefinitionsRequest(betterproto.Message):
-    name_pattern: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by name pattern"""
+
+    name_pattern: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListMetricDefinitionsResponse(betterproto.Message):
-    definitions: List["MetricDefinition"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    definitions: List["MetricDefinition"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RecordMetricRequest(betterproto.Message):
-    metric: "Metric" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Metric to record"""
+
+    metric: "Metric" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RecordMessageRoutingRequest(betterproto.Message):
     """R.E.D. metrics for message routing"""
 
-    actor_id: str = betterproto.string_field(1)
-    namespace: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """App / namespace dimension (e.g. tenant app-id)"""
 
-    success: bool = betterproto.bool_field(3)
-    duration: timedelta = betterproto.message_field(4)
-    error_type: str = betterproto.string_field(5)
+    success: bool = betterproto.bool_field(4)
+    duration: timedelta = betterproto.message_field(5)
+    error_type: str = betterproto.string_field(6)
     """Empty when success is true"""
 
 
@@ -169,44 +179,48 @@ class RecordMessageRoutingRequest(betterproto.Message):
 class RecordActorActivationRequest(betterproto.Message):
     """R.E.D. metrics for actor activation"""
 
-    actor_id: str = betterproto.string_field(1)
-    namespace: str = betterproto.string_field(2)
-    activation_type: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
+    activation_type: str = betterproto.string_field(4)
     """e.g. "lazy", "eager", "virtual"""
 
-    success: bool = betterproto.bool_field(4)
-    duration: timedelta = betterproto.message_field(5)
+    success: bool = betterproto.bool_field(5)
+    duration: timedelta = betterproto.message_field(6)
 
 
 @dataclass(eq=False, repr=False)
 class RecordChannelMetricsRequest(betterproto.Message):
     """R.E.D. metrics for channel operations"""
 
-    channel_name: str = betterproto.string_field(1)
-    namespace: str = betterproto.string_field(2)
-    operation: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    channel_name: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
+    operation: str = betterproto.string_field(4)
     """e.g. "ack", "nack", "dlq", "send", "receive"""
 
-    backend: str = betterproto.string_field(4)
-    success: bool = betterproto.bool_field(5)
-    duration: timedelta = betterproto.message_field(6)
-    delivery_count: int = betterproto.uint32_field(7)
-    reason: str = betterproto.string_field(8)
+    backend: str = betterproto.string_field(5)
+    success: bool = betterproto.bool_field(6)
+    duration: timedelta = betterproto.message_field(7)
+    delivery_count: int = betterproto.uint32_field(8)
+    reason: str = betterproto.string_field(9)
 
 
 @dataclass(eq=False, repr=False)
 class GetActorMetricsRequest(betterproto.Message):
     """Request to get actor metrics"""
 
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class GetNodeMetricsRequest(betterproto.Message):
     """Request to get node metrics"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node ID (empty = local node)"""
+
+    node_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)

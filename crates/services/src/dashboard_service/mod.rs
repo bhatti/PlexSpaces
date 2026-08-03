@@ -36,8 +36,8 @@ use tonic::{Request, Response, Status};
 
 use plexspaces_actor::{
     actor_metrics_from_exposition_for_namespace, max_histogram_bucket_upper_bound_for_labels,
-    sum_counter_for_labels, sum_sample_values_for_labels, ActorId, ActorRegistry,
-    DiscoverOptions, ProcessResourceSampler, RequestContext, RequestContextExt,
+    sum_counter_for_labels, sum_sample_values_for_labels, ActorId, ActorRegistry, DiscoverOptions,
+    ProcessResourceSampler, RequestContext, RequestContextExt,
     ServiceLocator as ServiceLocatorTrait, ServiceLocator,
 };
 use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
@@ -540,7 +540,6 @@ impl DashboardServiceImpl {
         request
     }
 
-
     async fn application_rows_from_registry(
         &self,
         req: &GetApplicationsRequest,
@@ -802,9 +801,9 @@ impl DashboardServiceImpl {
         };
 
         let local_id = cfg.id.clone();
-        let matches_cluster = cluster_id.as_ref().is_none_or(|cid| {
-            !cfg.cluster_name.is_empty() && cfg.cluster_name == *cid
-        });
+        let matches_cluster = cluster_id
+            .as_ref()
+            .is_none_or(|cid| !cfg.cluster_name.is_empty() && cfg.cluster_name == *cid);
 
         if let Ok(mut local) = self.node_to_proto().await {
             if let Some(n) = nodes.iter_mut().find(|n| n.id == local_id) {
@@ -1076,7 +1075,11 @@ impl DashboardService for DashboardServiceImpl {
                 tenant_ids.extend(actor_registry.registered_tenant_ids().await);
             }
             let count = tenant_ids.len() as u32;
-            if count == 0 && total_nodes > 0 { 1 } else { count }
+            if count == 0 && total_nodes > 0 {
+                1
+            } else {
+                count
+            }
         } else {
             tenant_id
                 .as_ref()
@@ -1388,7 +1391,6 @@ impl DashboardService for DashboardServiceImpl {
         let registered_entries = actor_registry.registered_actor_entries().await;
         let actor_configs = actor_registry.actor_configs().read().await.clone();
 
-
         // Phase 1: filter cheaply, collect candidates without expensive per-actor lookups.
         struct ActorCandidate {
             actor_id: ActorId,
@@ -1403,9 +1405,8 @@ impl DashboardService for DashboardServiceImpl {
         let mut candidates: Vec<ActorCandidate> = Vec::new();
         for (entry_tenant_id, entry_namespace, actor_id) in registered_entries {
             // Apply filters (proto fields are String, not Option<String>, so check if empty)
-            if !req.actor_id_pattern.is_empty()
-                && !actor_id.contains(&req.actor_id_pattern) {
-                    continue;
+            if !req.actor_id_pattern.is_empty() && !actor_id.contains(&req.actor_id_pattern) {
+                continue;
             }
 
             if !req.node_id.is_empty() {
@@ -1442,9 +1443,8 @@ impl DashboardService for DashboardServiceImpl {
                 found_type.unwrap_or_else(|| "unknown".to_string())
             };
 
-            if !req.actor_type.is_empty()
-                && actor_type != req.actor_type {
-                    continue;
+            if !req.actor_type.is_empty() && actor_type != req.actor_type {
+                continue;
             }
 
             let behavior_kind = actor_registry
@@ -1464,9 +1464,8 @@ impl DashboardService for DashboardServiceImpl {
                 continue;
             }
 
-            if !req.namespace.is_empty()
-                && entry_namespace != req.namespace {
-                    continue;
+            if !req.namespace.is_empty() && entry_namespace != req.namespace {
+                continue;
             }
 
             if !is_admin
@@ -1686,7 +1685,9 @@ impl DashboardService for DashboardServiceImpl {
             self.get_tenant_id_from_context(&request_for_context)
         };
 
-        let ctx = self.dashboard_ctx_from_metadata(request_for_context.metadata()).await;
+        let ctx = self
+            .dashboard_ctx_from_metadata(request_for_context.metadata())
+            .await;
         let storage = self.workflow_storage().await?;
         let statuses = Self::workflow_statuses(req.status)?;
         let node_filter = (!req.node_id.is_empty()).then_some(req.node_id.as_str());
@@ -1714,7 +1715,11 @@ impl DashboardService for DashboardServiceImpl {
         let mut workflows = Vec::with_capacity(executions.len());
         for execution in executions {
             let definition = storage
-                .get_definition(&ctx, &execution.definition_id, &execution.definition_version)
+                .get_definition(
+                    &ctx,
+                    &execution.definition_id,
+                    &execution.definition_version,
+                )
                 .await
                 .ok();
             workflows.push(plexspaces_proto::dashboard::v1::WorkflowInfo {
@@ -2074,28 +2079,30 @@ impl DashboardServiceImpl {
             let id_pat = req.id_pattern.to_lowercase();
             let has_next = registrations.len() > limit;
             let objects: Vec<plexspaces_proto::object_registry::v1::ObjectRegistration> =
-                registrations.into_iter()
+                registrations
+                    .into_iter()
                     .filter(|r| id_pat.is_empty() || r.object_id.to_lowercase().contains(&id_pat))
                     .take(limit)
-                    .map(|r| {
-                    plexspaces_proto::object_registry::v1::ObjectRegistration {
-                        object_id: r.object_id,
-                        object_name: r.object_name,
-                        object_type: r.object_type,
-                        version: r.version,
-                        tenant_id: r.tenant_id,
-                        namespace: r.namespace,
-                        node_id: r.node_id,
-                        grpc_address: r.grpc_address,
-                        object_category: r.object_category,
-                        capabilities: r.capabilities,
-                        metadata: None,
-                        health_status: r.health_status,
-                        last_heartbeat: r.last_heartbeat,
-                        created_at: r.created_at,
-                        ..Default::default()
-                    }
-                }).collect();
+                    .map(
+                        |r| plexspaces_proto::object_registry::v1::ObjectRegistration {
+                            object_id: r.object_id,
+                            object_name: r.object_name,
+                            object_type: r.object_type,
+                            version: r.version,
+                            tenant_id: r.tenant_id,
+                            namespace: r.namespace,
+                            node_id: r.node_id,
+                            grpc_address: r.grpc_address,
+                            object_category: r.object_category,
+                            capabilities: r.capabilities,
+                            metadata: None,
+                            health_status: r.health_status,
+                            last_heartbeat: r.last_heartbeat,
+                            created_at: r.created_at,
+                            ..Default::default()
+                        },
+                    )
+                    .collect();
 
             let page_response = plexspaces_proto::common::v1::PageResponse {
                 request_id: ulid::Ulid::new().to_string(),
@@ -2199,7 +2206,8 @@ impl DashboardServiceImpl {
                     .unwrap_or_default()
                     .unwrap_or_default();
                 let size_bytes = value_bytes.len() as u64;
-                let value_preview = String::from_utf8_lossy(&value_bytes[..value_bytes.len().min(100)]).to_string();
+                let value_preview =
+                    String::from_utf8_lossy(&value_bytes[..value_bytes.len().min(100)]).to_string();
                 entries.push(KeyValueDashboardEntry {
                     key: key.clone(),
                     value_preview,
@@ -2244,11 +2252,14 @@ impl DashboardServiceImpl {
             let total_size = keys.len();
             let has_next = (offset + limit) < total_size;
             let page_keys: Vec<String> = keys.into_iter().skip(offset).take(limit).collect();
-            let entries = page_keys.into_iter().map(|key| KeyValueDashboardEntry {
-                key,
-                value_preview: String::new(),
-                size_bytes: 0,
-            }).collect();
+            let entries = page_keys
+                .into_iter()
+                .map(|key| KeyValueDashboardEntry {
+                    key,
+                    value_preview: String::new(),
+                    size_bytes: 0,
+                })
+                .collect();
             Ok(Response::new(GetKeyValuesResponse {
                 request_id: req.request_id.clone(),
                 entries,
@@ -2356,7 +2367,11 @@ impl DashboardServiceImpl {
                 .ok_or_else(|| Status::unavailable("Blob service not available"))?;
 
             let (offset, limit) = Self::page_window(req.page.as_ref());
-            let kind_filter = if req.kind.is_empty() { None } else { Some(req.kind.as_str()) };
+            let kind_filter = if req.kind.is_empty() {
+                None
+            } else {
+                Some(req.kind.as_str())
+            };
 
             let (blobs, has_next) = blob_svc
                 .list_metadata(&ctx, &req.prefix, kind_filter, offset, limit)
@@ -2456,8 +2471,12 @@ impl DashboardServiceImpl {
                 })),
                 Err(e) => {
                     let msg = e.to_string();
-                    let user_msg = if msg.contains("Access key") || msg.contains("credentials") || msg.contains("Configuration error") {
-                        "Download unavailable: blob storage not configured for presigned URLs".to_string()
+                    let user_msg = if msg.contains("Access key")
+                        || msg.contains("credentials")
+                        || msg.contains("Configuration error")
+                    {
+                        "Download unavailable: blob storage not configured for presigned URLs"
+                            .to_string()
                     } else {
                         format!("Download failed: {e}")
                     };
@@ -2531,7 +2550,10 @@ impl DashboardServiceImpl {
                     .map(|rc| rc.service_links)
                     .unwrap_or_default()
             };
-            Ok(Response::new(GetServiceLinksResponse { request_id: req.request_id.clone(), service_links }))
+            Ok(Response::new(GetServiceLinksResponse {
+                request_id: req.request_id.clone(),
+                service_links,
+            }))
         } else {
             // Remote node — forward via ServiceLink gRPC client
             let channel = self
@@ -2595,7 +2617,9 @@ impl DashboardServiceImpl {
                 )
                 .await?;
             let mut client =
-                plexspaces_proto::metrics::v1::metrics_service_client::MetricsServiceClient::new(channel);
+                plexspaces_proto::metrics::v1::metrics_service_client::MetricsServiceClient::new(
+                    channel,
+                );
             let get_req = plexspaces_proto::metrics::v1::GetMetricsRequest {
                 request_id: ulid::Ulid::new().to_string(),
                 name_pattern: req.name_pattern,
@@ -2857,7 +2881,10 @@ mod tests {
 
     #[test]
     fn test_is_local_node_matching_is_local() {
-        assert!(DashboardServiceImpl::is_local_node_id("my-node-123", "my-node-123"));
+        assert!(DashboardServiceImpl::is_local_node_id(
+            "my-node-123",
+            "my-node-123"
+        ));
     }
 
     #[test]
@@ -2867,6 +2894,9 @@ mod tests {
 
     #[test]
     fn test_is_local_node_keyword_local() {
-        assert!(DashboardServiceImpl::is_local_node_id("any-node-id", "local"));
+        assert!(DashboardServiceImpl::is_local_node_id(
+            "any-node-id",
+            "local"
+        ));
     }
 }

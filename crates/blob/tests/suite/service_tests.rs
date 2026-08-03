@@ -134,7 +134,11 @@ async fn test_deduplication() {
     let metadata1 = service
         .upload_blob(
             &ctx,
-            UploadBlobParams { name: "file1.txt".to_string(), data: data.clone(), ..Default::default() },
+            UploadBlobParams {
+                name: "file1.txt".to_string(),
+                data: data.clone(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -143,7 +147,11 @@ async fn test_deduplication() {
     let metadata2 = service
         .upload_blob(
             &ctx,
-            UploadBlobParams { name: "file2.txt".to_string(), data: data.clone(), ..Default::default() },
+            UploadBlobParams {
+                name: "file2.txt".to_string(),
+                data: data.clone(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -167,7 +175,9 @@ async fn test_get_metadata() {
                 content_type: Some("text/plain".to_string()),
                 blob_group: Some("group1".to_string()),
                 kind: Some("ARTIFACTS".to_string()),
-                metadata: [("key1".to_string(), "value1".to_string())].into_iter().collect(),
+                metadata: [("key1".to_string(), "value1".to_string())]
+                    .into_iter()
+                    .collect(),
                 ..Default::default()
             },
         )
@@ -231,7 +241,11 @@ async fn test_delete_blob() {
     let metadata = service
         .upload_blob(
             &ctx,
-            UploadBlobParams { name: "test.txt".to_string(), data: b"content".to_vec(), ..Default::default() },
+            UploadBlobParams {
+                name: "test.txt".to_string(),
+                data: b"content".to_vec(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -258,7 +272,11 @@ async fn test_empty_data_error() {
     let result = service
         .upload_blob(
             &ctx,
-            UploadBlobParams { name: "empty.txt".to_string(), data: vec![], ..Default::default() },
+            UploadBlobParams {
+                name: "empty.txt".to_string(),
+                data: vec![],
+                ..Default::default()
+            },
         )
         .await;
 
@@ -315,7 +333,11 @@ async fn test_multi_tenancy_isolation() {
     let metadata1 = service
         .upload_blob(
             &ctx1,
-            UploadBlobParams { name: "file.txt".to_string(), data: b"tenant1".to_vec(), ..Default::default() },
+            UploadBlobParams {
+                name: "file.txt".to_string(),
+                data: b"tenant1".to_vec(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -324,7 +346,11 @@ async fn test_multi_tenancy_isolation() {
     let metadata2 = service
         .upload_blob(
             &ctx2,
-            UploadBlobParams { name: "file.txt".to_string(), data: b"tenant2".to_vec(), ..Default::default() },
+            UploadBlobParams {
+                name: "file.txt".to_string(),
+                data: b"tenant2".to_vec(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

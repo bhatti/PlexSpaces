@@ -185,7 +185,6 @@ fn prost_value_to_value(v: &prost_types::Value) -> Value {
     }
 }
 
-
 /// Convert serde_json::Value to Option<prost_types::Struct>
 fn value_to_opt_struct(v: &Value) -> Option<prost_types::Struct> {
     if v.is_null() {
@@ -731,7 +730,8 @@ impl WorkflowStorage {
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-                let mut sql = String::from("SELECT definition_proto FROM workflow_definitions WHERE 1=1");
+                let mut sql =
+                    String::from("SELECT definition_proto FROM workflow_definitions WHERE 1=1");
                 if name_prefix.is_some() {
                     sql.push_str(" AND name LIKE ?");
                 }
@@ -766,7 +766,8 @@ impl WorkflowStorage {
                 }
             }
             SqlPool::Postgres(pool) => {
-                let mut sql = String::from("SELECT definition_proto FROM workflow_definitions WHERE 1=1");
+                let mut sql =
+                    String::from("SELECT definition_proto FROM workflow_definitions WHERE 1=1");
                 let mut param_idx = 1;
                 if name_prefix.is_some() {
                     sql.push_str(&format!(" AND name LIKE ${}", param_idx));
@@ -819,7 +820,12 @@ impl WorkflowStorage {
     ///
     /// ## Returns
     /// Ok if deleted successfully
-    pub async fn delete_definition(&self, ctx: &RequestContext, id: &str, version: &str) -> Result<(), WorkflowError> {
+    pub async fn delete_definition(
+        &self,
+        ctx: &RequestContext,
+        id: &str,
+        version: &str,
+    ) -> Result<(), WorkflowError> {
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
         match &self.pool {
@@ -990,111 +996,10 @@ impl WorkflowStorage {
     ) -> Result<WorkflowExecution, WorkflowError> {
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
-        let row = self.get_execution_row_with_tenant(execution_id, tenant_id, namespace).await?;
+        let row = self
+            .get_execution_row_with_tenant(execution_id, tenant_id, namespace)
+            .await?;
         Ok(row.into())
-    }
-
-    /// Get workflow execution as internal row (with full version/heartbeat info)
-    pub(crate) async fn get_execution_row(
-        &self,
-        execution_id: &str,
-    ) -> Result<WorkflowExecutionRow, WorkflowError> {
-        let (
-            execution_id_val,
-            definition_id,
-            definition_version,
-            status_str,
-            current_step_id,
-            input_json,
-            output_json,
-            error,
-            node_id,
-            version,
-            last_heartbeat,
-        ): ExecutionQueryRow = match &self.pool {
-            SqlPool::Sqlite(pool) => {
-                let row = sqlx::query(
-                    r#"
-            SELECT execution_id, definition_id, definition_version, status,
-                   current_step_id, input_json, output_json, error,
-                           node_id, version, last_heartbeat,
-                           created_at, started_at, completed_at, updated_at
-            FROM workflow_executions
-            WHERE execution_id = ?
-            "#,
-                )
-                .bind(execution_id)
-                .fetch_one(pool)
-                .await
-                .map_err(|e| {
-                    WorkflowError::NotFound(format!("Execution {} not found: {}", execution_id, e))
-                })?;
-                (
-                    row.get::<String, _>(0),
-                    row.get::<String, _>(1),
-                    row.get::<String, _>(2),
-                    row.get::<String, _>(3),
-                    row.get::<Option<String>, _>(4),
-                    row.get::<Option<String>, _>(5),
-                    row.get::<Option<String>, _>(6),
-                    row.get::<Option<String>, _>(7),
-                    row.get::<Option<String>, _>(8),
-                    row.get::<i64, _>(9),
-                    row.get::<Option<chrono::DateTime<chrono::Utc>>, _>(10),
-                )
-            }
-            SqlPool::Postgres(pool) => {
-                let row = sqlx::query(
-                    r#"
-                    SELECT execution_id, definition_id, definition_version, status,
-                           current_step_id, input_json, output_json, error,
-                           node_id, version, last_heartbeat,
-                           created_at, started_at, completed_at, updated_at
-                    FROM workflow_executions
-                    WHERE execution_id = $1
-                    "#,
-                )
-                .bind(execution_id)
-                .fetch_one(pool)
-                .await
-                .map_err(|e| {
-                    WorkflowError::NotFound(format!("Execution {} not found: {}", execution_id, e))
-                })?;
-                (
-                    row.get::<String, _>(0),
-                    row.get::<String, _>(1),
-                    row.get::<String, _>(2),
-                    row.get::<String, _>(3),
-                    row.get::<Option<String>, _>(4),
-                    row.get::<Option<String>, _>(5),
-                    row.get::<Option<String>, _>(6),
-                    row.get::<Option<String>, _>(7),
-                    row.get::<Option<String>, _>(8),
-                    row.get::<i64, _>(9),
-                    row.get::<Option<chrono::DateTime<chrono::Utc>>, _>(10),
-                )
-            }
-        };
-
-        let status = ExecutionStatus::from_sql_str(&status_str)?;
-
-        Ok(WorkflowExecutionRow {
-            execution_id: execution_id_val,
-            definition_id,
-            definition_version,
-            status,
-            current_step_id,
-            input: input_json
-                .as_ref()
-                .and_then(|s| serde_json::from_str(s).ok()),
-            output: output_json
-                .as_ref()
-                .and_then(|s| serde_json::from_str(s).ok()),
-            error,
-            node_id,
-            _version: version as u64,
-            last_heartbeat,
-        })
     }
 
     /// Get workflow execution as internal row with tenant isolation

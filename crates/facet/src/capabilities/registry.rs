@@ -297,12 +297,12 @@ impl RegistryFacet {
                 });
 
                 // Convert metadata HashMap to Metadata proto struct
-                let metadata_proto = args.metadata.map(|meta_map| {
-                    plexspaces_proto::common::v1::Metadata {
-                        labels: meta_map,
-                        ..Default::default()
-                    }
-                });
+                let metadata_proto =
+                    args.metadata
+                        .map(|meta_map| plexspaces_proto::common::v1::Metadata {
+                            labels: meta_map,
+                            ..Default::default()
+                        });
 
                 let registration = ObjectRegistration {
                     object_id: args.object_id.clone(),

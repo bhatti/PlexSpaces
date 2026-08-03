@@ -30,7 +30,7 @@
 //! - Provides metrics for dashboard monitoring
 
 use plexspaces_actor::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
-use plexspaces_circuit_breaker::CircuitBreaker;
+use plexspaces_common::circuit_breaker::CircuitBreaker;
 use plexspaces_proto::circuitbreaker::prv::{
     CircuitBreakerConfig, CircuitBreakerMetrics, CircuitState, FailureStrategy,
 };
@@ -250,7 +250,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_circuit_breaker_health_checker_degraded_mode() {
-        let checker = Arc::new(PingChecker);
         // Create with low failure threshold for testing
         let config = CircuitBreakerConfig {
             name: "test-ping".to_string(),

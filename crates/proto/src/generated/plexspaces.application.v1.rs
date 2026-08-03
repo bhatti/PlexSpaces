@@ -85,6 +85,11 @@ pub struct ApplicationSpec {
     #[prost(message, repeated, tag="15")]
     pub required_service_links: ::prost::alloc::vec::Vec<ApplicationServiceLinkRequirement>,
     /// URL mount path for static files bundled in the app zip.
+    ///
+    /// When non-empty, the node serves the app's static/ directory at this path.
+    /// Example: "apps/chat" → files accessible at <http://<node>/apps/chat/>
+    /// Defaults to "apps/<application_id>" when static files are present but mount is empty.
+    /// Set in app-config.toml under \[static\] mount = "apps/chat"
     #[prost(string, tag="16")]
     pub static_mount: ::prost::alloc::string::String,
 }
@@ -694,6 +699,25 @@ impl ApplicationErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

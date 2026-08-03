@@ -124,58 +124,68 @@ class ReminderState(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class RegisterTimerRequest(betterproto.Message):
-    registration: "TimerRegistration" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    registration: "TimerRegistration" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RegisterTimerResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    timer_id: str = betterproto.string_field(2)
-    error_message: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    timer_id: str = betterproto.string_field(3)
+    error_message: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class UnregisterTimerRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    timer_name: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    timer_name: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class RegisterReminderRequest(betterproto.Message):
-    registration: "ReminderRegistration" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    registration: "ReminderRegistration" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RegisterReminderResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    reminder_id: str = betterproto.string_field(2)
-    error_message: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    reminder_id: str = betterproto.string_field(3)
+    error_message: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class UnregisterReminderRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    reminder_name: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    reminder_name: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class ListTimersRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListTimersResponse(betterproto.Message):
-    timers: List["TimerRegistration"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    timers: List["TimerRegistration"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListRemindersRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListRemindersResponse(betterproto.Message):
-    reminders: List["ReminderState"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    reminders: List["ReminderState"] = betterproto.message_field(2)
 
 
 class TimerServiceStub(betterproto.ServiceStub):

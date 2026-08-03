@@ -62,12 +62,12 @@ impl Mailbox {
     pub fn dequeue(&self) -> impl Future<Output = Option<Message>>;
     pub fn dequeue_with_timeout(&self, timeout: Option<Duration>) -> impl Future<Output = Option<Message>>;
 
-    // Size helpers
-    pub async fn size(&self) -> usize;         // data + ctrl
-    pub fn ctrl_size(&self) -> usize;          // ctrl only (atomic, O(1))
+    // Size helpers (sync — read atomics directly, no await needed)
+    pub fn size(&self) -> usize;               // data queue depth (not counting ctrl)
+    pub fn ctrl_size(&self) -> usize;          // ctrl queue depth (atomic, O(1))
 
-    // Observability
-    pub async fn get_stats(&self) -> MailboxObservabilityStats;
+    // Observability (sync — all counters are atomics)
+    pub fn get_stats(&self) -> MailboxObservabilityStats;
 }
 ```
 
@@ -77,9 +77,10 @@ impl Mailbox {
 pub struct MailboxObservabilityStats {
     pub data_queue_size: usize,   // pending data messages
     pub ctrl_queue_size: usize,   // pending control messages
-    pub total_enqueued:  usize,
-    pub total_dequeued:  usize,
-    pub backend_type:    String,
+    pub total_enqueued:  usize,   // lifetime data messages enqueued
+    pub total_dequeued:  usize,   // lifetime messages dequeued
+    pub total_dropped:   usize,   // messages dropped by DropOldest/DropNewest backpressure
+    pub backend_type:    String,  // "in_memory", "sqlite", "redis", etc.
     pub is_durable:      bool,
 }
 
@@ -87,6 +88,8 @@ impl MailboxObservabilityStats {
     pub fn total_size(&self) -> usize; // data_queue_size + ctrl_queue_size
 }
 ```
+
+Non-zero `total_dropped` indicates the actor is falling behind its message rate — a signal to scale or tune backpressure strategy.
 
 ## Backpressure
 
@@ -129,7 +132,7 @@ The data queue is backed by a pluggable `Channel` trait:
 use plexspaces_mailbox::{Mailbox, mailbox_config_default, new_message};
 use std::time::Duration;
 
-let mailbox = Mailbox::new(mailbox_config_default(), "my-actor".into()).await?;
+let mailbox = Mailbox::new(mailbox_config_default(), "my-actor".into(), String::new(), String::new(), None).await?;
 
 // Data message
 mailbox.enqueue(new_message(b"hello".to_vec())).await?;

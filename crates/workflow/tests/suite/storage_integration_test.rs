@@ -25,7 +25,8 @@ async fn test_create_and_get_execution() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({"input": "test"}),
@@ -53,7 +54,8 @@ async fn test_create_execution_with_node() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({"input": "test"}),
@@ -137,7 +139,8 @@ async fn test_transfer_ownership() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({}),
@@ -169,7 +172,8 @@ async fn test_transfer_ownership_optimistic_locking() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({}),
@@ -200,7 +204,8 @@ async fn test_update_heartbeat() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({}),
@@ -235,7 +240,8 @@ async fn test_list_executions_by_status() {
     storage.save_definition(&ctx, &def2).await.unwrap();
 
     let exec1 = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "workflow-1",
             "1.0",
             json!({}),
@@ -246,7 +252,8 @@ async fn test_list_executions_by_status() {
         .unwrap();
 
     let exec2 = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "workflow-2",
             "1.0",
             json!({}),
@@ -290,7 +297,8 @@ async fn test_list_executions_by_node() {
     storage.save_definition(&ctx, &def2).await.unwrap();
 
     let exec1 = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "workflow-1",
             "1.0",
             json!({}),
@@ -301,7 +309,8 @@ async fn test_list_executions_by_node() {
         .unwrap();
 
     let _exec2 = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "workflow-2",
             "1.0",
             json!({}),
@@ -312,7 +321,8 @@ async fn test_list_executions_by_node() {
         .unwrap();
 
     let node1_execs = storage
-        .list_executions_by_status(&ctx, 
+        .list_executions_by_status(
+            &ctx,
             vec![ExecutionStatus::ExecutionStatusPending],
             Some("node-1"),
         )
@@ -332,7 +342,8 @@ async fn test_list_stale_executions() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let exec1 = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "workflow-1",
             "1.0",
             json!({}),
@@ -600,7 +611,8 @@ async fn test_recovery_scenario_node_crash() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({}),
@@ -617,7 +629,8 @@ async fn test_recovery_scenario_node_crash() {
 
     // Find RUNNING executions on node-1
     let running = storage
-        .list_executions_by_status(&ctx, 
+        .list_executions_by_status(
+            &ctx,
             vec![ExecutionStatus::ExecutionStatusRunning],
             Some("node-1"),
         )
@@ -646,7 +659,8 @@ async fn test_recovery_scenario_concurrent_ownership_transfer() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({}),
@@ -677,7 +691,8 @@ async fn test_heartbeat_updates_health_monitoring() {
     storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(&ctx, 
+        .create_execution_with_node(
+            &ctx,
             "test-workflow",
             "1.0",
             json!({}),

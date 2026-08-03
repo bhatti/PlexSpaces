@@ -157,8 +157,7 @@ pub async fn registry_tell(
         .ok_or_else(|| {
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
-    let ctx =
-        RequestContext::new_without_auth("default".into(), actor_id.namespace().to_string());
+    let ctx = RequestContext::new_without_auth(String::new(), actor_id.namespace().to_string());
     actor_registry
         .tell(&ctx, actor_id, message)
         .await
@@ -182,7 +181,7 @@ pub async fn registry_ask(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
     let ctx = plexspaces_actor::RequestContext::new_without_auth(
-        "default".to_string(),
+        String::new(),
         "default".to_string(),
     );
     actor_registry
@@ -298,7 +297,7 @@ pub async fn register_actor_with_message_sender(
         })
         .unwrap();
     let ctx = plexspaces_actor::RequestContext::new_without_auth(
-        "default".to_string(),
+        String::new(),
         "default".to_string(),
     );
     actor_registry

@@ -85,6 +85,7 @@ use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, GetApplicationsRequest, GetSummaryRequest,
 };
 use plexspaces_proto::v1::application::ApplicationState;
+use std::io::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -259,6 +260,21 @@ fn create_minimal_wasm_module() -> Vec<u8> {
     wat::parse_str(wat).expect("Failed to parse WAT")
 }
 
+/// Wrap raw WASM bytes in a ZIP archive (as required by the deploy endpoint).
+///
+/// The deploy handler expects `app_file` to be a ZIP containing a top-level `.wasm` file.
+fn wrap_wasm_in_zip(wasm_bytes: &[u8]) -> Vec<u8> {
+    let buf = Vec::new();
+    let cursor = std::io::Cursor::new(buf);
+    let mut zip = zip::ZipWriter::new(cursor);
+    let opts =
+        zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("app.wasm", opts)
+        .expect("zip start_file failed");
+    zip.write_all(wasm_bytes).expect("zip write_all failed");
+    zip.finish().expect("zip finish failed").into_inner()
+}
+
 // ============================================================================
 // INTEGRATION TESTS
 // ============================================================================
@@ -335,10 +351,10 @@ async fn test_wasm_deployment_creates_applicationspec() {
         .text("name", "test-application")
         .text("version", "1.0.0")
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("test_app.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 
@@ -444,10 +460,10 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
         .text("name", "dashboard-test")
         .text("version", "1.0.0")
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("test_app.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 
@@ -555,10 +571,10 @@ async fn test_wasm_deployment_applicationspec_fields() {
         .text("name", app_name)
         .text("version", app_version)
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("test_app.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 
@@ -629,10 +645,10 @@ async fn test_wasm_deployment_undeployment_flow() {
         .text("name", app_name)
         .text("version", "1.0.0")
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("test_app.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 
@@ -747,10 +763,10 @@ async fn test_wasm_deployment_multiple_applications() {
             .text("name", app_name.to_string())
             .text("version", app_version.to_string())
             .part(
-                "wasm_file",
-                reqwest::multipart::Part::bytes(wasm_bytes.clone())
-                    .file_name("test_app.wasm")
-                    .mime_str("application/wasm")
+                "app_file",
+                reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                    .file_name("app.zip")
+                    .mime_str("application/zip")
                     .expect("Failed to set MIME type"),
             );
 
@@ -863,10 +879,10 @@ async fn test_wasm_deployment_component_error_handling() {
         .text("name", "component-app")
         .text("version", "1.0.0")
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("calculator_actor.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 
@@ -934,10 +950,10 @@ async fn test_wasm_deployment_applicationspec_auto_generation() {
         .text("name", app_name)
         .text("version", "1.0.0")
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("test_app.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 
@@ -1003,10 +1019,10 @@ async fn test_wasm_deployment_name_vs_application_id() {
         .text("name", app_name)
         .text("version", "1.0.0")
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("test_app.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 
@@ -1108,10 +1124,10 @@ async fn test_wasm_deployment_complete_workflow() {
         .text("name", app_name)
         .text("version", "1.0.0")
         .part(
-            "wasm_file",
-            reqwest::multipart::Part::bytes(wasm_bytes)
-                .file_name("test_app.wasm")
-                .mime_str("application/wasm")
+            "app_file",
+            reqwest::multipart::Part::bytes(wrap_wasm_in_zip(&wasm_bytes))
+                .file_name("app.zip")
+                .mime_str("application/zip")
                 .expect("Failed to set MIME type"),
         );
 

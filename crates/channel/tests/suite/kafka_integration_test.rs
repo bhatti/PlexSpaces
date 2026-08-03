@@ -247,7 +247,7 @@ async fn test_kafka_publish_subscribe() {
     });
 
     // Receive from subscription with timeout
-    let received = tokio::time::timeout(tokio::time::Duration::from_secs(3), stream.next())
+    let received = tokio::time::timeout(tokio::time::Duration::from_secs(2), stream.next())
         .await
         .expect("Timeout waiting for message");
 

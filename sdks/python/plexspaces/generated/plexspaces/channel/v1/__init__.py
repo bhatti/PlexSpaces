@@ -465,57 +465,64 @@ class ChannelStats(betterproto.Message):
 class CreateChannelRequest(betterproto.Message):
     """CreateChannel request"""
 
-    config: "ChannelConfig" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    config: "ChannelConfig" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CreateChannelResponse(betterproto.Message):
     """CreateChannel response"""
 
-    channel_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    channel_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class SendRequest(betterproto.Message):
     """Send request"""
 
-    channel: str = betterproto.string_field(1)
-    message: "__common_v1__.Message" = betterproto.message_field(2)
-    timeout: timedelta = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
+    message: "__common_v1__.Message" = betterproto.message_field(3)
+    timeout: timedelta = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class SendResponse(betterproto.Message):
     """Send response"""
 
-    message_id: str = betterproto.string_field(1)
-    sent: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    message_id: str = betterproto.string_field(2)
+    sent: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class ReceiveRequest(betterproto.Message):
     """Receive request"""
 
-    channel: str = betterproto.string_field(1)
-    timeout: timedelta = betterproto.message_field(2)
-    max_messages: int = betterproto.uint32_field(3)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
+    timeout: timedelta = betterproto.message_field(3)
+    max_messages: int = betterproto.uint32_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ReceiveResponse(betterproto.Message):
     """Receive response"""
 
-    messages: List["__common_v1__.Message"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    messages: List["__common_v1__.Message"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class SubscribeRequest(betterproto.Message):
     """Subscribe request (streaming)"""
 
-    channel: str = betterproto.string_field(1)
-    consumer_group: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
+    consumer_group: str = betterproto.string_field(3)
     filters: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
@@ -523,75 +530,85 @@ class SubscribeRequest(betterproto.Message):
 class PublishRequest(betterproto.Message):
     """Publish request (pub/sub)"""
 
-    channel: str = betterproto.string_field(1)
-    message: "__common_v1__.Message" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
+    message: "__common_v1__.Message" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class PublishResponse(betterproto.Message):
     """Publish response"""
 
-    message_id: str = betterproto.string_field(1)
-    subscriber_count: int = betterproto.uint32_field(2)
+    request_id: str = betterproto.string_field(1)
+    message_id: str = betterproto.string_field(2)
+    subscriber_count: int = betterproto.uint32_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class AckRequest(betterproto.Message):
     """Ack request"""
 
-    channel: str = betterproto.string_field(1)
-    message_id: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
+    message_id: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class AckResponse(betterproto.Message):
     """Ack response"""
 
-    acknowledged: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    acknowledged: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class NackRequest(betterproto.Message):
     """Nack request"""
 
-    channel: str = betterproto.string_field(1)
-    message_id: str = betterproto.string_field(2)
-    requeue: bool = betterproto.bool_field(3)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
+    message_id: str = betterproto.string_field(3)
+    requeue: bool = betterproto.bool_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class NackResponse(betterproto.Message):
     """Nack response"""
 
-    requeued: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    requeued: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStatsRequest(betterproto.Message):
     """GetStats request"""
 
-    channel: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStatsResponse(betterproto.Message):
     """GetStats response"""
 
-    stats: "ChannelStats" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    stats: "ChannelStats" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteChannelRequest(betterproto.Message):
     """DeleteChannel request"""
 
-    channel: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    channel: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteChannelResponse(betterproto.Message):
     """DeleteChannel response"""
 
-    deleted: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    deleted: bool = betterproto.bool_field(2)
 
 
 class ChannelServiceStub(betterproto.ServiceStub):

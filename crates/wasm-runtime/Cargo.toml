@@ -20,34 +20,33 @@ plexspaces-tuplespace = { path = "../tuplespace" }
 plexspaces-mailbox = { path = "../mailbox" }
 plexspaces-journaling = { path = "../journaling" }
 plexspaces-keyvalue = { path = "../keyvalue", features = ["sql-backend"] }
-plexspaces-process-groups = { path = "../process-groups" }
 plexspaces-locks = { path = "../locks" }
 plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-blob = { path = "../blob" }
 
 # WASM runtime (User Decision A1: wasmtime)
-wasmtime = { version = "25", features = ["async", "pooling-allocator", "component-model", "cranelift"] }
-wasmtime-wasi = { version = "25" }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
 
 # Async runtime
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
+tokio = { workspace = true }
+async-trait = { workspace = true }
 
 # gRPC
 tonic = { workspace = true }
 prost = { workspace = true }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 bincode = "1.3"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = { workspace = true }
 
 # Logging
-tracing = "0.1"
+tracing = { workspace = true }
 
 # Metrics/observability
 metrics = "0.23"
@@ -60,10 +59,10 @@ hex = "0.4"
 base64 = "0.22"
 
 # Time
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 
 # ID generation (ULID - CLAUDE.md Core Principle 0)
-ulid = { version = "1.1", features = ["serde"] }
+ulid = { workspace = true }
 
 [dev-dependencies]
 # Testing
@@ -72,15 +71,14 @@ tokio-stream = { version = "0.1", features = ["net"] }  # For gRPC integration t
 futures = "0.3"  # For concurrent test utilities
 tempfile = "3.8"
 wat = "1.0"  # WebAssembly Text format for inline WASM tests
-object_store = { version = "0.10", features = ["aws", "gcp", "azure"] }  # For blob integration tests
+object_store = { version = "0.10", features = ["aws"] }  # For blob integration tests (aws only)
 plexspaces-mailbox = { path = "../mailbox" }
 plexspaces-journaling = { path = "../journaling" }
 plexspaces-keyvalue = { path = "../keyvalue", features = ["sql-backend"] }
-plexspaces-process-groups = { path = "../process-groups" }
 plexspaces-locks = { path = "../locks" }
 plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-blob = { path = "../blob", features = ["sql-backend"] }  # For blob integration tests
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any", "migrate"] }  # For blob tests
+sqlx = { workspace = true }  # For blob tests
 
 # Metrics/observability (for testing)
 prometheus = "0.13"

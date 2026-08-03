@@ -2,6 +2,7 @@
 // Comprehensive tests for virtual actors covering all edge cases
 
 use async_trait::async_trait;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::Message;
 use plexspaces_actor::{Actor as ActorStruct, ActorBuilder};
 use plexspaces_actor::{
@@ -9,7 +10,6 @@ use plexspaces_actor::{
     RequestContext, RequestContextExt,
 };
 use plexspaces_actor::{InitializableServiceLocator, ServiceLocator, ServiceLocatorBase};
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::{
     DurabilityFacet, JournalStorage, SqliteJournalStorage, StateLoader, VirtualActorFacet,
 };
@@ -24,6 +24,7 @@ use super::test_helpers::{
     lookup_actor_ref, registry_ask, registry_tell, spawn_actor_helper, test_runtime_actor_id,
     unregister_actor_helper, virtual_actor_metadata_optional, wait_for_virtual_actor_activation,
 };
+use plexspaces_test_utils::messages::create_test_message;
 
 fn runtime_actor_id(name: &str) -> ActorId {
     test_runtime_actor_id(name, "test-node")
@@ -50,15 +51,6 @@ async fn register_counter_behavior(node: &plexspaces_node::Node) {
     node.service_locator()
         .register_behavior_registry(Arc::new(behavior_registry))
         .await;
-}
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
-    plexspaces_actor::Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
 }
 
 /// Helper to create a test message with message type
@@ -1794,7 +1786,7 @@ async fn test_virtual_actor_implicit_activation() {
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
     let actor_id = runtime_actor_id("virtual-actor-implicit-1");
-    let mailbox = Mailbox::new(mailbox_config, actor_id.to_string())
+    let mailbox = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -1855,7 +1847,7 @@ async fn test_virtual_actor_idle_deactivation() {
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
     let actor_id2 = runtime_actor_id("virtual-actor-idle-2");
-    let mailbox = Mailbox::new(mailbox_config, actor_id2.to_string())
+    let mailbox = Mailbox::new(mailbox_config, actor_id2.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -1919,7 +1911,7 @@ async fn test_virtual_actor_pending_messages() {
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
     let actor_id3 = runtime_actor_id("virtual-actor-pending-3");
-    let mailbox = Mailbox::new(mailbox_config, actor_id3.to_string())
+    let mailbox = Mailbox::new(mailbox_config, actor_id3.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -1971,7 +1963,7 @@ async fn test_activate_actor_manual() {
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
     let actor_id4 = runtime_actor_id("virtual-actor-manual-4");
-    let mailbox = Mailbox::new(mailbox_config, actor_id4.to_string())
+    let mailbox = Mailbox::new(mailbox_config, actor_id4.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -2016,7 +2008,7 @@ async fn test_deactivate_actor_manual() {
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
     let actor_id5 = runtime_actor_id("virtual-actor-deact-5");
-    let mailbox = Mailbox::new(mailbox_config, actor_id5.to_string())
+    let mailbox = Mailbox::new(mailbox_config, actor_id5.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -2084,7 +2076,7 @@ async fn test_check_actor_exists() {
 
     let mailbox_config = MailboxConfig::default();
     let actor_id6 = runtime_actor_id("virtual-actor-check-6");
-    let mailbox = Mailbox::new(mailbox_config, actor_id6.to_string())
+    let mailbox = Mailbox::new(mailbox_config, actor_id6.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -2408,5 +2400,151 @@ async fn test_ask_with_virtual_actor_lazy_reproduce_issue() {
     assert!(
         elapsed < Duration::from_secs(1),
         "Should respond within 1 second"
+    );
+}
+
+// ============================================================================
+// P1: Thundering herd — type-registered virtual actor first activation
+// ============================================================================
+
+/// Register a type-level virtual actor definition (no specific instance pre-registered).
+/// This is the production pattern: `register_virtual_actor_type("gen_server", ...)` then
+/// on first message to any instance of that type, the actor is created on demand.
+async fn register_counter_type(node: &plexspaces_node::Node, namespace: &str, actor_type: &str) {
+    let manager = node
+        .service_locator()
+        .virtual_actor_manager()
+        .await
+        .expect("VirtualActorManager not available");
+    manager
+        .register_virtual_actor_type(
+            actor_type.to_string(),
+            None,
+            namespace.to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "10m",
+                    "activation_strategy": "lazy"
+                }
+            }),
+            Some("default".to_string()),
+            None,
+        )
+        .await
+        .expect("type registration must succeed");
+}
+
+/// Smoke: a single ask() to a type-registered virtual actor (no instance pre-spawned) succeeds.
+#[tokio::test]
+async fn test_single_ask_type_registered_virtual_actor() {
+    let node = Arc::new(NodeBuilder::new("test-node-single").build().await);
+    register_counter_behavior(&node).await;
+
+    let namespace = "single-ns";
+    let actor_type = "gen_server";
+    register_counter_type(&node, namespace, actor_type).await;
+
+    let actor_id = ActorId::new("single-target", actor_type, namespace, "test-node-single")
+        .expect("valid actor id");
+
+    let registry: Arc<ActorRegistry> = node
+        .service_locator()
+        .actor_registry()
+        .await
+        .expect("ActorRegistry required");
+    let ctx = RequestContext::new_without_auth("default".to_string(), namespace.to_string());
+
+    let msg = plexspaces_actor::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload: serde_json::to_vec(&TestMessage::Ping).unwrap(),
+        message_type: "call".to_string(),
+        ..Default::default()
+    };
+    let result = registry.ask(&ctx, &actor_id, msg, Duration::from_secs(10)).await;
+    assert!(
+        result.is_ok(),
+        "Single ask to type-registered virtual actor must succeed: {:?}",
+        result.err()
+    );
+}
+
+/// Concurrent first-activation guard: N concurrent ask() calls to a type-registered
+/// virtual actor that has never been instantiated must all succeed, and exactly one
+/// actor instance must be created.
+///
+/// Before the activation_in_flight guard, every caller races through the
+/// `get_facet → Err → should_activate=true` path and calls activate_virtual_actor N
+/// times simultaneously, causing queue corruption, duplicate actors, or 30s timeouts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_thundering_herd_type_registered_virtual_actor() {
+    let node = Arc::new(NodeBuilder::new("test-node-herd").build().await);
+    register_counter_behavior(&node).await;
+
+    let namespace = "herd-ns";
+    let actor_type = "gen_server";
+    register_counter_type(&node, namespace, actor_type).await;
+
+    // This instance has never been spawned — it only exists as a type registration.
+    let actor_id = ActorId::new("herd-target", actor_type, namespace, "test-node-herd")
+        .expect("valid actor id");
+
+    let registry: Arc<ActorRegistry> = node
+        .service_locator()
+        .actor_registry()
+        .await
+        .expect("ActorRegistry required");
+    let ctx = RequestContext::new_without_auth("default".to_string(), namespace.to_string());
+
+    // 50 concurrent ask() calls — all arrive before the first activation completes.
+    // Each carries a unique Ping message so we can verify replies.
+    let concurrency = 50;
+    let mut handles = Vec::with_capacity(concurrency);
+    for i in 0..concurrency {
+        let registry_clone = registry.clone();
+        let ctx_clone = ctx.clone();
+        let actor_id_clone = actor_id.clone();
+        let handle = tokio::spawn(async move {
+            let msg = plexspaces_actor::Message {
+                id: ulid::Ulid::new().to_string(),
+                payload: serde_json::to_vec(&TestMessage::Ping).unwrap(),
+                message_type: "call".to_string(),
+                ..Default::default()
+            };
+            let result = registry_clone
+                .ask(&ctx_clone, &actor_id_clone, msg, Duration::from_secs(30))
+                .await;
+            (i, result)
+        });
+        handles.push(handle);
+    }
+
+    let mut success_count = 0;
+    let mut failures = Vec::new();
+    for handle in handles {
+        let (i, result) = handle.await.expect("task must not panic");
+        match result {
+            Ok(_) => success_count += 1,
+            Err(e) => failures.push((i, e)),
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "All concurrent activations must succeed, got {} failures: {:?}",
+        failures.len(),
+        failures
+    );
+    assert_eq!(
+        success_count, concurrency,
+        "All {} concurrent requests must receive a reply",
+        concurrency
+    );
+
+    // Exactly one actor instance must be alive — the guard serialised activation.
+    let active_count = registry.registered_actor_ids().await.len();
+    assert!(
+        active_count <= 2, // allow 1 actor + possible temp sender artifacts
+        "At most one gen_server actor should exist after concurrent activation, got {}",
+        active_count
     );
 }

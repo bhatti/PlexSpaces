@@ -710,16 +710,16 @@ mod tests {
     use crate::actor_context::{
         ActorService, ChannelService, ObjectRegistry, ProcessGroupService, TupleSpaceProvider,
     };
-    use plexspaces_common::RequestContextExt;
     use crate::behavior_factory::BehaviorRegistry;
     use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
     use crate::monitoring::NodeConnectionInfo;
     use crate::{
         ActorFactory, ActorRegistry, ApplicationManager, BlobServiceTrait, GrpcConnectionManager,
         InitializableServiceLocator, KeyValueStore, LockManager, NodeRegistryTrait,
-        ReplyWaiterRegistry, Service, ServiceLocator, VirtualActorManager, WasmRuntimeTrait,
+        Service, ServiceLocator, VirtualActorManager, WasmRuntimeTrait,
     };
     use async_trait::async_trait;
+    use plexspaces_common::RequestContextExt;
     use plexspaces_keyvalue::SqliteKVStore;
     use plexspaces_locks::MemoryLockManager;
     use plexspaces_proto::node::v1::{NodeConfig, RuntimeConfig, SecurityConfig};
@@ -930,9 +930,6 @@ mod tests {
         }
 
         async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
-            None
-        }
-        async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
             None
         }
         async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
@@ -1216,11 +1213,7 @@ mod tests {
         ) {
         }
 
-        async fn register_ws_registry(
-            &self,
-            _registry: Arc<dyn crate::WsRegistryTrait>,
-        ) {
-        }
+        async fn register_ws_registry(&self, _registry: Arc<dyn crate::WsRegistryTrait>) {}
     }
 
     /// Helper to create a test ServiceLocator with all required services

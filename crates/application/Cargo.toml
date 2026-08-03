@@ -13,12 +13,11 @@ description = "Application lifecycle management for PlexSpaces (Erlang/OTP-inspi
 plexspaces-common = { path = "../common" }
 plexspaces-proto = { workspace = true }
 plexspaces-actor = { path = "../actor" }
-plexspaces-wasm-runtime = { path = "../wasm-runtime" }
+plexspaces-wasm-runtime = { path = "../wasm-runtime", features = ["component-model"] }
 plexspaces-channel = { workspace = true, features = ["channel-service"] }
 plexspaces-mailbox = { workspace = true }
 plexspaces-journaling = { path = "../journaling" }
 plexspaces-keyvalue = { workspace = true }
-plexspaces-process-groups = { workspace = true }
 plexspaces-locks = { workspace = true }
 plexspaces-blob = { path = "../blob" }
 plexspaces-facet = { workspace = true }
@@ -35,7 +34,7 @@ prost-types = { workspace = true }  # For proto Duration/Timestamp types
 prost = { workspace = true }  # For protobuf decoding
 metrics = "0.23"  # For observability
 chrono = { workspace = true }  # For timestamps
-futures = "0.3"  # For stream handling
+futures = { workspace = true }  # For stream handling
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }

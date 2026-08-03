@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use plexspaces_proto::security::v1::ApiToken;
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
+#[cfg(test)]
 use ulid::Ulid;
 
 #[async_trait]
@@ -90,13 +91,22 @@ impl SqlApiTokenRepository {
             scopes,
             expires_at: expires_at
                 .filter(|&t| t > 0)
-                .map(|t| prost_types::Timestamp { seconds: t, nanos: 0 }),
+                .map(|t| prost_types::Timestamp {
+                    seconds: t,
+                    nanos: 0,
+                }),
             created_at: created_at
                 .filter(|&t| t > 0)
-                .map(|t| prost_types::Timestamp { seconds: t, nanos: 0 }),
+                .map(|t| prost_types::Timestamp {
+                    seconds: t,
+                    nanos: 0,
+                }),
             last_used_at: last_used_at
                 .filter(|&t| t > 0)
-                .map(|t| prost_types::Timestamp { seconds: t, nanos: 0 }),
+                .map(|t| prost_types::Timestamp {
+                    seconds: t,
+                    nanos: 0,
+                }),
             revoked: revoked_at.filter(|&t| t > 0).is_some(),
             is_admin: is_admin != 0,
         }
@@ -208,12 +218,13 @@ impl ApiTokenRepository for SqlApiTokenRepository {
         offset: i32,
         limit: i32,
     ) -> Result<(Vec<ApiToken>, i32), ApiTokenRepositoryError> {
-        let total: i32 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL")
-                .bind(user_id)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| ApiTokenRepositoryError::Database(e.to_string()))?;
+        let total: i32 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| ApiTokenRepositoryError::Database(e.to_string()))?;
 
         let rows = sqlx::query(
             "SELECT * FROM api_tokens
@@ -285,7 +296,15 @@ mod tests {
         let token_id = Ulid::new().to_string();
 
         let token = repo
-            .create(&token_id, "u1", "tenant1", "ci-token", &["read".into()], None, false)
+            .create(
+                &token_id,
+                "u1",
+                "tenant1",
+                "ci-token",
+                &["read".into()],
+                None,
+                false,
+            )
             .await
             .unwrap();
 
@@ -301,7 +320,9 @@ mod tests {
         let pool = setup().await;
         let repo = SqlApiTokenRepository::new(pool);
         let token_id = Ulid::new().to_string();
-        repo.create(&token_id, "u1", "t1", "tok", &[], None, false).await.unwrap();
+        repo.create(&token_id, "u1", "t1", "tok", &[], None, false)
+            .await
+            .unwrap();
 
         repo.revoke(&token_id, "u1", false).await.unwrap();
         assert!(repo.is_revoked(&token_id).await.unwrap());
@@ -312,9 +333,14 @@ mod tests {
         let pool = setup().await;
         let repo = SqlApiTokenRepository::new(pool);
         let token_id = Ulid::new().to_string();
-        repo.create(&token_id, "u1", "t1", "tok", &[], None, false).await.unwrap();
+        repo.create(&token_id, "u1", "t1", "tok", &[], None, false)
+            .await
+            .unwrap();
 
-        let err = repo.revoke(&token_id, "other_user", false).await.unwrap_err();
+        let err = repo
+            .revoke(&token_id, "other_user", false)
+            .await
+            .unwrap_err();
         assert!(matches!(err, ApiTokenRepositoryError::PermissionDenied(_)));
     }
 
@@ -323,7 +349,9 @@ mod tests {
         let pool = setup().await;
         let repo = SqlApiTokenRepository::new(pool);
         let token_id = Ulid::new().to_string();
-        repo.create(&token_id, "u1", "t1", "tok", &[], None, false).await.unwrap();
+        repo.create(&token_id, "u1", "t1", "tok", &[], None, false)
+            .await
+            .unwrap();
 
         repo.revoke(&token_id, "admin_user", true).await.unwrap();
     }
@@ -335,8 +363,12 @@ mod tests {
 
         let id1 = Ulid::new().to_string();
         let id2 = Ulid::new().to_string();
-        repo.create(&id1, "u1", "t1", "tok1", &[], None, false).await.unwrap();
-        repo.create(&id2, "u1", "t1", "tok2", &[], None, false).await.unwrap();
+        repo.create(&id1, "u1", "t1", "tok1", &[], None, false)
+            .await
+            .unwrap();
+        repo.create(&id2, "u1", "t1", "tok2", &[], None, false)
+            .await
+            .unwrap();
         repo.revoke(&id1, "u1", false).await.unwrap();
 
         let (tokens, total) = repo.list_for_user("u1", 0, 50).await.unwrap();

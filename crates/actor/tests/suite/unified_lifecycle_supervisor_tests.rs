@@ -31,7 +31,7 @@ use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEv
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError, Message,
 };
-use plexspaces_actor::{ActorInstance as Actor, ChildSpec};
+use plexspaces_actor::ChildSpec;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 
@@ -130,8 +130,7 @@ async fn test_supervisor_start_child_with_facets() {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
                 let mailbox = Mailbox::new(
-                    MailboxConfig::default(),
-                    format!("mailbox-{}", actor_id.clone()),
+                    MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
                 .unwrap();
@@ -199,8 +198,7 @@ async fn test_supervisor_restart_preserves_facets() {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
                     let mailbox = Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     )
                     .await
                     .unwrap();
@@ -318,6 +316,9 @@ async fn test_supervisor_restart_sets_self_ref_before_init() {
                     let mailbox = Mailbox::new(
                         MailboxConfig::default(),
                         format!("mailbox-{}", actor_id_string),
+                        String::new(),
+                        String::new(),
+                        None,
                     )
                     .await
                     .unwrap();

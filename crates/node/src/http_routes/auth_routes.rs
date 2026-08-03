@@ -16,7 +16,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{Json, Response},
-    routing::{delete, get, post},
+    routing::{delete, get},
     Router,
 };
 use serde::Deserialize;
@@ -37,9 +37,13 @@ use crate::http_jwt::JwtClaims;
 /// Uses the same Arc-based DI pattern as `ActorRouteState`.
 #[derive(Clone)]
 pub struct AuthRouteState {
+    /// User repository for credential and profile lookups.
     pub user_repo: Arc<dyn UserRepository>,
+    /// Tenant repository for tenant resolution and validation.
     pub tenant_repo: Arc<dyn TenantRepository>,
+    /// API token repository for token issuance and validation.
     pub token_repo: Arc<dyn ApiTokenRepository>,
+    /// Service locator for accessing node-wide services.
     pub service_locator: Arc<dyn ServiceLocator>,
     /// OIDC state. None when OIDC is not configured (auth_disabled or no oidc config).
     pub oidc: Option<Arc<plexspaces_services::user_service::oidc::OidcState>>,
@@ -73,7 +77,10 @@ pub fn auth_router(state: AuthRouteState) -> Router {
         .route("/api/v1/auth/logout", get(logout))
         .route("/api/v1/auth/users", get(list_users))
         .route("/api/v1/auth/tenants", get(list_tenants))
-        .route("/api/v1/auth/tokens", get(list_api_tokens).post(create_api_token))
+        .route(
+            "/api/v1/auth/tokens",
+            get(list_api_tokens).post(create_api_token),
+        )
         .route("/api/v1/auth/tokens/:token_id", delete(delete_api_token))
         .route("/.well-known/jwks.json", get(jwks_endpoint));
 
@@ -86,7 +93,6 @@ pub fn auth_router(state: AuthRouteState) -> Router {
 
     router.with_state(state)
 }
-
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -168,9 +174,7 @@ async fn logout() -> Response {
 
 // ─── JWKS endpoint ──────────────────────────────────────────────────────────
 
-async fn jwks_endpoint(
-    State(state): State<AuthRouteState>,
-) -> Json<Value> {
+async fn jwks_endpoint(State(state): State<AuthRouteState>) -> Json<Value> {
     match &state.jwt_key_pair {
         Some(kp) => Json(kp.jwks_json()),
         None => Json(serde_json::json!({ "keys": [] })),
@@ -263,12 +267,16 @@ async fn list_tenants(
     }
 
     let (tenants, total) = if claims.is_admin {
-        state.tenant_repo.list_tenants(offset, limit).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?
+        state
+            .tenant_repo
+            .list_tenants(offset, limit)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "code": 500, "message": e.to_string() })),
+                )
+            })?
     } else {
         // Non-admins: single-item list of their own tenant.
         let tenant = state
@@ -302,7 +310,6 @@ async fn list_tenants(
         "page": { "total_size": total, "offset": offset, "limit": limit, "has_next": offset + limit < total }
     })))
 }
-
 
 // ─── OIDC handlers ────────────────────────────────────────────────────────────
 
@@ -505,7 +512,10 @@ async fn delete_api_token(
                 ApiTokenRepositoryError::PermissionDenied(_) => StatusCode::FORBIDDEN,
                 ApiTokenRepositoryError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
-            (status, Json(serde_json::json!({ "code": status.as_u16(), "message": e.to_string() })))
+            (
+                status,
+                Json(serde_json::json!({ "code": status.as_u16(), "message": e.to_string() })),
+            )
         })?;
 
     Ok(Json(serde_json::json!({ "ok": true })))

@@ -50,7 +50,6 @@ pub mod controller;
 // Re-export main types (ApplicationManager is the type alias above)
 pub use controller::ApplicationController;
 
-
 pub mod child_spec_util;
 
 // Application implementations

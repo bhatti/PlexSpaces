@@ -36,15 +36,14 @@
 //! - Uses actor_id factory methods for consistent ID parsing/construction
 //! - All metadata follows proto definitions
 
+use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
 use crate::{ActorId, ActorRegistry};
-use plexspaces_common::{
-    from_config_str, ActivationStrategy, RequestContext, ServiceNameExt,
-};
+use plexspaces_common::{from_config_str, ActivationStrategy, RequestContext, ServiceNameExt};
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Message;
@@ -429,6 +428,11 @@ pub struct VirtualActorManager {
     /// Max pool size per actor type (for LRU eviction)
     /// Defaults to DEFAULT_MAX_POOL_PER_ACTOR_TYPE (100) if not set
     max_pool_per_actor_type: Arc<RwLock<u32>>,
+    /// In-flight activation guard: prevents thundering herd when N concurrent callers
+    /// all arrive before a type-registered virtual actor has been instantiated.
+    /// First caller inserts and activates; subsequent callers wait on the Notify.
+    /// Winner removes the entry and calls notify_waiters() so waiters proceed.
+    activation_in_flight: DashMap<ActorId, Arc<tokio::sync::Notify>>,
 }
 
 impl VirtualActorManager {
@@ -458,6 +462,7 @@ impl VirtualActorManager {
             registry: VirtualActorRegistry::new(),
             actor_registry,
             max_pool_per_actor_type: Arc::new(RwLock::new(DEFAULT_MAX_POOL_PER_ACTOR_TYPE)),
+            activation_in_flight: DashMap::new(),
         }
     }
 
@@ -487,6 +492,34 @@ impl VirtualActorManager {
     /// This getter allows Node to access the registry for observability/debugging.
     pub fn registry(&self) -> &VirtualActorRegistry {
         &self.registry
+    }
+
+    /// Thundering-herd guard for first activation of a type-registered virtual actor.
+    ///
+    /// Returns `true` if the caller won the race and must call `activate_virtual_actor`.
+    /// Returns `false` if another caller is already activating — the caller must wait
+    /// on the returned `Notify` until the winner finishes.
+    ///
+    /// After activation completes (success or failure), the winner must call
+    /// `release_activation_guard(actor_id)` to wake all waiters.
+    pub fn try_acquire_activation(&self, actor_id: &ActorId) -> (bool, Arc<tokio::sync::Notify>) {
+        use dashmap::mapref::entry::Entry;
+        match self.activation_in_flight.entry(actor_id.clone()) {
+            Entry::Vacant(e) => {
+                let notify = Arc::new(tokio::sync::Notify::new());
+                e.insert(notify.clone());
+                (true, notify)
+            }
+            Entry::Occupied(e) => (false, e.get().clone()),
+        }
+    }
+
+    /// Release the activation guard and wake all waiters.
+    /// Must be called by the winner of `try_acquire_activation` after activation completes.
+    pub fn release_activation_guard(&self, actor_id: &ActorId) {
+        if let Some((_, notify)) = self.activation_in_flight.remove(actor_id) {
+            notify.notify_waiters();
+        }
     }
 
     /// Register a virtual actor (always addressable, may not be active)

@@ -512,7 +512,10 @@ impl SystemService for SystemServiceImpl {
             settings.retain(|s: &_| regex.is_match(&s.key));
         }
 
-        Ok(Response::new(GetConfigResponse { request_id: req.request_id.clone(), settings }))
+        Ok(Response::new(GetConfigResponse {
+            request_id: req.request_id.clone(),
+            settings,
+        }))
     }
 
     async fn set_config(
@@ -777,7 +780,9 @@ mod tests {
         let reporter = Arc::new(reporter);
         let service = SystemServiceImpl::new(reporter.clone());
 
-        let request = Request::new(LivenessProbeRequest { request_id: ulid::Ulid::new().to_string() });
+        let request = Request::new(LivenessProbeRequest {
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let response = service.liveness_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -800,7 +805,9 @@ mod tests {
         let service = SystemServiceImpl::new(reporter.clone());
 
         // Initially not ready (startup not complete)
-        let request = Request::new(ReadinessProbeRequest { request_id: ulid::Ulid::new().to_string() });
+        let request = Request::new(ReadinessProbeRequest {
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let response = service.readiness_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -826,7 +833,9 @@ mod tests {
 
         let service = SystemServiceImpl::new(reporter.clone());
 
-        let request = Request::new(ReadinessProbeRequest { request_id: ulid::Ulid::new().to_string() });
+        let request = Request::new(ReadinessProbeRequest {
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let response = service.readiness_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -849,7 +858,9 @@ mod tests {
         let service = SystemServiceImpl::new(reporter.clone());
 
         // Initially not complete
-        let request = Request::new(StartupProbeRequest { request_id: ulid::Ulid::new().to_string() });
+        let request = Request::new(StartupProbeRequest {
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let response = service.startup_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -859,7 +870,9 @@ mod tests {
         // Mark complete
         reporter.mark_startup_complete(None).await;
 
-        let request = Request::new(StartupProbeRequest { request_id: ulid::Ulid::new().to_string() });
+        let request = Request::new(StartupProbeRequest {
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let response = service.startup_probe(request).await.unwrap();
         let resp = response.into_inner();
 

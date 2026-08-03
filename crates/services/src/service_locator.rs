@@ -50,9 +50,7 @@
 //!
 //! let actor_registry = Arc::new(ActorRegistry::new());
 //! service_locator.register_service(actor_registry.clone());
-//!
-//! let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
-//! service_locator.register_service(reply_waiter_registry);
+//! // ActorRegistry owns PendingAsks internally — no separate registry needed.
 //! ```
 //!
 //! ### Retrieving Services
@@ -166,8 +164,8 @@ use plexspaces_actor::metrics_renderer::MetricsPrometheusRenderer;
 use plexspaces_actor::metrics_service_access::MetricsServiceAccess;
 use plexspaces_actor::monitoring::NodeConnectionInfo;
 use plexspaces_actor::JournalStorage;
-use plexspaces_actor::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
 use plexspaces_actor::ServiceLocator;
+use plexspaces_actor::{ActorRegistry, VirtualActorManager};
 use plexspaces_common::RequestContextExt;
 use plexspaces_service_traits::ServiceLocatorBase;
 
@@ -1153,20 +1151,6 @@ impl ServiceLocatorImpl {
 
     /// Get ReplyWaiterRegistry service
     ///
-    /// ## Returns
-    /// `Some(Arc<ReplyWaiterRegistry>)` if registered, `None` otherwise
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let registry = service_locator.reply_waiter_registry().await?;
-    /// ```
-    pub async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
-        self.get_service_by_name::<ReplyWaiterRegistry>(
-            ServiceName::ServiceNameReplyWaiterRegistry.as_str(),
-        )
-        .await
-    }
-
     /// Create a mailbox with default configuration (memory backend)
     ///
     /// ## Purpose
@@ -1198,7 +1182,7 @@ impl ServiceLocatorImpl {
         mailbox_config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
 
         // Create mailbox with the configured backend
-        Mailbox::new(mailbox_config, mailbox_id)
+        Mailbox::new(mailbox_config, mailbox_id, String::new(), String::new(), None)
             .await
             .map_err(|e| format!("Failed to create mailbox: {}", e).into())
     }
@@ -1338,7 +1322,6 @@ impl ServiceLocatorImpl {
 
         Ok(())
     }
-
 }
 
 #[async_trait::async_trait]
@@ -1421,10 +1404,6 @@ impl plexspaces_actor::ServiceLocator for ServiceLocatorImpl {
 
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
         self.virtual_actor_manager().await
-    }
-
-    async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
-        self.reply_waiter_registry().await
     }
 
     async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
@@ -1644,7 +1623,9 @@ impl plexspaces_actor::ServiceLocator for ServiceLocatorImpl {
         registry.clone()
     }
 
-    async fn get_ws_registry(&self) -> Option<std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait>> {
+    async fn get_ws_registry(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait>> {
         let registry = self.ws_registry.read().await;
         registry.clone()
     }
@@ -1898,7 +1879,10 @@ impl plexspaces_actor::InitializableServiceLocator for ServiceLocatorImpl {
         *g = Some(client);
     }
 
-    async fn register_ws_registry(&self, registry: std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait>) {
+    async fn register_ws_registry(
+        &self,
+        registry: std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait>,
+    ) {
         let mut g = self.ws_registry.write().await;
         *g = Some(registry);
     }
@@ -1957,8 +1941,8 @@ async fn initialize_services_impl(
     service_locator_impl: Arc<ServiceLocatorImpl>,
     release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
 ) {
-    use plexspaces_actor::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
-    use plexspaces_process_groups::ProcessGroupRegistry;
+    use plexspaces_actor::process_groups::ProcessGroupRegistry;
+    use plexspaces_actor::{ActorRegistry, VirtualActorManager};
     use std::collections::HashMap;
 
     let prometheus_handle = crate::metrics_service::install_metrics_recorder();
@@ -1994,16 +1978,17 @@ async fn initialize_services_impl(
         .unwrap_or_else(|| {
             let mut spec = plexspaces_proto::node::v1::ReleaseSpec::default();
             plexspaces_common::config_manager::initialize(&mut spec);
-            spec.runtime.unwrap_or_else(|| plexspaces_proto::node::v1::RuntimeConfig {
-                db: Some(plexspaces_proto::storage::v1::SharedDbConfig {
-                    connection_string: plexspaces_common::config_manager::default_shared_db_url(
-                        &plexspaces_common::config_manager::get_default_base_dir(),
-                    ),
-                    auto_migrate: true,
+            spec.runtime
+                .unwrap_or_else(|| plexspaces_proto::node::v1::RuntimeConfig {
+                    db: Some(plexspaces_proto::storage::v1::SharedDbConfig {
+                        connection_string: plexspaces_common::config_manager::default_shared_db_url(
+                            &plexspaces_common::config_manager::get_default_base_dir(),
+                        ),
+                        auto_migrate: true,
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            })
+                })
         });
 
     let shared_db = final_runtime_config.db.as_ref().unwrap_or_else(|| {
@@ -2117,12 +2102,8 @@ async fn initialize_services_impl(
     let actor_registry = Arc::new(ActorRegistry::new(node_id_str.clone()));
 
     // Create and register essential services
-    let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     let facet_manager = actor_registry.facet_manager().clone();
-    actor_registry
-        .set_reply_waiter_registry(reply_waiter_registry.clone())
-        .await;
     actor_registry
         .set_virtual_actor_manager(virtual_actor_manager.clone())
         .await;
@@ -2143,8 +2124,8 @@ async fn initialize_services_impl(
     };
     use plexspaces_journaling::facet_factories::{
         DurabilityFacetFactory, EventSourcingFacetFactory, ExecutionTraceFacetFactory,
-        MemoizeFacetFactory, ReminderFacetFactory, SchemaValidationFacetFactory,
-        TimerFacetFactory, VirtualActorFacetFactory,
+        MemoizeFacetFactory, ReminderFacetFactory, SchemaValidationFacetFactory, TimerFacetFactory,
+        VirtualActorFacetFactory,
     };
     use std::sync::Arc as StdArc;
     let service_locator_for_factories: Arc<dyn plexspaces_actor::ServiceLocator> =
@@ -2232,12 +2213,6 @@ async fn initialize_services_impl(
         .register_service_by_name(
             ServiceName::ServiceNameActorRegistry.as_str(),
             actor_registry.clone(),
-        )
-        .await;
-    service_locator_impl
-        .register_service_by_name(
-            ServiceName::ServiceNameReplyWaiterRegistry.as_str(),
-            reply_waiter_registry,
         )
         .await;
     service_locator_impl
@@ -2435,11 +2410,8 @@ async fn initialize_services_impl(
     // Configure mTLS from environment variables if cert files are present.
     use plexspaces_actor::GrpcConnectionManager;
     let pool_size = final_node_config.grpc_connection_pool_size;
-    let base_manager = GrpcConnectionManager::new(if pool_size > 0 {
-        Some(pool_size)
-    } else {
-        None
-    });
+    let base_manager =
+        GrpcConnectionManager::new(if pool_size > 0 { Some(pool_size) } else { None });
     let connection_manager = {
         let ca = std::env::var("PLEXSPACES_MTLS_CA_CERT").ok();
         let cert = std::env::var("PLEXSPACES_MTLS_SERVER_CERT").ok();

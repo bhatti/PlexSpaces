@@ -578,7 +578,10 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .request_context_for_system_operations()
             .await;
 
-        let req = SpawnActorsRequest { request_id: ulid::Ulid::new().to_string(), requests };
+        let req = SpawnActorsRequest {
+            request_id: ulid::Ulid::new().to_string(),
+            requests,
+        };
 
         let actor_service = self.actor_service.clone();
         actor_service
@@ -845,7 +848,10 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         &mut self,
         requests: Vec<SpawnActorRequest>,
     ) -> Result<SpawnActorsResponse> {
-        let req = SpawnActorsRequest { request_id: ulid::Ulid::new().to_string(), requests };
+        let req = SpawnActorsRequest {
+            request_id: ulid::Ulid::new().to_string(),
+            requests,
+        };
 
         let resp = self
             .client

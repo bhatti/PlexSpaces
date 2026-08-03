@@ -12,52 +12,58 @@ import betterproto.lib.google.protobuf as betterproto_lib_google_protobuf
 
 @dataclass(eq=False, repr=False)
 class HandleRequestRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    message: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(2)
-    correlation_id: str = betterproto.string_field(3)
-    sender_id: str = betterproto.string_field(4)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    message: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(3)
+    correlation_id: str = betterproto.string_field(4)
+    sender_id: str = betterproto.string_field(5)
     metadata: Dict[str, str] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
 @dataclass(eq=False, repr=False)
 class HandleRequestResponse(betterproto.Message):
-    message: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(1)
-    correlation_id: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    message: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(2)
+    correlation_id: str = betterproto.string_field(3)
     metadata: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
 @dataclass(eq=False, repr=False)
 class HandleEventRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    message: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(2)
-    event_type: str = betterproto.string_field(3)
-    sender_id: str = betterproto.string_field(4)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    message: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(3)
+    event_type: str = betterproto.string_field(4)
+    sender_id: str = betterproto.string_field(5)
     metadata: Dict[str, str] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
 @dataclass(eq=False, repr=False)
 class NotifyHandlersRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    event: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    event: "betterproto_lib_google_protobuf.Any" = betterproto.message_field(3)
     metadata: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
 @dataclass(eq=False, repr=False)
 class AddHandlerRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    handler_id: str = betterproto.string_field(2)
-    handler_type: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    handler_id: str = betterproto.string_field(3)
+    handler_type: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class RemoveHandlerRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    handler_id: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    handler_id: str = betterproto.string_field(3)

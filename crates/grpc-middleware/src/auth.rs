@@ -428,11 +428,13 @@ impl AuthInterceptor {
 
         let claims = match self.validate_jwt(&token) {
             Ok(c) => {
-                metrics::counter!("plexspaces_auth_token_validations_total", "status" => "valid").increment(1);
+                metrics::counter!("plexspaces_auth_token_validations_total", "status" => "valid")
+                    .increment(1);
                 c
             }
             Err(e) => {
-                metrics::counter!("plexspaces_auth_token_validations_total", "status" => "invalid").increment(1);
+                metrics::counter!("plexspaces_auth_token_validations_total", "status" => "invalid")
+                    .increment(1);
                 if tracing::enabled!(tracing::Level::WARN) {
                     tracing::warn!(
                         method = %context.method,
@@ -449,7 +451,8 @@ impl AuthInterceptor {
             let (svc, _) = Self::parse_method(&context.method);
             metrics::counter!("plexspaces_auth_rbac_denials_total",
                 "service" => svc.to_string()
-            ).increment(1);
+            )
+            .increment(1);
             if tracing::enabled!(tracing::Level::WARN) {
                 tracing::warn!(
                     user_id = %claims.sub,

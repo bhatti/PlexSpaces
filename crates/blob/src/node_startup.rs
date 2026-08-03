@@ -99,9 +99,11 @@ pub async fn create_and_register_blob_service(
     // Auto-start embedded object store when backend is "embedded" and no external endpoint given
     let embedded_store = if blob_config.backend == "embedded" && blob_config.endpoint.is_empty() {
         tracing::info!(port = embedded_port, "Auto-starting embedded object store");
-        let store = EmbeddedObjectStore::start(embedded_port).await.map_err(|e| {
-            BlobError::ConfigError(format!("Failed to start embedded object store: {e}"))
-        })?;
+        let store = EmbeddedObjectStore::start(embedded_port)
+            .await
+            .map_err(|e| {
+                BlobError::ConfigError(format!("Failed to start embedded object store: {e}"))
+            })?;
         blob_config.endpoint = store.s3_endpoint.clone();
         if !store.access_key.is_empty() {
             blob_config.access_key_id = store.access_key.clone();

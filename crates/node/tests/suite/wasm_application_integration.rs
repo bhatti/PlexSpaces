@@ -1979,7 +1979,7 @@ async fn test_go_wasm_role_dispatch_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -1991,7 +1991,7 @@ async fn test_go_wasm_role_dispatch_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "increment", "amount": 3 }),
     )
     .await;
@@ -2007,7 +2007,7 @@ async fn test_go_wasm_role_dispatch_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2352,7 +2352,7 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2363,7 +2363,7 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "increment", "amount": 2 }),
     )
     .await;
@@ -2399,7 +2399,7 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
             &actor_service,
             tenant_id,
             app_id,
-            "ephemeral:session-1",
+            "session-1:ephemeral",
             serde_json::json!({ "op": "status" }),
         )
         .await;
@@ -2515,7 +2515,7 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2526,7 +2526,7 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "increment", "amount": 2 }),
     )
     .await;
@@ -2562,7 +2562,7 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
             &actor_service,
             tenant_id,
             app_id,
-            "ephemeral:session-1",
+            "session-1:ephemeral",
             serde_json::json!({ "op": "status" }),
         )
         .await;
@@ -2677,7 +2677,7 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2688,7 +2688,7 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "increment", "amount": 2 }),
     )
     .await;
@@ -2724,7 +2724,7 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
             &actor_service,
             tenant_id,
             app_id,
-            "ephemeral:session-1",
+            "session-1:ephemeral",
             serde_json::json!({ "op": "status" }),
         )
         .await;
@@ -2781,7 +2781,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2792,7 +2792,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "increment", "amount": 2 }),
     )
     .await;
@@ -2820,7 +2820,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2834,7 +2834,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2845,7 +2845,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "increment", "amount": 2 }),
     )
     .await;
@@ -2870,7 +2870,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
             &actor_service,
             tenant_id,
             app_id,
-            "ephemeral:session-1",
+            "session-1:ephemeral",
             serde_json::json!({ "op": "status" }),
         )
         .await;
@@ -2934,7 +2934,7 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -2950,7 +2950,7 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
         &actor_service,
         tenant_id,
         app_id,
-        "ephemeral:session-1",
+        "session-1:ephemeral",
         serde_json::json!({ "op": "increment", "amount": 2 }),
     )
     .await;
@@ -2990,7 +2990,7 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
             &actor_service,
             tenant_id,
             app_id,
-            "ephemeral:session-1",
+            "session-1:ephemeral",
             serde_json::json!({ "op": "status" }),
         )
         .await;
@@ -3244,18 +3244,23 @@ async fn test_typescript_wasm_sequential_send_after_no_reentrance_trap() {
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "status" }),
     )
     .await;
-    assert_eq!(status_result["count"], serde_json::json!(0), "status should work, got: {:?}", status_result);
+    assert_eq!(
+        status_result["count"],
+        serde_json::json!(0),
+        "status should work, got: {:?}",
+        status_result
+    );
 
     // First message: schedule_timer (calls host.sendAfter internally)
     let timer_result = actor_ask_json(
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "schedule_timer", "delay_ms": 100 }),
     )
     .await;
@@ -3276,7 +3281,7 @@ async fn test_typescript_wasm_sequential_send_after_no_reentrance_trap() {
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "schedule_reminder", "delay_ms": 140 }),
     )
     .await;
@@ -3297,7 +3302,7 @@ async fn test_typescript_wasm_sequential_send_after_no_reentrance_trap() {
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -3352,7 +3357,7 @@ async fn test_typescript_wasm_send_after_works_after_journal_replay() {
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "increment", "amount": 1 }),
     )
     .await;
@@ -3363,7 +3368,7 @@ async fn test_typescript_wasm_send_after_works_after_journal_replay() {
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "status" }),
     )
     .await;
@@ -3371,8 +3376,8 @@ async fn test_typescript_wasm_send_after_works_after_journal_replay() {
         .as_str()
         .expect("self_id must be present")
         .to_string();
-    let actor_id = plexspaces_actor::ActorId::from_canonical(&actor_id_str)
-        .expect("self_id must be valid");
+    let actor_id =
+        plexspaces_actor::ActorId::from_canonical(&actor_id_str).expect("self_id must be valid");
     let stop_ctx =
         plexspaces_actor::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
@@ -3389,7 +3394,7 @@ async fn test_typescript_wasm_send_after_works_after_journal_replay() {
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "schedule_timer", "delay_ms": 100 }),
     )
     .await;
@@ -3403,7 +3408,7 @@ async fn test_typescript_wasm_send_after_works_after_journal_replay() {
         &actor_service,
         tenant_id,
         app_id,
-        "abstractions:cart-1",
+        "cart-1:abstractions",
         serde_json::json!({ "op": "schedule_reminder", "delay_ms": 140 }),
     )
     .await;

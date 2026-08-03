@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: all build build-fast build-fast-minimal build-cli build-cli-release build-sdks build-examples build-wasm run-examples test test-fast test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf proto-python proto-typescript proto-go proto-polyglot proto-install-deps fmt fmt-rust fmt-proto fmt-paths fmt-check lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help check
+.PHONY: all build build-fast build-fast-minimal build-cli build-cli-release build-sdks build-examples build-wasm run-examples test test-fast test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf proto-python proto-typescript proto-go proto-polyglot proto-install-deps fmt fmt-rust fmt-proto fmt-paths fmt-check lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help check load-test load-test-build load-test-baseline
 
 # Variables
 CARGO = cargo
@@ -108,6 +108,12 @@ help:
 	@echo "  make setup            - Development environment setup"
 	@echo "  make wasm             - Build and test all WASM actors"
 	@echo "  make wasm-check       - Quick WASM compilation check"
+	@echo ""
+	@echo "📊 Load Testing:"
+	@echo "  make load-test-build  - Build all 5 perf actors (Python/Go/TS/Rust WASM + Rust embedded)"
+	@echo "  make load-test-baseline - Run baseline echo test (100 VUs, all languages, both transports)"
+	@echo "  make load-test        - Full load test suite (100 VUs, all modes)"
+	@echo "  (See load-test/README.md for all options)"
 	@echo ""
 	@echo "🐳 Docker:"
 	@echo "  make docker-build          - Build Docker image (framework-only, with BuildKit cache)"
@@ -1080,6 +1086,31 @@ test-byzantine-distributed:
 test-quick:
 	@echo "Running quick tests..."
 	@./scripts/test_quick.sh
+
+# Load test targets
+load-test-build:
+	@echo "Building all load-test perf actors..."
+	@PROJECT_ROOT=$$(pwd); \
+	echo "--- Python WASM ---"; \
+	(cd "load-test/apps/python/apps/perf_actor" && bash build.sh) && echo "✅ Python" || echo "⚠️  Python build failed (install plexspaces-py SDK first)"; \
+	echo "--- Go WASM ---"; \
+	(cd "load-test/apps/go/apps/perf_actor" && bash build.sh) && echo "✅ Go" || echo "⚠️  Go build failed (install TinyGo + wasm-tools first)"; \
+	echo "--- TypeScript WASM ---"; \
+	(cd "load-test/apps/typescript/apps/perf_actor" && bash build.sh) && echo "✅ TypeScript" || echo "⚠️  TypeScript build failed (install jco + Node.js first)"; \
+	echo "--- Rust WASM ---"; \
+	(cd "load-test/apps/rust/apps/perf_actor" && bash build.sh) && echo "✅ Rust WASM" || echo "⚠️  Rust WASM build failed"; \
+	echo "--- Rust Embedded ---"; \
+	CARGO_TARGET_DIR="$$PROJECT_ROOT/target" $(CARGO) build --manifest-path load-test/apps/rust/embedded/perf_actor/Cargo.toml --bin perf_actor && echo "✅ Rust Embedded" || echo "⚠️  Rust Embedded build failed"
+
+load-test-baseline: load-test-build
+	@echo "Running load-test baseline (100 VUs, echo, all languages, both transports)..."
+	@echo "Make sure the server is running first: ./scripts/server.sh"
+	@bash load-test/k6/run.sh --mode echo --lang all --transport both --vus 100 --iters 100
+
+load-test: load-test-build
+	@echo "Running full load-test suite (100 VUs, all modes, all languages)..."
+	@echo "Make sure the server is running first: ./scripts/server.sh"
+	@bash load-test/k6/run.sh --mode all --lang all --transport both --vus 100 --iters 100
 
 # Run benchmarks
 bench:

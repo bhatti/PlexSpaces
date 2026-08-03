@@ -15,12 +15,13 @@ plexspaces-mailbox = { workspace = true }
 plexspaces-persistence = { workspace = true }
 plexspaces-facet = { workspace = true }
 plexspaces-proto = { workspace = true }
-plexspaces-keyvalue = { workspace = true }
+plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }
 plexspaces-tuplespace = { workspace = true }
 plexspaces-locks = { path = "../locks" }
 plexspaces-journaling = { path = "../journaling" }
 plexspaces-common = { path = "../common" }
 indexmap = { version = "2.0", features = ["serde"] }
+dashmap = "5"
 
 # Core dependencies
 tokio = { workspace = true }
@@ -30,7 +31,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-ulid = "1.1"
+ulid = { workspace = true }
 futures = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
@@ -54,6 +55,7 @@ pretty_assertions = { version = "1.4" }
 plexspaces-services = { path = "../services" }
 plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-node = { path = "../node" }
+plexspaces-test-utils = { path = "../test-utils" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio-stream = { workspace = true }
 

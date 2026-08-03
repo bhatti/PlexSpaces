@@ -329,15 +329,6 @@ pub trait ActorFactory: Send + Sync {
         actor_id: &ActorId,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Create a temporary sender for ask() pattern.
-    async fn create_temporary_sender(
-        &self,
-        ctx: &RequestContext,
-        temp_sender_id: ActorId,
-        correlation_id: String,
-        expires_at: std::time::Instant,
-    ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
-
     /// Returns self as Any for downcasting to concrete implementation.
     fn as_any(&self) -> &dyn std::any::Any;
 }

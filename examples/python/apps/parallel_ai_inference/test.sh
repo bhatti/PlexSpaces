@@ -60,9 +60,9 @@ read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
-WORKER_ACTOR_PATH="InferenceWorkerActor:default"
-BENCHMARK_ACTOR_PATH="BenchmarkActor:default"
-ORCHESTRATOR_ACTOR_PATH="OrchestratorWorkflow:default"
+WORKER_ACTOR_PATH="default:InferenceWorkerActor"
+BENCHMARK_ACTOR_PATH="default:BenchmarkActor"
+ORCHESTRATOR_ACTOR_PATH="default:OrchestratorWorkflow"
 
 
 grpc_seed_nodes() {

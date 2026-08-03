@@ -7,11 +7,11 @@
 
 use async_trait::async_trait;
 use plexspaces_actor::actor_context::ObjectRegistry;
+use plexspaces_actor::process_groups::ProcessGroupRegistry;
 use plexspaces_actor::JournalStorage;
 use plexspaces_actor::{
     ChannelService, ElasticPoolService, KeyValueStore, LockManager, RequestContext,
 };
-use plexspaces_process_groups::ProcessGroupRegistry;
 use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
     BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
@@ -675,11 +675,7 @@ impl HostFunctions {
     }
 
     /// Get TTL for a key (returns remaining seconds, or 0 if no TTL / key not found)
-    pub async fn get_keyvalue_ttl(
-        &self,
-        ctx: &RequestContext,
-        key: &str,
-    ) -> Result<u64, String> {
+    pub async fn get_keyvalue_ttl(&self, ctx: &RequestContext, key: &str) -> Result<u64, String> {
         if let Some(kv) = &self.keyvalue_store {
             kv.get_ttl(ctx, key)
                 .await
@@ -755,11 +751,7 @@ impl HostFunctions {
 
     /// Set a durable alarm for this actor at an absolute timestamp.
     /// Uses the journal storage reminder system. The alarm fires `__alarm__` at the actor.
-    pub async fn alarm_set(
-        &self,
-        actor_id: &str,
-        timestamp_ms: u64,
-    ) -> Result<(), String> {
+    pub async fn alarm_set(&self, actor_id: &str, timestamp_ms: u64) -> Result<(), String> {
         use plexspaces_proto::prost_types::Timestamp;
         let storage = match &self.journal_storage {
             Some(s) => s,
@@ -767,12 +759,15 @@ impl HostFunctions {
         };
         let secs = (timestamp_ms / 1000) as i64;
         let nanos = ((timestamp_ms % 1000) * 1_000_000) as i32;
-        let ts = Timestamp { seconds: secs, nanos };
+        let ts = Timestamp {
+            seconds: secs,
+            nanos,
+        };
         let registration = plexspaces_proto::timer::v1::ReminderRegistration {
             actor_id: actor_id.to_string(),
             reminder_name: "__alarm__".to_string(),
             interval: None,
-            first_fire_time: Some(ts.clone()),
+            first_fire_time: Some(ts),
             callback_data: Vec::new(),
             persist_across_activations: true,
             max_occurrences: 1,
@@ -826,7 +821,11 @@ impl HostFunctions {
 
     /// CAS-style alarm delete: removes the alarm only if its timestamp matches expected_ms.
     /// Returns Ok(true) if deleted, Ok(false) if not found or timestamp mismatch.
-    pub async fn alarm_delete_if_matches(&self, actor_id: &str, expected_ms: u64) -> Result<bool, String> {
+    pub async fn alarm_delete_if_matches(
+        &self,
+        actor_id: &str,
+        expected_ms: u64,
+    ) -> Result<bool, String> {
         let storage = match &self.journal_storage {
             Some(s) => s,
             None => return Ok(false),

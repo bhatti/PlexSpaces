@@ -272,7 +272,7 @@ async fn test_init_called_before_message_loop() {
     let actor_impl = TestLifecycleActor::new();
     let init_called = actor_impl.init_called.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -300,7 +300,7 @@ async fn test_init_called_before_message_loop() {
 async fn test_init_failure_prevents_start() {
     let actor_impl = TestLifecycleActor::new().with_init_error("init failed".to_string());
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -329,7 +329,7 @@ async fn test_terminate_called_on_stop() {
     let terminate_called = actor_impl.terminate_called.clone();
     let terminate_reason = actor_impl.terminate_reason.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -407,7 +407,7 @@ async fn test_handle_exit_called_when_linked_actor_dies() {
 async fn test_metrics_emitted_on_init_success() {
     let actor_impl = ObservabilityTestActor::new();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -434,7 +434,7 @@ async fn test_metrics_emitted_on_init_success() {
 
 #[tokio::test]
 async fn test_metrics_emitted_on_init_failure() {
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -460,7 +460,7 @@ async fn test_metrics_emitted_on_init_failure() {
 async fn test_metrics_emitted_on_terminate() {
     let actor_impl = ObservabilityTestActor::new();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -490,7 +490,7 @@ async fn test_metrics_emitted_on_terminate() {
 async fn test_logging_on_lifecycle_events() {
     let actor_impl = ObservabilityTestActor::new();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -568,7 +568,7 @@ async fn test_multiple_facets_attachment_order() {
         Arc::new(AtomicU32::new(0)),
     );
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -707,7 +707,7 @@ async fn test_multiple_facets_detachment_order() {
         facet3_detach.clone(),
     );
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(

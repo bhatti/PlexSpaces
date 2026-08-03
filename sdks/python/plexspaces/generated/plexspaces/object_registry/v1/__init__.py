@@ -251,16 +251,17 @@ class ObjectRegistration(betterproto.Message):
 class RegisterRequest(betterproto.Message):
     """Register object request"""
 
-    registration: "ObjectRegistration" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Object registration to create/update"""
 
-    ttl: timedelta = betterproto.message_field(2)
+    registration: "ObjectRegistration" = betterproto.message_field(2)
+    ttl: timedelta = betterproto.message_field(3)
     """
     TTL for auto-expiry (optional, default: no expiry)
      If specified, object auto-unregisters after TTL expires
     """
 
-    enforce_unique_alias: bool = betterproto.bool_field(3)
+    enforce_unique_alias: bool = betterproto.bool_field(4)
     """
     If true, enforce unique alias placement.
      Returns existing grpc_address in response if another active registration holds the same alias.
@@ -269,19 +270,20 @@ class RegisterRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class RegisterResponse(betterproto.Message):
-    registration: "ObjectRegistration" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Registered object (with generated timestamps)"""
 
-    created: bool = betterproto.bool_field(2)
+    registration: "ObjectRegistration" = betterproto.message_field(2)
+    created: bool = betterproto.bool_field(3)
     """Whether this was a new registration (true) or update (false)"""
 
-    existing_grpc_address: str = betterproto.string_field(3)
+    existing_grpc_address: str = betterproto.string_field(4)
     """
     If enforce_unique_alias was true and an active registration with the same alias exists,
      this contains the existing registration's grpc_address for forwarding.
     """
 
-    existing_object_id: str = betterproto.string_field(4)
+    existing_object_id: str = betterproto.string_field(5)
     """
     If enforce_unique_alias was true and an active registration with the same alias exists,
      this contains the existing object_id for diagnostics.
@@ -292,42 +294,46 @@ class RegisterResponse(betterproto.Message):
 class UnregisterRequest(betterproto.Message):
     """Unregister object request"""
 
-    object_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Object ID to unregister"""
 
-    object_type: "ObjectType" = betterproto.enum_field(2)
+    object_id: str = betterproto.string_field(2)
+    object_type: "ObjectType" = betterproto.enum_field(3)
     """Object type (for key construction)"""
 
-    tenant_id: str = betterproto.string_field(3)
+    tenant_id: str = betterproto.string_field(4)
     """Tenant ID (for multi-tenancy)"""
 
-    namespace: str = betterproto.string_field(4)
+    namespace: str = betterproto.string_field(5)
     """Namespace (for logical grouping)"""
 
 
 @dataclass(eq=False, repr=False)
 class UnregisterResponse(betterproto.Message):
-    unregistered: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether object was found and unregistered"""
+
+    unregistered: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class LookupRequest(betterproto.Message):
     """Lookup single object request"""
 
-    object_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Object ID to lookup (mutually exclusive with alias)"""
 
-    object_type: "ObjectType" = betterproto.enum_field(2)
+    object_id: str = betterproto.string_field(2)
+    object_type: "ObjectType" = betterproto.enum_field(3)
     """Object type (optional - if not specified, searches all types)"""
 
-    tenant_id: str = betterproto.string_field(3)
+    tenant_id: str = betterproto.string_field(4)
     """Tenant ID (for multi-tenancy)"""
 
-    namespace: str = betterproto.string_field(4)
+    namespace: str = betterproto.string_field(5)
     """Namespace (for logical grouping)"""
 
-    alias: str = betterproto.string_field(5)
+    alias: str = betterproto.string_field(6)
     """
     Lookup by alias (mutually exclusive with object_id).
      Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
@@ -336,10 +342,11 @@ class LookupRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class LookupResponse(betterproto.Message):
-    registration: "ObjectRegistration" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Object registration (null if not found)"""
 
-    found: bool = betterproto.bool_field(2)
+    registration: "ObjectRegistration" = betterproto.message_field(2)
+    found: bool = betterproto.bool_field(3)
     """Whether object was found"""
 
 
@@ -347,75 +354,77 @@ class LookupResponse(betterproto.Message):
 class DiscoverRequest(betterproto.Message):
     """Discover objects request (with extensive filtering)"""
 
-    object_type: "ObjectType" = betterproto.enum_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Filter by object type (optional - if not specified, returns ALL types)
     """
 
-    object_category: str = betterproto.string_field(2)
+    object_type: "ObjectType" = betterproto.enum_field(2)
+    object_category: str = betterproto.string_field(3)
     """
     Filter by object category (exact match)
      Examples: "GenServer", "redis", "order-service"
     """
 
-    node_id: str = betterproto.string_field(3)
+    node_id: str = betterproto.string_field(4)
     """Filter by node ID"""
 
-    tenant_id: str = betterproto.string_field(4)
+    tenant_id: str = betterproto.string_field(5)
     """Filter by tenant ID"""
 
-    namespace: str = betterproto.string_field(5)
+    namespace: str = betterproto.string_field(6)
     """Filter by namespace"""
 
-    capabilities: List[str] = betterproto.string_field(6)
+    capabilities: List[str] = betterproto.string_field(7)
     """
     Filter by capabilities (ALL must be present)
      Example: ["persistent", "distributed"] → only objects with BOTH capabilities
     """
 
-    labels: List[str] = betterproto.string_field(7)
+    labels: List[str] = betterproto.string_field(8)
     """
     Filter by labels (ANY can match)
      Example: ["prod", "us-west-2"] → objects with "prod" OR "us-west-2"
     """
 
-    health_status: "HealthStatus" = betterproto.enum_field(8)
+    health_status: "HealthStatus" = betterproto.enum_field(9)
     """Filter by health status"""
 
-    max_heartbeat_age: timedelta = betterproto.message_field(9)
+    max_heartbeat_age: timedelta = betterproto.message_field(10)
     """
     Filter by minimum health age (exclude stale objects)
      Example: last_heartbeat < (now - max_age) → excluded
     """
 
-    page_size: int = betterproto.int32_field(10)
+    page_size: int = betterproto.int32_field(11)
     """Maximum results per page (default: 100, max: 1000)"""
 
-    page_token: str = betterproto.string_field(11)
+    page_token: str = betterproto.string_field(12)
     """Pagination token from previous response (opaque)"""
 
-    sort_by: str = betterproto.string_field(12)
+    sort_by: str = betterproto.string_field(13)
     """
     Sort field (default: "created_at")
      Options: "object_id", "created_at", "updated_at", "last_heartbeat"
     """
 
-    descending: bool = betterproto.bool_field(13)
+    descending: bool = betterproto.bool_field(14)
     """Sort order (default: ascending)"""
 
 
 @dataclass(eq=False, repr=False)
 class DiscoverResponse(betterproto.Message):
-    registrations: List["ObjectRegistration"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Matching objects (paginated)"""
 
-    total_count: int = betterproto.int64_field(2)
+    registrations: List["ObjectRegistration"] = betterproto.message_field(2)
+    total_count: int = betterproto.int64_field(3)
     """Total count of matching objects (before pagination)"""
 
-    next_page_token: str = betterproto.string_field(3)
+    next_page_token: str = betterproto.string_field(4)
     """Next page token (empty if no more results)"""
 
-    has_more: bool = betterproto.bool_field(4)
+    has_more: bool = betterproto.bool_field(5)
     """Whether there are more results"""
 
 
@@ -423,33 +432,35 @@ class DiscoverResponse(betterproto.Message):
 class HeartbeatRequest(betterproto.Message):
     """Heartbeat request"""
 
-    object_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Object ID sending heartbeat"""
 
-    object_type: "ObjectType" = betterproto.enum_field(2)
+    object_id: str = betterproto.string_field(2)
+    object_type: "ObjectType" = betterproto.enum_field(3)
     """Object type"""
 
-    tenant_id: str = betterproto.string_field(3)
+    tenant_id: str = betterproto.string_field(4)
     """Tenant ID"""
 
-    namespace: str = betterproto.string_field(4)
+    namespace: str = betterproto.string_field(5)
     """Namespace"""
 
-    health_status: "HealthStatus" = betterproto.enum_field(5)
+    health_status: "HealthStatus" = betterproto.enum_field(6)
     """Updated health status (optional)"""
 
     metrics: Dict[str, float] = betterproto.map_field(
-        6, betterproto.TYPE_STRING, betterproto.TYPE_DOUBLE
+        7, betterproto.TYPE_STRING, betterproto.TYPE_DOUBLE
     )
     """Updated metrics (optional)"""
 
 
 @dataclass(eq=False, repr=False)
 class HeartbeatResponse(betterproto.Message):
-    accepted: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether heartbeat was accepted"""
 
-    registration: "ObjectRegistration" = betterproto.message_field(2)
+    accepted: bool = betterproto.bool_field(2)
+    registration: "ObjectRegistration" = betterproto.message_field(3)
     """Updated registration"""
 
 
@@ -457,19 +468,22 @@ class HeartbeatResponse(betterproto.Message):
 class BatchHeartbeatRequest(betterproto.Message):
     """Batch heartbeat request"""
 
-    heartbeats: List["HeartbeatRequest"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Multiple heartbeats"""
+
+    heartbeats: List["HeartbeatRequest"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class BatchHeartbeatResponse(betterproto.Message):
-    results: List["HeartbeatResponse"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Results for each heartbeat (same order as request)"""
 
-    success_count: int = betterproto.int32_field(2)
+    results: List["HeartbeatResponse"] = betterproto.message_field(2)
+    success_count: int = betterproto.int32_field(3)
     """Number of successful heartbeats"""
 
-    failure_count: int = betterproto.int32_field(3)
+    failure_count: int = betterproto.int32_field(4)
     """Number of failed heartbeats"""
 
 
@@ -477,10 +491,11 @@ class BatchHeartbeatResponse(betterproto.Message):
 class ListObjectTypesRequest(betterproto.Message):
     """List object types request"""
 
-    tenant_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by tenant (optional)"""
 
-    namespace: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """Filter by namespace (optional)"""
 
 
@@ -502,10 +517,11 @@ class ObjectTypeSummary(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class ListObjectTypesResponse(betterproto.Message):
-    summaries: List["ObjectTypeSummary"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Summary for each object type"""
 
-    total_count: int = betterproto.int64_field(2)
+    summaries: List["ObjectTypeSummary"] = betterproto.message_field(2)
+    total_count: int = betterproto.int64_field(3)
     """Total registered objects across all types"""
 
 

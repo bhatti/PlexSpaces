@@ -33,11 +33,11 @@ plexspaces-mailbox = { path = "../mailbox" }
 plexspaces-facet = { path = "../facet" }
 
 # Async runtime
-tokio = { version = "1.44", features = ["full"] }
-async-trait = "0.1"
+tokio = { workspace = true }
+async-trait = { workspace = true }
 
 # Database backends (all optional)
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "migrate", "chrono"], optional = true }
+sqlx = { workspace = true, optional = true }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
 aws-sdk-dynamodb = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
@@ -47,8 +47,8 @@ zstd = { version = "0.13", optional = true }
 snap = { version = "1.1", optional = true }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 
@@ -56,12 +56,12 @@ prost-types = { workspace = true }
 plexspaces-locks = { path = "../locks", optional = true }
 
 # Error handling
-thiserror = "1.0"
+thiserror = { workspace = true }
 
 # Utilities
-ulid = { version = "1.1", features = ["serde"] }
-tracing = "0.1"
-chrono = "0.4"
+ulid = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
 
 # JSON Schema validation (full draft-7) — used by SchemaValidationFacet
 jsonschema = { version = "0.17", default-features = false }

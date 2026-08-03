@@ -234,21 +234,21 @@ echo ""
 echo "Step 6: Presence actor lifecycle"
 echo "----------------------------------------------------------------"
 
-ONLINE_RESP=$(ask_actor "PresenceActor:alice" '{"op":"online"}')
+ONLINE_RESP=$(ask_actor "alice:PresenceActor" '{"op":"online"}')
 if echo "$ONLINE_RESP" | grep -qE '"online"[[:space:]]*:[[:space:]]*true'; then
   pass "PresenceActor: alice marked online"
 else
   echo -e "${YELLOW}[WARN] Presence online response: $ONLINE_RESP${NC}"
 fi
 
-PRESENCE_STATUS=$(ask_actor "PresenceActor:alice" '{"op":"status"}')
+PRESENCE_STATUS=$(ask_actor "alice:PresenceActor" '{"op":"status"}')
 if echo "$PRESENCE_STATUS" | grep -q '"user_id"'; then
   pass "PresenceActor: status returned"
 else
   echo -e "${YELLOW}[WARN] Presence status: $PRESENCE_STATUS${NC}"
 fi
 
-OFFLINE_RESP=$(ask_actor "PresenceActor:alice" '{"op":"offline"}')
+OFFLINE_RESP=$(ask_actor "alice:PresenceActor" '{"op":"offline"}')
 if echo "$OFFLINE_RESP" | grep -qE '"online"[[:space:]]*:[[:space:]]*false'; then
   pass "PresenceActor: alice marked offline"
 else

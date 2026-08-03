@@ -29,9 +29,7 @@
 //! - **Production-Grade**: Handles errors gracefully, supports all facet types
 //! - **Runtime Config**: Factories use ServiceLocator to get runtime configuration
 
-use plexspaces_facet::{
-    Facet, FacetError, FacetRegistry,
-};
+use plexspaces_facet::{Facet, FacetError, FacetRegistry};
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use serde_json::Value;
 use std::collections::HashMap;

@@ -30,11 +30,11 @@
 //!   - Slower, requires WASM runtime
 
 use async_trait::async_trait;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::Message;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_actor::{ActorRegistry, RequestContext, ServiceLocator};
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
@@ -58,15 +58,7 @@ use tonic::Request;
 use super::test_helpers::{
     app_request_with_tenant, lookup_actor_ref, spawn_actor_helper, test_runtime_actor_id,
 };
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
-    plexspaces_actor::Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
-}
+use plexspaces_test_utils::messages::create_test_message;
 
 // ============================================================================
 // TEST ACTOR BEHAVIOR
@@ -160,7 +152,6 @@ async fn create_test_node() -> Arc<Node> {
     }
     node
 }
-
 
 /// Helper to wait for actors to be registered (yield-based polling, no sleep)
 async fn wait_for_actors_registered(
@@ -266,7 +257,7 @@ fn create_virtual_actor_facet(activation_strategy: &str) -> Facet {
 /// UNIT TEST: Eager virtual actors should activate immediately
 #[tokio::test]
 async fn test_eager_virtual_actors_activation() {
-    timeout(Duration::from_secs(3), async {
+    timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
         let node_id = node.id().as_str();
 
@@ -317,7 +308,7 @@ async fn test_eager_virtual_actors_activation() {
 /// UNIT TEST: Lazy virtual actors should be registered but not active until first message
 #[tokio::test]
 async fn test_lazy_virtual_actors_registration() {
-    timeout(Duration::from_secs(3), async {
+    timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
         let node_id = node.id().as_str();
 
@@ -378,7 +369,7 @@ async fn test_lazy_virtual_actors_registration() {
 /// UNIT TEST: Mixed eager and lazy virtual actors
 #[tokio::test]
 async fn test_mixed_eager_lazy_virtual_actors() {
-    timeout(Duration::from_secs(3), async {
+    timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
         let node_id = node.id().as_str();
 
@@ -501,7 +492,10 @@ async fn test_application_deployment_with_eager_virtual_actors() {
         supervisor: Some(supervisor_spec),
         enabled: true,
         auto_start: true,
-        shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
         required_service_links: vec![],
@@ -510,7 +504,10 @@ async fn test_application_deployment_with_eager_virtual_actors() {
     };
 
     // Verify spec structure
-    let sup = app_spec.supervisor.as_ref().expect("supervisor must be set");
+    let sup = app_spec
+        .supervisor
+        .as_ref()
+        .expect("supervisor must be set");
     assert_eq!(sup.children.len(), 1);
     let child = &sup.children[0];
     let identity = child.actor_identity.as_ref().expect("identity must be set");
@@ -519,15 +516,23 @@ async fn test_application_deployment_with_eager_virtual_actors() {
     assert_eq!(child.facets.len(), 1);
     let facet = &child.facets[0];
     assert_eq!(facet.r#type, "virtual_actor");
-    assert_eq!(facet.config.get("activation_strategy").map(String::as_str), Some("eager"));
+    assert_eq!(
+        facet.config.get("activation_strategy").map(String::as_str),
+        Some("eager")
+    );
     assert_eq!(
         sup.strategy,
         SupervisionStrategy::SupervisionStrategyOneForOne as i32
     );
 
     // Verify the actor ID that would be registered after deployment
-    let actor_id = ActorId::new("eager-worker-1", "test_wasm_actor", "eager-app-001", "test-node")
-        .expect("actor id must be valid");
+    let actor_id = ActorId::new(
+        "eager-worker-1",
+        "test_wasm_actor",
+        "eager-app-001",
+        "test-node",
+    )
+    .expect("actor id must be valid");
     assert_eq!(actor_id.name(), "eager-worker-1");
     assert_eq!(actor_id.actor_type(), "test_wasm_actor");
     assert_eq!(actor_id.namespace(), "eager-app-001");

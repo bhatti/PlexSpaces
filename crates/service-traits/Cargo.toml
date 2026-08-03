@@ -31,6 +31,7 @@ plexspaces-facet = { path = "../facet" }
 plexspaces-locks = { path = "../locks" }
 plexspaces-tuplespace = { path = "../tuplespace" }
 async-trait = { workspace = true }
+bytes = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }

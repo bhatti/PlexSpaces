@@ -508,7 +508,7 @@ impl WasmRuntime {
         tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn plexspaces_actor::KeyValueStore>>,
         process_group_registry: Option<
-            std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>,
+            std::sync::Arc<plexspaces_actor::process_groups::ProcessGroupRegistry>,
         >,
         lock_manager: Option<std::sync::Arc<dyn plexspaces_actor::LockManager + Send + Sync>>,
         object_registry: Option<
@@ -764,7 +764,7 @@ impl plexspaces_actor::WasmRuntimeTrait for WasmRuntime {
 
         // Downcast process_group_registry if provided
         let pg_registry = process_group_registry.and_then(|pg| {
-            pg.downcast::<plexspaces_process_groups::ProcessGroupRegistry>()
+            pg.downcast::<plexspaces_actor::process_groups::ProcessGroupRegistry>()
                 .ok()
         });
 

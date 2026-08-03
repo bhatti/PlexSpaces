@@ -87,7 +87,8 @@ async fn test_choice_to_parallel_workflow() -> Result<(), Box<dyn std::error::Er
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-parallel", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-parallel", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(

@@ -1818,9 +1818,44 @@ Each facet can:
 
 ## Virtual Actor Activation Details
 
+### Actor Address Formats
+
+PlexSpaces supports three address formats at HTTP and gRPC boundaries:
+
+| Format | Example | Behavior |
+|--------|---------|----------|
+| `instance_name:actor_type` | `cart-1:abstractions` | O(1) lookup for a named instance. If the actor is not live and the type is registered as virtual, it is activated on demand. |
+| bare `actor_type` | `gen_server` | Picks a random live instance of that type (load-balancing across a pre-warmed pool). |
+| canonical | `cart-1//abstractions::default@node1` | Used internally; passed through as-is at boundaries. |
+
+The convention is **instance name first, actor type second** — this mirrors `ActorId::new(name, actor_type, ...)` and makes the hot path a single O(1) HashMap lookup.
+
+**HTTP URL**:
+```
+POST /api/v1/actors/{namespace}/{instance_name}:{actor_type}/ask
+```
+
+Examples:
+```bash
+# Named regular actor
+curl -X POST .../api/v1/actors/default/cart-1:abstractions/ask
+
+# Named virtual actor (activated on demand if not live)
+curl -X POST .../api/v1/actors/default/session-42:user-session/ask
+
+# Bare type — routes to any live instance
+curl -X POST .../api/v1/actors/default/gen_server/ask
+```
+
+**gRPC `AskReplyRequest`** — always use explicit fields:
+```rust
+// Explicit fields — the only supported form for gRPC
+AskReplyRequest { actor_type: "abstractions".to_string(), actor_name: "cart-1".to_string(), .. }
+```
+
 ### AskReply and SendMessage APIs
 
-Virtual actors are activated on demand through `AskReply` and `SendMessage`. The public API stays actor-type based, and the framework performs actor lookup first, then internally activates or reinstantiates the virtual actor from stored metadata when no active instance is found.
+Virtual actors are activated on demand through `AskReply` and `SendMessage`. Supply `actor_name` and `actor_type` as separate fields to target a specific instance; the framework activates it if not already live.
 
 ```rust
 use plexspaces_proto::v1::actor_service::{ActorServiceClient, AskReplyRequest};
@@ -1830,7 +1865,8 @@ let mut client = ActorServiceClient::connect("http://localhost:9000").await?;
 
 let request = AskReplyRequest {
     namespace: "default".to_string(),
-    actor_type: "user-session:user-123".to_string(),
+    actor_name: "user-123".to_string(),
+    actor_type: "user-session".to_string(),
     http_method: "GET".to_string(),
     payload: vec![],
     headers: Default::default(),

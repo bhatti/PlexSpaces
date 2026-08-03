@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Constants used across PlexSpaces
-
-/// Temporary sender ID prefix for ask() pattern.
-/// Format: "{TEMP_SENDER_PREFIX}_{correlation_id}" in ActorId.name().
-pub const TEMP_SENDER_PREFIX: &str = "ask";
-
-/// Internal actor type for temporary senders used by ask/reply routing.
-pub const TEMP_SENDER_ACTOR_TYPE: &str = "temporary_sender";
+// Re-export constants from plexspaces-service-traits as the canonical definition.
+// Do not redefine them here — duplicate definitions cause silent divergence.
+pub use plexspaces_service_traits::{TEMP_SENDER_ACTOR_TYPE, TEMP_SENDER_PREFIX};

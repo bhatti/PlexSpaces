@@ -58,7 +58,7 @@ plexspaces-locks = { path = "../locks", features = ["sqlite-backend"] }
 plexspaces-application = { path = "../application" }
 plexspaces-services = { path = "../services" }
 plexspaces-proto = { workspace = true }
-ulid = "1.1"
+ulid = { workspace = true }
 
 [lib]
 name = "plexspaces_facet"

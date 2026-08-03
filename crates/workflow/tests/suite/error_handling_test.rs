@@ -147,7 +147,8 @@ async fn test_choice_less_than_operator() -> Result<(), Box<dyn std::error::Erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-less-than", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-less-than", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -185,9 +186,14 @@ async fn test_wait_invalid_timestamp() -> Result<(), Box<dyn std::error::Error>>
     );
     storage.save_definition(&ctx, &definition).await?;
 
-    let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "wait-invalid-timestamp", "1.0", json!({}))
-            .await?;
+    let execution_id = WorkflowExecutor::start_execution(
+        &storage,
+        &ctx,
+        "wait-invalid-timestamp",
+        "1.0",
+        json!({}),
+    )
+    .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -230,9 +236,14 @@ async fn test_signal_missing_config() -> Result<(), Box<dyn std::error::Error>> 
     );
     storage.save_definition(&ctx, &definition).await?;
 
-    let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "signal-missing-config", "1.0", json!({}))
-            .await?;
+    let execution_id = WorkflowExecutor::start_execution(
+        &storage,
+        &ctx,
+        "signal-missing-config",
+        "1.0",
+        json!({}),
+    )
+    .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -265,9 +276,14 @@ async fn test_wait_missing_duration() -> Result<(), Box<dyn std::error::Error>> 
     );
     storage.save_definition(&ctx, &definition).await?;
 
-    let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "wait-missing-duration", "1.0", json!({}))
-            .await?;
+    let execution_id = WorkflowExecutor::start_execution(
+        &storage,
+        &ctx,
+        "wait-missing-duration",
+        "1.0",
+        json!({}),
+    )
+    .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -340,7 +356,8 @@ async fn test_choice_non_numeric_comparison() -> Result<(), Box<dyn std::error::
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-non-numeric", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-non-numeric", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -408,7 +425,8 @@ async fn test_choice_float_greater_than() -> Result<(), Box<dyn std::error::Erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-float-gt", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-float-gt", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -475,7 +493,8 @@ async fn test_choice_float_less_than() -> Result<(), Box<dyn std::error::Error>>
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-float-lt", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-float-lt", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -500,7 +519,8 @@ async fn test_execute_from_state_empty_workflow() -> Result<(), Box<dyn std::err
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "empty-workflow",
             "1.0",
             json!({}),
@@ -612,7 +632,8 @@ async fn test_choice_no_match_no_default() -> Result<(), Box<dyn std::error::Err
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-no-match", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-no-match", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(

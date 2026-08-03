@@ -16,7 +16,6 @@
 
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use axum::extract::connect_info::IntoMakeServiceWithConnectInfo;
 use hyper::body::Incoming;

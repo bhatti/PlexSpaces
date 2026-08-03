@@ -227,23 +227,27 @@ class BackupInfo(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class GetSystemInfoRequest(betterproto.Message):
-    include_details: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    include_details: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetSystemInfoResponse(betterproto.Message):
-    system_info: "SystemInfo" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    system_info: "SystemInfo" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetHealthRequest(betterproto.Message):
-    components: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    components: List[str] = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetHealthResponse(betterproto.Message):
-    overall_status: "HealthStatus" = betterproto.enum_field(1)
-    checks: List["HealthCheck"] = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    overall_status: "HealthStatus" = betterproto.enum_field(2)
+    checks: List["HealthCheck"] = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -613,16 +617,19 @@ class MarkStartupCompleteRequest(betterproto.Message):
      - Initial actors spawned
     """
 
-    message: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Optional message explaining what was initialized"""
+
+    message: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class MarkStartupCompleteResponse(betterproto.Message):
-    status: "ServingStatus" = betterproto.enum_field(1)
+    request_id: str = betterproto.string_field(1)
     """New serving status (should be SERVING)"""
 
-    startup_duration: timedelta = betterproto.message_field(2)
+    status: "ServingStatus" = betterproto.enum_field(2)
+    startup_duration: timedelta = betterproto.message_field(3)
     """Time taken for startup"""
 
 
@@ -643,22 +650,24 @@ class BeginShutdownRequest(betterproto.Message):
      - Pod has terminationGracePeriodSeconds (default 30s) before SIGKILL
     """
 
-    reason: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Reason for shutdown (for logging)"""
 
-    drain_timeout: timedelta = betterproto.message_field(2)
+    reason: str = betterproto.string_field(2)
+    drain_timeout: timedelta = betterproto.message_field(3)
     """Override default drain timeout"""
 
 
 @dataclass(eq=False, repr=False)
 class BeginShutdownResponse(betterproto.Message):
-    requests_drained: int = betterproto.uint64_field(1)
+    request_id: str = betterproto.string_field(1)
     """Number of requests drained"""
 
-    drain_duration: timedelta = betterproto.message_field(2)
+    requests_drained: int = betterproto.uint64_field(2)
+    drain_duration: timedelta = betterproto.message_field(3)
     """Time taken to drain"""
 
-    drain_completed: bool = betterproto.bool_field(3)
+    drain_completed: bool = betterproto.bool_field(4)
     """Whether drain completed or timed out"""
 
 
@@ -671,44 +680,49 @@ class GetNodeReadinessRequest(betterproto.Message):
      Get detailed readiness status for debugging (beyond simple SERVING/NOT_SERVING)
     """
 
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class GetNodeReadinessResponse(betterproto.Message):
-    readiness: "NodeReadinessStatus" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    readiness: "NodeReadinessStatus" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetDetailedHealthRequest(betterproto.Message):
     """Get detailed health request"""
 
-    include_non_critical: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """If true, include non-critical dependency checks"""
+
+    include_non_critical: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetDetailedHealthResponse(betterproto.Message):
     """Get detailed health response"""
 
-    health: "DetailedHealthCheck" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    health: "DetailedHealthCheck" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class LivenessProbeRequest(betterproto.Message):
     """Liveness probe request"""
 
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class LivenessProbeResponse(betterproto.Message):
     """Liveness probe response"""
 
-    is_alive: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether node is alive"""
 
-    http_status_code: int = betterproto.int32_field(2)
+    is_alive: bool = betterproto.bool_field(2)
+    http_status_code: int = betterproto.int32_field(3)
     """Status code for HTTP (200 if alive, 503 if not)"""
 
 
@@ -716,20 +730,21 @@ class LivenessProbeResponse(betterproto.Message):
 class ReadinessProbeRequest(betterproto.Message):
     """Readiness probe request"""
 
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class ReadinessProbeResponse(betterproto.Message):
     """Readiness probe response"""
 
-    is_ready: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether node is ready"""
 
-    http_status_code: int = betterproto.int32_field(2)
+    is_ready: bool = betterproto.bool_field(2)
+    http_status_code: int = betterproto.int32_field(3)
     """Status code for HTTP (200 if ready, 503 if not)"""
 
-    not_ready_reason: str = betterproto.string_field(3)
+    not_ready_reason: str = betterproto.string_field(4)
     """Reason if not ready (for debugging)"""
 
 
@@ -737,57 +752,65 @@ class ReadinessProbeResponse(betterproto.Message):
 class StartupProbeRequest(betterproto.Message):
     """Startup probe request"""
 
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class StartupProbeResponse(betterproto.Message):
     """Startup probe response"""
 
-    startup_complete: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether startup is complete"""
 
-    http_status_code: int = betterproto.int32_field(2)
+    startup_complete: bool = betterproto.bool_field(2)
+    http_status_code: int = betterproto.int32_field(3)
     """Status code for HTTP (200 if complete, 503 if not)"""
 
-    not_complete_reason: str = betterproto.string_field(3)
+    not_complete_reason: str = betterproto.string_field(4)
     """Reason if not complete (for debugging)"""
 
 
 @dataclass(eq=False, repr=False)
 class GetMetricsRequest(betterproto.Message):
-    start_time: datetime = betterproto.message_field(1)
-    end_time: datetime = betterproto.message_field(2)
-    interval: timedelta = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    start_time: datetime = betterproto.message_field(2)
+    end_time: datetime = betterproto.message_field(3)
+    interval: timedelta = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class GetMetricsResponse(betterproto.Message):
-    metrics: List["__metrics_v1__.SystemMetrics"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """System metrics from observability core (metrics.proto)"""
+
+    metrics: List["__metrics_v1__.SystemMetrics"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetConfigRequest(betterproto.Message):
-    key_pattern: str = betterproto.string_field(1)
-    include_secrets: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    key_pattern: str = betterproto.string_field(2)
+    include_secrets: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetConfigResponse(betterproto.Message):
-    settings: List["ConfigSetting"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    settings: List["ConfigSetting"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class SetConfigRequest(betterproto.Message):
-    settings: List["ConfigSetting"] = betterproto.message_field(1)
-    validate_only: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    settings: List["ConfigSetting"] = betterproto.message_field(2)
+    validate_only: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class SetConfigResponse(betterproto.Message):
-    errors: List["ConfigValidationError"] = betterproto.message_field(1)
-    requires_restart: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    errors: List["ConfigValidationError"] = betterproto.message_field(2)
+    requires_restart: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -798,73 +821,83 @@ class ConfigValidationError(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class GetLogsRequest(betterproto.Message):
-    start_time: datetime = betterproto.message_field(1)
-    end_time: datetime = betterproto.message_field(2)
-    min_level: "LogLevel" = betterproto.enum_field(3)
-    components: List[str] = betterproto.string_field(4)
-    query: str = betterproto.string_field(5)
-    page_request: "__common_v1__.PageRequest" = betterproto.message_field(6)
+    request_id: str = betterproto.string_field(1)
+    start_time: datetime = betterproto.message_field(2)
+    end_time: datetime = betterproto.message_field(3)
+    min_level: "LogLevel" = betterproto.enum_field(4)
+    components: List[str] = betterproto.string_field(5)
+    query: str = betterproto.string_field(6)
+    page_request: "__common_v1__.PageRequest" = betterproto.message_field(7)
 
 
 @dataclass(eq=False, repr=False)
 class GetLogsResponse(betterproto.Message):
-    entries: List["LogEntry"] = betterproto.message_field(1)
-    page_response: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    entries: List["LogEntry"] = betterproto.message_field(2)
+    page_response: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class CreateBackupRequest(betterproto.Message):
-    type: "BackupType" = betterproto.enum_field(1)
-    components: List[str] = betterproto.string_field(2)
-    destination: str = betterproto.string_field(3)
-    compress: bool = betterproto.bool_field(4)
-    encrypt: bool = betterproto.bool_field(5)
+    request_id: str = betterproto.string_field(1)
+    type: "BackupType" = betterproto.enum_field(2)
+    components: List[str] = betterproto.string_field(3)
+    destination: str = betterproto.string_field(4)
+    compress: bool = betterproto.bool_field(5)
+    encrypt: bool = betterproto.bool_field(6)
 
 
 @dataclass(eq=False, repr=False)
 class CreateBackupResponse(betterproto.Message):
-    backup: "BackupInfo" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    backup: "BackupInfo" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListBackupsRequest(betterproto.Message):
-    page_request: "__common_v1__.PageRequest" = betterproto.message_field(1)
-    type: "BackupType" = betterproto.enum_field(2)
-    status: "BackupStatus" = betterproto.enum_field(3)
+    request_id: str = betterproto.string_field(1)
+    page_request: "__common_v1__.PageRequest" = betterproto.message_field(2)
+    type: "BackupType" = betterproto.enum_field(3)
+    status: "BackupStatus" = betterproto.enum_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ListBackupsResponse(betterproto.Message):
-    backups: List["BackupInfo"] = betterproto.message_field(1)
-    page_response: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    backups: List["BackupInfo"] = betterproto.message_field(2)
+    page_response: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class RestoreBackupRequest(betterproto.Message):
-    backup_id: str = betterproto.string_field(1)
-    components: List[str] = betterproto.string_field(2)
-    verify_checksum: bool = betterproto.bool_field(3)
-    force: bool = betterproto.bool_field(4)
+    request_id: str = betterproto.string_field(1)
+    backup_id: str = betterproto.string_field(2)
+    components: List[str] = betterproto.string_field(3)
+    verify_checksum: bool = betterproto.bool_field(4)
+    force: bool = betterproto.bool_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class RestoreBackupResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    error: str = betterproto.string_field(2)
-    restored_components: List[str] = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    error: str = betterproto.string_field(3)
+    restored_components: List[str] = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ShutdownRequest(betterproto.Message):
-    graceful: bool = betterproto.bool_field(1)
-    timeout: timedelta = betterproto.message_field(2)
-    reason: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    graceful: bool = betterproto.bool_field(2)
+    timeout: timedelta = betterproto.message_field(3)
+    reason: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ShutdownResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    message: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    message: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -948,14 +981,15 @@ class ShutdownPhaseStatus(betterproto.Message):
 class GetShutdownStatusRequest(betterproto.Message):
     """Get shutdown status request"""
 
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class GetShutdownStatusResponse(betterproto.Message):
     """Get shutdown status response"""
 
-    status: "ShutdownStatus" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    status: "ShutdownStatus" = betterproto.message_field(2)
 
 
 class SystemServiceStub(betterproto.ServiceStub):

@@ -49,7 +49,8 @@ async fn test_record_step_execution_start() -> Result<(), Box<dyn std::error::Er
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "step-test",
             "1.0",
             json!({}),
@@ -93,7 +94,8 @@ async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "completion-test",
             "1.0",
             json!({}),
@@ -145,7 +147,8 @@ async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "failure-test",
             "1.0",
             json!({}),
@@ -196,7 +199,8 @@ async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "retry-test",
             "1.0",
             json!({}),
@@ -262,7 +266,8 @@ async fn test_get_step_execution_history() -> Result<(), Box<dyn std::error::Err
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "history-test",
             "1.0",
             json!({}),

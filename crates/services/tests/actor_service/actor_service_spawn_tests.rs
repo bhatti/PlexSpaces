@@ -167,12 +167,8 @@ async fn test_spawn_actor_always_uses_local_node_id() {
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
-        .await;
-    service_locator
-        .register_service(reply_waiter_registry)
         .await;
 
     // Register ActorFactory (required for spawn_actor to work)
@@ -274,12 +270,8 @@ async fn test_spawn_actor_rejects_remote_node_id() {
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
-        .await;
-    service_locator
-        .register_service(reply_waiter_registry)
         .await;
 
     let actor_service = ActorServiceImpl::new(service_locator, "local-node".to_string());
@@ -325,12 +317,8 @@ async fn test_spawn_actor_design_principle() {
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
-        .await;
-    service_locator
-        .register_service(reply_waiter_registry)
         .await;
 
     // Register ActorFactory (required for spawn_actor to work)
@@ -391,12 +379,8 @@ async fn test_spawn_actor_with_callback() {
 
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
-        .await;
-    service_locator
-        .register_service(reply_waiter_registry)
         .await;
 
     // Register ActorFactory (required for spawn_actor)

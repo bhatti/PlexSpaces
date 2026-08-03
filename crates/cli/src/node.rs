@@ -28,11 +28,11 @@ use plexspaces_proto::node::v1::{
 use plexspaces_proto::prost_types;
 use plexspaces_proto::system::v1::{system_service_client::SystemServiceClient, GetHealthRequest};
 use std::sync::Arc;
-use ulid::Ulid;
 use tokio::signal;
 use tonic::transport::Channel;
 use tonic::Request;
 use tracing::{debug, info, warn};
+use ulid::Ulid;
 
 pub async fn status(node_addr: &str) -> Result<()> {
     let channel = Channel::from_shared(format!("http://{}", node_addr))
@@ -45,7 +45,10 @@ pub async fn status(node_addr: &str) -> Result<()> {
 
     println!("📊 Node Status: {}", node_addr);
 
-    let request = GetHealthRequest { request_id: Ulid::new().to_string(), components: vec![] };
+    let request = GetHealthRequest {
+        request_id: Ulid::new().to_string(),
+        components: vec![],
+    };
     let response = client
         .get_health(tonic::Request::new(request))
         .await
@@ -168,8 +171,8 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
         }
     });
 
-    // Wait a bit for node to initialize
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    // Brief pause for node to complete initialization before logging ready message
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
     info!("✅ Node started successfully!");
     info!("   Listening on: {}", listen_addr);

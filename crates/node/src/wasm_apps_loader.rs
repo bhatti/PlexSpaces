@@ -692,7 +692,6 @@ async fn deploy_wasm_app(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     #[test]

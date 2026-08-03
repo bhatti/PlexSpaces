@@ -895,10 +895,8 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
         if !items.is_empty() {
             if let Some(blob_attr) = items[0].get("registration_blob") {
                 if let Ok(blob) = blob_attr.as_b() {
-                    let mut registration =
-                        ObjectRegistration::decode(blob.as_ref()).map_err(|e| {
-                            RepositoryError::Serialization(e.to_string())
-                        })?;
+                    let mut registration = ObjectRegistration::decode(blob.as_ref())
+                        .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
                     // Merge indexed columns from item attributes
                     if let Some(hs) = items[0]
                         .get("health_status")
@@ -1088,10 +1086,8 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
         for item in result.items() {
             if let Some(blob_attr) = item.get("registration_blob") {
                 if let Ok(blob) = blob_attr.as_b() {
-                    let mut registration =
-                        ObjectRegistration::decode(blob.as_ref()).map_err(|e| {
-                            RepositoryError::Serialization(e.to_string())
-                        })?;
+                    let mut registration = ObjectRegistration::decode(blob.as_ref())
+                        .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
                     // Merge indexed columns from item
                     if let Some(hs) = item
                         .get("health_status")

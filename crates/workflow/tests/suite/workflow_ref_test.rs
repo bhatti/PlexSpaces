@@ -6,11 +6,11 @@
 // Tests the high-level WorkflowRef API with a real workflow actor.
 
 use async_trait::async_trait;
+use plexspaces_actor::behavior::Workflow;
 use plexspaces_actor::ActorBuilder;
 use plexspaces_actor::{
     Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContext, RequestContextExt,
 };
-use plexspaces_actor::behavior::Workflow;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_workflow::WorkflowRef;
 use serde::{Deserialize, Serialize};

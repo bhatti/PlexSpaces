@@ -17,9 +17,9 @@ multiplexing = true
 [env]
 # Enable incremental compilation in shells that invoke cargo outside the Makefile.
 CARGO_INCREMENTAL = "1"
-# Optional compiler cache. Leave disabled by default and enable per-shell or in Makefile
-# when `sccache` is installed.
-# RUSTC_WRAPPER = "sccache"
+# Compiler cache: enabled when sccache is installed (brew install sccache).
+# Falls back gracefully to no-cache if binary is absent.
+RUSTC_WRAPPER = "sccache"
 
 [target.'cfg(target_os = "linux")']
 # Optimize compilation flags for faster builds on Linux
@@ -30,6 +30,7 @@ rustflags = [
 
 [target.'cfg(target_os = "macos")']
 # Work around Apple clang/ld crashes seen when linking large test binaries.
+# Alternative: `brew install llvm` then use `-C linker=clang -C link-arg=-fuse-ld=lld`
 rustflags = [
     "-C", "link-arg=-Wl,-ld_classic",
 ]

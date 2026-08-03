@@ -547,16 +547,32 @@ mod tests {
             data.insert(key.to_string(), v.to_string().into_bytes());
             Ok(v)
         }
-        async fn get_ttl(&self, _: &RequestContext, _key: &str) -> Result<Option<std::time::Duration>, KeyValueStoreError> {
+        async fn get_ttl(
+            &self,
+            _: &RequestContext,
+            _key: &str,
+        ) -> Result<Option<std::time::Duration>, KeyValueStoreError> {
             Ok(None)
         }
-        async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> Result<Vec<Option<Vec<u8>>>, KeyValueStoreError> {
+        async fn multi_get(
+            &self,
+            ctx: &RequestContext,
+            keys: &[&str],
+        ) -> Result<Vec<Option<Vec<u8>>>, KeyValueStoreError> {
             let mut results = Vec::with_capacity(keys.len());
-            for k in keys { results.push(self.get(ctx, k).await?); }
+            for k in keys {
+                results.push(self.get(ctx, k).await?);
+            }
             Ok(results)
         }
-        async fn multi_put(&self, ctx: &RequestContext, pairs: &[(&str, Vec<u8>)]) -> Result<(), KeyValueStoreError> {
-            for (k, v) in pairs { self.put(ctx, k, v.clone()).await?; }
+        async fn multi_put(
+            &self,
+            ctx: &RequestContext,
+            pairs: &[(&str, Vec<u8>)],
+        ) -> Result<(), KeyValueStoreError> {
+            for (k, v) in pairs {
+                self.put(ctx, k, v.clone()).await?;
+            }
             Ok(())
         }
     }
@@ -995,7 +1011,10 @@ mod tests {
             "method_schemas": { "m": "not-valid-json{{" }
         });
         let result = factory.create(config).await;
-        assert!(result.is_err(), "invalid schema must fail at factory.create()");
+        assert!(
+            result.is_err(),
+            "invalid schema must fail at factory.create()"
+        );
     }
 
     #[tokio::test]
@@ -1009,7 +1028,11 @@ mod tests {
         });
 
         let facet = factory.create(config).await;
-        assert!(facet.is_ok(), "factory.create failed: {:?}", facet.err().map(|e| e.to_string()));
+        assert!(
+            facet.is_ok(),
+            "factory.create failed: {:?}",
+            facet.err().map(|e| e.to_string())
+        );
         let facet = facet.unwrap();
         assert_eq!(facet.facet_type(), "execution_trace");
 
@@ -1029,7 +1052,10 @@ mod tests {
 
         let config = serde_json::json!({});
         let facet = factory.create(config).await;
-        assert!(facet.is_ok(), "should succeed even without KV (uses NoopTraceExporter)");
+        assert!(
+            facet.is_ok(),
+            "should succeed even without KV (uses NoopTraceExporter)"
+        );
         let facet = facet.unwrap();
         assert_eq!(facet.facet_type(), "execution_trace");
     }

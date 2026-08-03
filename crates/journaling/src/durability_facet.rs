@@ -102,7 +102,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 /// Maps promise IDs to their resolved results and timestamps.
-type ResolvedPromises = Arc<RwLock<HashMap<String, (Result<Vec<u8>, String>, prost_types::Timestamp)>>>;
+type ResolvedPromises =
+    Arc<RwLock<HashMap<String, (Result<Vec<u8>, String>, prost_types::Timestamp)>>>;
 
 /// Durability facet providing journaling and deterministic replay
 ///
@@ -741,12 +742,10 @@ impl DurabilityFacet {
                 promise_id.to_string(),
                 (
                     result,
-                    entry
-                        .timestamp
-                        .unwrap_or(prost_types::Timestamp {
-                            seconds: 0,
-                            nanos: 0,
-                        }),
+                    entry.timestamp.unwrap_or(prost_types::Timestamp {
+                        seconds: 0,
+                        nanos: 0,
+                    }),
                 ),
             );
         }
@@ -814,12 +813,10 @@ impl DurabilityFacet {
                         promise_id,
                         (
                             result,
-                            entry
-                                .timestamp
-                                .unwrap_or(prost_types::Timestamp {
-                                    seconds: 0,
-                                    nanos: 0,
-                                }),
+                            entry.timestamp.unwrap_or(prost_types::Timestamp {
+                                seconds: 0,
+                                nanos: 0,
+                            }),
                         ),
                     );
                 }
@@ -1851,7 +1848,12 @@ mod tests {
                 .await
                 .unwrap();
             facet1
-                .after_method(&format!("op_{}", i), &[], &[], &std::collections::HashMap::new())
+                .after_method(
+                    &format!("op_{}", i),
+                    &[],
+                    &[],
+                    &std::collections::HashMap::new(),
+                )
                 .await
                 .unwrap();
         }
@@ -1877,9 +1879,20 @@ mod tests {
             .await;
         assert!(result.is_ok(), "on_attach should succeed: {:?}", result);
 
-        assert_eq!(start_count.load(Ordering::Relaxed), 1, "on_replay_start called once");
-        assert_eq!(end_count.load(Ordering::Relaxed), 1, "on_replay_end called once");
-        assert!(!signal.load(Ordering::Acquire), "signal should be false after replay");
+        assert_eq!(
+            start_count.load(Ordering::Relaxed),
+            1,
+            "on_replay_start called once"
+        );
+        assert_eq!(
+            end_count.load(Ordering::Relaxed),
+            1,
+            "on_replay_end called once"
+        );
+        assert!(
+            !signal.load(Ordering::Acquire),
+            "signal should be false after replay"
+        );
     }
 
     #[tokio::test]

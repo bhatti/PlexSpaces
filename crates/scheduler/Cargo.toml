@@ -35,8 +35,8 @@ plexspaces-channel = { path = "../channel" }
 plexspaces-keyvalue = { path = "../keyvalue" }
 
 # Async runtime
-tokio = { version = "1.44", features = ["sync", "time", "macros", "rt-multi-thread"] }
-async-trait = "0.1"
+tokio = { workspace = true }
+async-trait = { workspace = true }
 
 # gRPC
 tonic = { workspace = true }
@@ -45,22 +45,22 @@ prost-types = { workspace = true }
 base64 = "0.22"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Error handling
-thiserror = "1.0"
+thiserror = { workspace = true }
 
 # Utilities
-ulid = { version = "1.1", features = ["serde"] }
-tracing = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-futures = "0.3"
+ulid = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
 rand = "0.8"
 metrics = "0.23"
 
 # Database backends (all optional)
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "migrate", "sqlite"], optional = true }
+sqlx = { workspace = true, optional = true }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
 aws-sdk-dynamodb = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
@@ -79,6 +79,6 @@ all-backends = ["postgres-backend", "redis-backend", "sqlite-backend", "ddb-back
 
 [dev-dependencies]
 tokio-test = "0.4"
-anyhow = "1.0"
-env_logger = "0.11"
+anyhow = { workspace = true }
+env_logger = { workspace = true }
 serial_test = "3.0"

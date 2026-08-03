@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Workflow API (Simplified Design)
@@ -956,7 +956,8 @@ func (x *StepExecution) GetCompletedAt() *timestamppb.Timestamp {
 
 type CreateDefinitionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Definition    *WorkflowDefinition    `protobuf:"bytes,1,opt,name=definition,proto3" json:"definition,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Definition    *WorkflowDefinition    `protobuf:"bytes,2,opt,name=definition,proto3" json:"definition,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -991,6 +992,13 @@ func (*CreateDefinitionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{5}
 }
 
+func (x *CreateDefinitionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *CreateDefinitionRequest) GetDefinition() *WorkflowDefinition {
 	if x != nil {
 		return x.Definition
@@ -1000,7 +1008,8 @@ func (x *CreateDefinitionRequest) GetDefinition() *WorkflowDefinition {
 
 type CreateDefinitionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Definition    *WorkflowDefinition    `protobuf:"bytes,1,opt,name=definition,proto3" json:"definition,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Definition    *WorkflowDefinition    `protobuf:"bytes,2,opt,name=definition,proto3" json:"definition,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1035,6 +1044,13 @@ func (*CreateDefinitionResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *CreateDefinitionResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *CreateDefinitionResponse) GetDefinition() *WorkflowDefinition {
 	if x != nil {
 		return x.Definition
@@ -1044,8 +1060,9 @@ func (x *CreateDefinitionResponse) GetDefinition() *WorkflowDefinition {
 
 type GetDefinitionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"` // Empty = latest version
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Empty = latest version
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1080,6 +1097,13 @@ func (*GetDefinitionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *GetDefinitionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetDefinitionRequest) GetId() string {
 	if x != nil {
 		return x.Id
@@ -1096,7 +1120,8 @@ func (x *GetDefinitionRequest) GetVersion() string {
 
 type GetDefinitionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Definition    *WorkflowDefinition    `protobuf:"bytes,1,opt,name=definition,proto3" json:"definition,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Definition    *WorkflowDefinition    `protobuf:"bytes,2,opt,name=definition,proto3" json:"definition,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1131,6 +1156,13 @@ func (*GetDefinitionResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{8}
 }
 
+func (x *GetDefinitionResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetDefinitionResponse) GetDefinition() *WorkflowDefinition {
 	if x != nil {
 		return x.Definition
@@ -1140,9 +1172,10 @@ func (x *GetDefinitionResponse) GetDefinition() *WorkflowDefinition {
 
 type ListDefinitionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Page          *v1.PageRequest        `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
-	LabelFilter   map[string]string      `protobuf:"bytes,2,rep,name=label_filter,json=labelFilter,proto3" json:"label_filter,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	NamePrefix    string                 `protobuf:"bytes,3,opt,name=name_prefix,json=namePrefix,proto3" json:"name_prefix,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Page          *v1.PageRequest        `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
+	LabelFilter   map[string]string      `protobuf:"bytes,3,rep,name=label_filter,json=labelFilter,proto3" json:"label_filter,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	NamePrefix    string                 `protobuf:"bytes,4,opt,name=name_prefix,json=namePrefix,proto3" json:"name_prefix,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1177,6 +1210,13 @@ func (*ListDefinitionsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{9}
 }
 
+func (x *ListDefinitionsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ListDefinitionsRequest) GetPage() *v1.PageRequest {
 	if x != nil {
 		return x.Page
@@ -1200,8 +1240,9 @@ func (x *ListDefinitionsRequest) GetNamePrefix() string {
 
 type ListDefinitionsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Definitions   []*WorkflowDefinition  `protobuf:"bytes,1,rep,name=definitions,proto3" json:"definitions,omitempty"`
-	Page          *v1.PageResponse       `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Definitions   []*WorkflowDefinition  `protobuf:"bytes,2,rep,name=definitions,proto3" json:"definitions,omitempty"`
+	Page          *v1.PageResponse       `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1236,6 +1277,13 @@ func (*ListDefinitionsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{10}
 }
 
+func (x *ListDefinitionsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ListDefinitionsResponse) GetDefinitions() []*WorkflowDefinition {
 	if x != nil {
 		return x.Definitions
@@ -1252,7 +1300,8 @@ func (x *ListDefinitionsResponse) GetPage() *v1.PageResponse {
 
 type UpdateDefinitionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Definition    *WorkflowDefinition    `protobuf:"bytes,1,opt,name=definition,proto3" json:"definition,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Definition    *WorkflowDefinition    `protobuf:"bytes,2,opt,name=definition,proto3" json:"definition,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1287,6 +1336,13 @@ func (*UpdateDefinitionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{11}
 }
 
+func (x *UpdateDefinitionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *UpdateDefinitionRequest) GetDefinition() *WorkflowDefinition {
 	if x != nil {
 		return x.Definition
@@ -1296,7 +1352,8 @@ func (x *UpdateDefinitionRequest) GetDefinition() *WorkflowDefinition {
 
 type UpdateDefinitionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Definition    *WorkflowDefinition    `protobuf:"bytes,1,opt,name=definition,proto3" json:"definition,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Definition    *WorkflowDefinition    `protobuf:"bytes,2,opt,name=definition,proto3" json:"definition,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1331,6 +1388,13 @@ func (*UpdateDefinitionResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{12}
 }
 
+func (x *UpdateDefinitionResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *UpdateDefinitionResponse) GetDefinition() *WorkflowDefinition {
 	if x != nil {
 		return x.Definition
@@ -1340,8 +1404,9 @@ func (x *UpdateDefinitionResponse) GetDefinition() *WorkflowDefinition {
 
 type DeleteDefinitionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"` // Empty = delete all versions
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Empty = delete all versions
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1376,6 +1441,13 @@ func (*DeleteDefinitionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{13}
 }
 
+func (x *DeleteDefinitionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *DeleteDefinitionRequest) GetId() string {
 	if x != nil {
 		return x.Id
@@ -1392,11 +1464,12 @@ func (x *DeleteDefinitionRequest) GetVersion() string {
 
 type StartExecutionRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	DefinitionId      string                 `protobuf:"bytes,1,opt,name=definition_id,json=definitionId,proto3" json:"definition_id,omitempty"`
-	DefinitionVersion string                 `protobuf:"bytes,2,opt,name=definition_version,json=definitionVersion,proto3" json:"definition_version,omitempty"` // Empty = latest version
-	Input             *structpb.Struct       `protobuf:"bytes,3,opt,name=input,proto3" json:"input,omitempty"`
-	ExecutionId       string                 `protobuf:"bytes,4,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"` // Optional - auto-generate if empty
-	Labels            map[string]string      `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	RequestId         string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	DefinitionId      string                 `protobuf:"bytes,2,opt,name=definition_id,json=definitionId,proto3" json:"definition_id,omitempty"`
+	DefinitionVersion string                 `protobuf:"bytes,3,opt,name=definition_version,json=definitionVersion,proto3" json:"definition_version,omitempty"` // Empty = latest version
+	Input             *structpb.Struct       `protobuf:"bytes,4,opt,name=input,proto3" json:"input,omitempty"`
+	ExecutionId       string                 `protobuf:"bytes,5,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"` // Optional - auto-generate if empty
+	Labels            map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1429,6 +1502,13 @@ func (x *StartExecutionRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use StartExecutionRequest.ProtoReflect.Descriptor instead.
 func (*StartExecutionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *StartExecutionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *StartExecutionRequest) GetDefinitionId() string {
@@ -1468,7 +1548,8 @@ func (x *StartExecutionRequest) GetLabels() map[string]string {
 
 type StartExecutionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ExecutionId   string                 `protobuf:"bytes,1,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1503,6 +1584,13 @@ func (*StartExecutionResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{15}
 }
 
+func (x *StartExecutionResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *StartExecutionResponse) GetExecutionId() string {
 	if x != nil {
 		return x.ExecutionId
@@ -1512,7 +1600,8 @@ func (x *StartExecutionResponse) GetExecutionId() string {
 
 type GetExecutionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ExecutionId   string                 `protobuf:"bytes,1,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1547,6 +1636,13 @@ func (*GetExecutionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{16}
 }
 
+func (x *GetExecutionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetExecutionRequest) GetExecutionId() string {
 	if x != nil {
 		return x.ExecutionId
@@ -1556,7 +1652,8 @@ func (x *GetExecutionRequest) GetExecutionId() string {
 
 type GetExecutionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Execution     *WorkflowExecution     `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Execution     *WorkflowExecution     `protobuf:"bytes,2,opt,name=execution,proto3" json:"execution,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1591,6 +1688,13 @@ func (*GetExecutionResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{17}
 }
 
+func (x *GetExecutionResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetExecutionResponse) GetExecution() *WorkflowExecution {
 	if x != nil {
 		return x.Execution
@@ -1600,12 +1704,13 @@ func (x *GetExecutionResponse) GetExecution() *WorkflowExecution {
 
 type ListExecutionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Page          *v1.PageRequest        `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
-	DefinitionId  string                 `protobuf:"bytes,2,opt,name=definition_id,json=definitionId,proto3" json:"definition_id,omitempty"`
-	Status        ExecutionStatus        `protobuf:"varint,3,opt,name=status,proto3,enum=plexspaces.workflow.v1.ExecutionStatus" json:"status,omitempty"`
-	LabelFilter   map[string]string      `protobuf:"bytes,4,rep,name=label_filter,json=labelFilter,proto3" json:"label_filter,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	StartedAfter  *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=started_after,json=startedAfter,proto3" json:"started_after,omitempty"`
-	StartedBefore *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started_before,json=startedBefore,proto3" json:"started_before,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Page          *v1.PageRequest        `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
+	DefinitionId  string                 `protobuf:"bytes,3,opt,name=definition_id,json=definitionId,proto3" json:"definition_id,omitempty"`
+	Status        ExecutionStatus        `protobuf:"varint,4,opt,name=status,proto3,enum=plexspaces.workflow.v1.ExecutionStatus" json:"status,omitempty"`
+	LabelFilter   map[string]string      `protobuf:"bytes,5,rep,name=label_filter,json=labelFilter,proto3" json:"label_filter,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	StartedAfter  *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started_after,json=startedAfter,proto3" json:"started_after,omitempty"`
+	StartedBefore *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=started_before,json=startedBefore,proto3" json:"started_before,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1638,6 +1743,13 @@ func (x *ListExecutionsRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ListExecutionsRequest.ProtoReflect.Descriptor instead.
 func (*ListExecutionsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListExecutionsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ListExecutionsRequest) GetPage() *v1.PageRequest {
@@ -1684,8 +1796,9 @@ func (x *ListExecutionsRequest) GetStartedBefore() *timestamppb.Timestamp {
 
 type ListExecutionsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Executions    []*WorkflowExecution   `protobuf:"bytes,1,rep,name=executions,proto3" json:"executions,omitempty"`
-	Page          *v1.PageResponse       `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Executions    []*WorkflowExecution   `protobuf:"bytes,2,rep,name=executions,proto3" json:"executions,omitempty"`
+	Page          *v1.PageResponse       `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1720,6 +1833,13 @@ func (*ListExecutionsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{19}
 }
 
+func (x *ListExecutionsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ListExecutionsResponse) GetExecutions() []*WorkflowExecution {
 	if x != nil {
 		return x.Executions
@@ -1736,8 +1856,9 @@ func (x *ListExecutionsResponse) GetPage() *v1.PageResponse {
 
 type CancelExecutionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ExecutionId   string                 `protobuf:"bytes,1,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
-	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1772,6 +1893,13 @@ func (*CancelExecutionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{20}
 }
 
+func (x *CancelExecutionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *CancelExecutionRequest) GetExecutionId() string {
 	if x != nil {
 		return x.ExecutionId
@@ -1788,9 +1916,10 @@ func (x *CancelExecutionRequest) GetReason() string {
 
 type SignalExecutionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ExecutionId   string                 `protobuf:"bytes,1,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
-	SignalName    string                 `protobuf:"bytes,2,opt,name=signal_name,json=signalName,proto3" json:"signal_name,omitempty"`
-	Data          *structpb.Value        `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	SignalName    string                 `protobuf:"bytes,3,opt,name=signal_name,json=signalName,proto3" json:"signal_name,omitempty"`
+	Data          *structpb.Value        `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1825,6 +1954,13 @@ func (*SignalExecutionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{21}
 }
 
+func (x *SignalExecutionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *SignalExecutionRequest) GetExecutionId() string {
 	if x != nil {
 		return x.ExecutionId
@@ -1848,8 +1984,9 @@ func (x *SignalExecutionRequest) GetData() *structpb.Value {
 
 type QueryExecutionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ExecutionId   string                 `protobuf:"bytes,1,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
-	QueryName     string                 `protobuf:"bytes,2,opt,name=query_name,json=queryName,proto3" json:"query_name,omitempty"` // "status", "context", "current_step"
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	QueryName     string                 `protobuf:"bytes,3,opt,name=query_name,json=queryName,proto3" json:"query_name,omitempty"` // "status", "context", "current_step"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1884,6 +2021,13 @@ func (*QueryExecutionRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{22}
 }
 
+func (x *QueryExecutionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *QueryExecutionRequest) GetExecutionId() string {
 	if x != nil {
 		return x.ExecutionId
@@ -1900,7 +2044,8 @@ func (x *QueryExecutionRequest) GetQueryName() string {
 
 type QueryExecutionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Result        *structpb.Value        `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Result        *structpb.Value        `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1935,6 +2080,13 @@ func (*QueryExecutionResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{23}
 }
 
+func (x *QueryExecutionResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *QueryExecutionResponse) GetResult() *structpb.Value {
 	if x != nil {
 		return x.Result
@@ -1944,8 +2096,9 @@ func (x *QueryExecutionResponse) GetResult() *structpb.Value {
 
 type GetStepExecutionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ExecutionId   string                 `protobuf:"bytes,1,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
-	Page          *v1.PageRequest        `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	Page          *v1.PageRequest        `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1980,6 +2133,13 @@ func (*GetStepExecutionsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{24}
 }
 
+func (x *GetStepExecutionsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetStepExecutionsRequest) GetExecutionId() string {
 	if x != nil {
 		return x.ExecutionId
@@ -1996,8 +2156,9 @@ func (x *GetStepExecutionsRequest) GetPage() *v1.PageRequest {
 
 type GetStepExecutionsResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	StepExecutions []*StepExecution       `protobuf:"bytes,1,rep,name=step_executions,json=stepExecutions,proto3" json:"step_executions,omitempty"`
-	Page           *v1.PageResponse       `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	StepExecutions []*StepExecution       `protobuf:"bytes,2,rep,name=step_executions,json=stepExecutions,proto3" json:"step_executions,omitempty"`
+	Page           *v1.PageResponse       `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2030,6 +2191,13 @@ func (x *GetStepExecutionsResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetStepExecutionsResponse.ProtoReflect.Descriptor instead.
 func (*GetStepExecutionsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *GetStepExecutionsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *GetStepExecutionsResponse) GetStepExecutions() []*StepExecution {
@@ -2124,94 +2292,136 @@ const file_plexspaces_v1_workflow_workflow_proto_rawDesc = "" +
 	"started_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12=\n" +
 	"\fcompleted_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt:3\x92A0\n" +
-	".*\x0eStep Execution2\x1cSingle step execution record\"j\n" +
-	"\x17CreateDefinitionRequest\x12O\n" +
+	".*\x0eStep Execution2\x1cSingle step execution record\"\x92\x01\n" +
+	"\x17CreateDefinitionRequest\x12&\n" +
 	"\n" +
-	"definition\x18\x01 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionB\x03\xe0A\x02R\n" +
-	"definition\"f\n" +
-	"\x18CreateDefinitionResponse\x12J\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12O\n" +
 	"\n" +
-	"definition\x18\x01 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionR\n" +
-	"definition\"X\n" +
-	"\x14GetDefinitionRequest\x12\x1d\n" +
-	"\x02id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\x12!\n" +
-	"\aversion\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18@R\aversion\"c\n" +
-	"\x15GetDefinitionResponse\x12J\n" +
+	"definition\x18\x02 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionB\x03\xe0A\x02R\n" +
+	"definition\"\x8e\x01\n" +
+	"\x18CreateDefinitionResponse\x12&\n" +
 	"\n" +
-	"definition\x18\x01 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionR\n" +
-	"definition\"\x9e\x02\n" +
-	"\x16ListDefinitionsRequest\x125\n" +
-	"\x04page\x18\x01 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page\x12b\n" +
-	"\flabel_filter\x18\x02 \x03(\v2?.plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntryR\vlabelFilter\x12)\n" +
-	"\vname_prefix\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12J\n" +
+	"\n" +
+	"definition\x18\x02 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionR\n" +
+	"definition\"\x80\x01\n" +
+	"\x14GetDefinitionRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x1d\n" +
+	"\x02id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\x12!\n" +
+	"\aversion\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x18@R\aversion\"\x8b\x01\n" +
+	"\x15GetDefinitionResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12J\n" +
+	"\n" +
+	"definition\x18\x02 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionR\n" +
+	"definition\"\xc6\x02\n" +
+	"\x16ListDefinitionsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x125\n" +
+	"\x04page\x18\x02 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page\x12b\n" +
+	"\flabel_filter\x18\x03 \x03(\v2?.plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntryR\vlabelFilter\x12)\n" +
+	"\vname_prefix\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\n" +
 	"namePrefix\x1a>\n" +
 	"\x10LabelFilterEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xaa\x01\n" +
-	"\x17ListDefinitionsResponse\x12W\n" +
-	"\vdefinitions\x18\x01 \x03(\v2*.plexspaces.workflow.v1.WorkflowDefinitionB\t\xbaH\x06\x92\x01\x03\x10\x90NR\vdefinitions\x126\n" +
-	"\x04page\x18\x02 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page\"j\n" +
-	"\x17UpdateDefinitionRequest\x12O\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd2\x01\n" +
+	"\x17ListDefinitionsResponse\x12&\n" +
 	"\n" +
-	"definition\x18\x01 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionB\x03\xe0A\x02R\n" +
-	"definition\"f\n" +
-	"\x18UpdateDefinitionResponse\x12J\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12W\n" +
+	"\vdefinitions\x18\x02 \x03(\v2*.plexspaces.workflow.v1.WorkflowDefinitionB\t\xbaH\x06\x92\x01\x03\x10\x90NR\vdefinitions\x126\n" +
+	"\x04page\x18\x03 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page\"\x92\x01\n" +
+	"\x17UpdateDefinitionRequest\x12&\n" +
 	"\n" +
-	"definition\x18\x01 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionR\n" +
-	"definition\"[\n" +
-	"\x17DeleteDefinitionRequest\x12\x1d\n" +
-	"\x02id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\x12!\n" +
-	"\aversion\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18@R\aversion\"\xed\x02\n" +
-	"\x15StartExecutionRequest\x122\n" +
-	"\rdefinition_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fdefinitionId\x126\n" +
-	"\x12definition_version\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18@R\x11definitionVersion\x12-\n" +
-	"\x05input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x05input\x12+\n" +
-	"\fexecution_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\vexecutionId\x12Q\n" +
-	"\x06labels\x18\x05 \x03(\v29.plexspaces.workflow.v1.StartExecutionRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12O\n" +
+	"\n" +
+	"definition\x18\x02 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionB\x03\xe0A\x02R\n" +
+	"definition\"\x8e\x01\n" +
+	"\x18UpdateDefinitionResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12J\n" +
+	"\n" +
+	"definition\x18\x02 \x01(\v2*.plexspaces.workflow.v1.WorkflowDefinitionR\n" +
+	"definition\"\x83\x01\n" +
+	"\x17DeleteDefinitionRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x1d\n" +
+	"\x02id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\x12!\n" +
+	"\aversion\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x18@R\aversion\"\x95\x03\n" +
+	"\x15StartExecutionRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x122\n" +
+	"\rdefinition_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fdefinitionId\x126\n" +
+	"\x12definition_version\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x18@R\x11definitionVersion\x12-\n" +
+	"\x05input\x18\x04 \x01(\v2\x17.google.protobuf.StructR\x05input\x12+\n" +
+	"\fexecution_id\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\vexecutionId\x12Q\n" +
+	"\x06labels\x18\x06 \x03(\v29.plexspaces.workflow.v1.StartExecutionRequest.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"E\n" +
-	"\x16StartExecutionResponse\x12+\n" +
-	"\fexecution_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\vexecutionId\"G\n" +
-	"\x13GetExecutionRequest\x120\n" +
-	"\fexecution_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\"_\n" +
-	"\x14GetExecutionResponse\x12G\n" +
-	"\texecution\x18\x01 \x01(\v2).plexspaces.workflow.v1.WorkflowExecutionR\texecution\"\xe5\x03\n" +
-	"\x15ListExecutionsRequest\x125\n" +
-	"\x04page\x18\x01 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page\x12-\n" +
-	"\rdefinition_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\fdefinitionId\x12?\n" +
-	"\x06status\x18\x03 \x01(\x0e2'.plexspaces.workflow.v1.ExecutionStatusR\x06status\x12a\n" +
-	"\flabel_filter\x18\x04 \x03(\v2>.plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntryR\vlabelFilter\x12?\n" +
-	"\rstarted_after\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\fstartedAfter\x12A\n" +
-	"\x0estarted_before\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\rstartedBefore\x1a>\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"m\n" +
+	"\x16StartExecutionResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12+\n" +
+	"\fexecution_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\vexecutionId\"o\n" +
+	"\x13GetExecutionRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x120\n" +
+	"\fexecution_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\"\x87\x01\n" +
+	"\x14GetExecutionResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12G\n" +
+	"\texecution\x18\x02 \x01(\v2).plexspaces.workflow.v1.WorkflowExecutionR\texecution\"\x8d\x04\n" +
+	"\x15ListExecutionsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x125\n" +
+	"\x04page\x18\x02 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page\x12-\n" +
+	"\rdefinition_id\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\fdefinitionId\x12?\n" +
+	"\x06status\x18\x04 \x01(\x0e2'.plexspaces.workflow.v1.ExecutionStatusR\x06status\x12a\n" +
+	"\flabel_filter\x18\x05 \x03(\v2>.plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntryR\vlabelFilter\x12?\n" +
+	"\rstarted_after\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\fstartedAfter\x12A\n" +
+	"\x0estarted_before\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\rstartedBefore\x1a>\n" +
 	"\x10LabelFilterEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa6\x01\n" +
-	"\x16ListExecutionsResponse\x12T\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xce\x01\n" +
+	"\x16ListExecutionsResponse\x12&\n" +
 	"\n" +
-	"executions\x18\x01 \x03(\v2).plexspaces.workflow.v1.WorkflowExecutionB\t\xbaH\x06\x92\x01\x03\x10\x90NR\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12T\n" +
+	"\n" +
+	"executions\x18\x02 \x03(\v2).plexspaces.workflow.v1.WorkflowExecutionB\t\xbaH\x06\x92\x01\x03\x10\x90NR\n" +
 	"executions\x126\n" +
-	"\x04page\x18\x02 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page\"l\n" +
-	"\x16CancelExecutionRequest\x120\n" +
-	"\fexecution_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x12 \n" +
-	"\x06reason\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\x06reason\"\xa6\x01\n" +
-	"\x16SignalExecutionRequest\x120\n" +
-	"\fexecution_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x12.\n" +
-	"\vsignal_name\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\n" +
-	"signalName\x12*\n" +
-	"\x04data\x18\x03 \x01(\v2\x16.google.protobuf.ValueR\x04data\"w\n" +
-	"\x15QueryExecutionRequest\x120\n" +
-	"\fexecution_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x12,\n" +
+	"\x04page\x18\x03 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page\"\x94\x01\n" +
+	"\x16CancelExecutionRequest\x12&\n" +
 	"\n" +
-	"query_name\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tqueryName\"H\n" +
-	"\x16QueryExecutionResponse\x12.\n" +
-	"\x06result\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x06result\"\x83\x01\n" +
-	"\x18GetStepExecutionsRequest\x120\n" +
-	"\fexecution_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x125\n" +
-	"\x04page\x18\x02 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page\"\xae\x01\n" +
-	"\x19GetStepExecutionsResponse\x12Y\n" +
-	"\x0fstep_executions\x18\x01 \x03(\v2%.plexspaces.workflow.v1.StepExecutionB\t\xbaH\x06\x92\x01\x03\x10\x90NR\x0estepExecutions\x126\n" +
-	"\x04page\x18\x02 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page*\xa4\x01\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x120\n" +
+	"\fexecution_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x12 \n" +
+	"\x06reason\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\x06reason\"\xce\x01\n" +
+	"\x16SignalExecutionRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x120\n" +
+	"\fexecution_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x12.\n" +
+	"\vsignal_name\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\n" +
+	"signalName\x12*\n" +
+	"\x04data\x18\x04 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x9f\x01\n" +
+	"\x15QueryExecutionRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x120\n" +
+	"\fexecution_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x12,\n" +
+	"\n" +
+	"query_name\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tqueryName\"p\n" +
+	"\x16QueryExecutionResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12.\n" +
+	"\x06result\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x06result\"\xab\x01\n" +
+	"\x18GetStepExecutionsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x120\n" +
+	"\fexecution_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\vexecutionId\x125\n" +
+	"\x04page\x18\x03 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page\"\xd6\x01\n" +
+	"\x19GetStepExecutionsResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12Y\n" +
+	"\x0fstep_executions\x18\x02 \x03(\v2%.plexspaces.workflow.v1.StepExecutionB\t\xbaH\x06\x92\x01\x03\x10\x90NR\x0estepExecutions\x126\n" +
+	"\x04page\x18\x03 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page*\xa4\x01\n" +
 	"\bStepType\x12\x19\n" +
 	"\x15STEP_TYPE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTEP_TYPE_TASK\x10\x01\x12\x16\n" +

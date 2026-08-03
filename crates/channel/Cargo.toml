@@ -21,7 +21,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-ulid = { version = "1.1", features = ["serde"] }
+ulid = { workspace = true }
 
 # Proto conversion
 prost = { workspace = true }
@@ -43,7 +43,7 @@ rdkafka = { version = "0.36", optional = true }
 async-nats = { version = "0.45", optional = true }
 
 # Optional: SQLite backend (feature-gated, for testing durability)
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"], optional = true }
+sqlx = { workspace = true, optional = true }
 
 # Optional: UDP backend (feature-gated, for multicast pub/sub)
 socket2 = { version = "0.5", optional = true }

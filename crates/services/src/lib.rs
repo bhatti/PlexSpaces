@@ -69,13 +69,13 @@ pub mod metrics_service;
 pub mod node_address;
 pub mod node_registry;
 pub mod node_service;
+pub mod object_registry_service;
 pub mod process_group_service;
 pub mod service_link_service;
 pub mod system_service;
 pub mod tuple_service;
-pub mod wasm_file_saver;
-pub mod object_registry_service;
 pub mod user_service;
+pub mod wasm_file_saver;
 pub mod workflow_service;
 
 // Re-export ProcessGroupServiceImpl for convenience

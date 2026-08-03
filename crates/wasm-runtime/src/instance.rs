@@ -90,13 +90,15 @@ fn add_simple_actor_interfaces_to_linker(
     use crate::simple_component_host::plexspaces::actor;
     macro_rules! link_iface {
         ($mod:ident, $label:literal) => {
-            actor::$mod::add_to_linker(
-                component_linker,
-                |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
-            )
-            .map_err(|e| WasmError::InstantiationError(format!(
-                concat!("Failed to add ", $label, " bindings: {}"), e
-            )))?;
+            actor::$mod::add_to_linker(component_linker, |ctx: &mut ComponentContext| {
+                &mut ctx.simple_host_impl
+            })
+            .map_err(|e| {
+                WasmError::InstantiationError(format!(
+                    concat!("Failed to add ", $label, " bindings: {}"),
+                    e
+                ))
+            })?;
         };
     }
     link_iface!(host_logging, "host-logging");
@@ -274,7 +276,7 @@ impl WasmInstance {
         message_sender: Option<Arc<dyn crate::MessageSender>>,
         tuplespace_provider: Option<Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
         keyvalue_store: Option<Arc<dyn plexspaces_actor::KeyValueStore>>,
-        process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>>,
+        process_group_registry: Option<Arc<plexspaces_actor::process_groups::ProcessGroupRegistry>>,
         lock_manager: Option<Arc<dyn plexspaces_actor::LockManager + Send + Sync>>,
         object_registry: Option<Arc<dyn plexspaces_actor::actor_context::ObjectRegistry>>,
         journal_storage: Option<Arc<dyn plexspaces_actor::JournalStorage>>,
@@ -1530,7 +1532,6 @@ impl WasmInstance {
             message_type
         )))
     }
-
 
     /// Tries to get application-level msg_type (handler name) from JSON payload.
     /// Used when routing to handle_event (GenEvent) so event_type is the handler name (e.g. "ingest").

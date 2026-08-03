@@ -13,30 +13,27 @@
 //!   → TenantRepository    (tenants table)
 //!   → ApiTokenRepository  (api_tokens table)
 
+pub mod api_token_repository;
 pub mod oidc;
 mod repository;
 mod tenant_repository;
-pub mod api_token_repository;
 
-use plexspaces_actor::ServiceLocator;
-use plexspaces_common::request_context_ext::RequestContextExt;
-use plexspaces_proto::security::v1::{
-    user_service_server::UserService,
-    CreateApiTokenRequest, CreateApiTokenResponse,
-    DeleteApiTokenRequest, DeleteApiTokenResponse,
-    GetOrCreateByEmailRequest, GetOrCreateByEmailResponse,
-    ListApiTokensRequest, ListApiTokensResponse,
-    ListTenantsRequest, ListTenantsResponse,
-    ListUsersRequest, ListUsersResponse,
-    UpdateUserRequest, UpdateUserResponse,
-};
-use plexspaces_proto::common::v1::PageResponse;
-pub use repository::{SqlUserRepository, UserRepository};
-pub use tenant_repository::{SqlTenantRepository, TenantRepository, TenantRepositoryError};
 pub use api_token_repository::{
     ApiTokenRepository, ApiTokenRepositoryError, SqlApiTokenRepository,
 };
+use plexspaces_actor::ServiceLocator;
+use plexspaces_common::request_context_ext::RequestContextExt;
+use plexspaces_proto::common::v1::PageResponse;
+use plexspaces_proto::security::v1::{
+    user_service_server::UserService, CreateApiTokenRequest, CreateApiTokenResponse,
+    DeleteApiTokenRequest, DeleteApiTokenResponse, GetOrCreateByEmailRequest,
+    GetOrCreateByEmailResponse, ListApiTokensRequest, ListApiTokensResponse, ListTenantsRequest,
+    ListTenantsResponse, ListUsersRequest, ListUsersResponse, UpdateUserRequest,
+    UpdateUserResponse,
+};
+pub use repository::{SqlUserRepository, UserRepository};
 use std::sync::Arc;
+pub use tenant_repository::{SqlTenantRepository, TenantRepository, TenantRepositoryError};
 use tonic::{Request, Response, Status};
 
 use crate::request_context_from_grpc_request;
@@ -178,7 +175,10 @@ impl UserService for UserServiceImpl {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        Ok(Response::new(UpdateUserResponse { request_id: req.request_id.clone(), user: Some(user) }))
+        Ok(Response::new(UpdateUserResponse {
+            request_id: req.request_id.clone(),
+            user: Some(user),
+        }))
     }
 
     async fn list_users(
@@ -196,7 +196,11 @@ impl UserService for UserServiceImpl {
         let req = request.into_inner();
         let page = req.page.unwrap_or_default();
         let offset = page.offset.max(0);
-        let limit = if page.limit <= 0 { 50 } else { page.limit.min(1000) };
+        let limit = if page.limit <= 0 {
+            50
+        } else {
+            page.limit.min(1000)
+        };
 
         // Admins may pass tenant_id_filter to query a specific tenant, or leave it empty for all.
         // Non-admins are always constrained to their own tenant.
@@ -240,7 +244,11 @@ impl UserService for UserServiceImpl {
         let req = request.into_inner();
         let page = req.page.unwrap_or_default();
         let offset = page.offset.max(0);
-        let limit = if page.limit <= 0 { 50 } else { page.limit.min(1000) };
+        let limit = if page.limit <= 0 {
+            50
+        } else {
+            page.limit.min(1000)
+        };
 
         if ctx.is_admin() {
             let (tenants, total) = self
@@ -301,7 +309,11 @@ impl UserService for UserServiceImpl {
             req.scopes.clone()
         };
 
-        let ttl_secs = req.ttl.as_ref().map(|d| d.seconds).unwrap_or(90 * 24 * 3600);
+        let ttl_secs = req
+            .ttl
+            .as_ref()
+            .map(|d| d.seconds)
+            .unwrap_or(90 * 24 * 3600);
         let expires_at = Some(chrono::Utc::now().timestamp() + ttl_secs);
 
         let token_id = ulid::Ulid::new().to_string();
@@ -374,7 +386,9 @@ impl UserService for UserServiceImpl {
         metrics::counter!("plexspaces_api_tokens_revoked_total").increment(1);
         tracing::info!(user_id = %user_id, token_id = %req.token_id, "auth.api_token.revoked");
 
-        Ok(Response::new(DeleteApiTokenResponse { request_id: req.request_id.clone() }))
+        Ok(Response::new(DeleteApiTokenResponse {
+            request_id: req.request_id.clone(),
+        }))
     }
 
     async fn list_api_tokens(
@@ -397,7 +411,11 @@ impl UserService for UserServiceImpl {
         let req = request.into_inner();
         let page = req.page.unwrap_or_default();
         let offset = page.offset.max(0);
-        let limit = if page.limit <= 0 { 50 } else { page.limit.min(1000) };
+        let limit = if page.limit <= 0 {
+            50
+        } else {
+            page.limit.min(1000)
+        };
 
         let (tokens, total) = self
             .token_repo

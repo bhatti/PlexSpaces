@@ -27,19 +27,11 @@ use plexspaces_actor::{Message, RequestContextExt};
 use plexspaces_node::service_wrappers::TupleSpaceProviderWrapper;
 use plexspaces_node::NodeBuilder;
 use plexspaces_services::actor_service::ActorServiceImpl;
+use plexspaces_test_utils::messages::create_test_message;
 use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField};
 use std::sync::Arc;
 
 use super::test_helpers::{find_actor_helper, spawn_actor_helper};
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
-    plexspaces_actor::Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
-}
 
 #[tokio::test]
 async fn test_node_operations_wrapper() {

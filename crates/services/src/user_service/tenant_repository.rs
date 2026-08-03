@@ -21,10 +21,7 @@ pub trait TenantRepository: Send + Sync + 'static {
     ) -> Result<(Tenant, bool), TenantRepositoryError>;
 
     /// Return a single tenant by primary key, or None if not found.
-    async fn get_tenant(
-        &self,
-        tenant_id: &str,
-    ) -> Result<Option<Tenant>, TenantRepositoryError>;
+    async fn get_tenant(&self, tenant_id: &str) -> Result<Option<Tenant>, TenantRepositoryError>;
 
     /// Paginated list of all tenants.
     async fn list_tenants(
@@ -50,7 +47,10 @@ pub struct SqlTenantRepository {
 
 impl SqlTenantRepository {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool, cached_total: AtomicI32::new(-1) }
+        Self {
+            pool,
+            cached_total: AtomicI32::new(-1),
+        }
     }
 
     fn tenant_from_row(row: &sqlx::sqlite::SqliteRow) -> Tenant {
@@ -62,10 +62,16 @@ impl SqlTenantRepository {
             display_name: row.get("display_name"),
             created_at: created_at
                 .filter(|&t| t > 0)
-                .map(|t| prost_types::Timestamp { seconds: t, nanos: 0 }),
+                .map(|t| prost_types::Timestamp {
+                    seconds: t,
+                    nanos: 0,
+                }),
             updated_at: updated_at
                 .filter(|&t| t > 0)
-                .map(|t| prost_types::Timestamp { seconds: t, nanos: 0 }),
+                .map(|t| prost_types::Timestamp {
+                    seconds: t,
+                    nanos: 0,
+                }),
         }
     }
 }
@@ -88,15 +94,13 @@ impl TenantRepository for SqlTenantRepository {
         }
 
         let tenant_id = Ulid::new().to_string();
-        sqlx::query(
-            "INSERT INTO tenants (tenant_id, slug, display_name) VALUES (?, ?, ?)",
-        )
-        .bind(&tenant_id)
-        .bind(slug)
-        .bind(display_name)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| TenantRepositoryError::Database(e.to_string()))?;
+        sqlx::query("INSERT INTO tenants (tenant_id, slug, display_name) VALUES (?, ?, ?)")
+            .bind(&tenant_id)
+            .bind(slug)
+            .bind(display_name)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| TenantRepositoryError::Database(e.to_string()))?;
 
         // Invalidate cached count so next list_tenants picks up the new row.
         self.cached_total.store(-1, Ordering::Relaxed);
@@ -110,10 +114,7 @@ impl TenantRepository for SqlTenantRepository {
         Ok((Self::tenant_from_row(&row), true))
     }
 
-    async fn get_tenant(
-        &self,
-        tenant_id: &str,
-    ) -> Result<Option<Tenant>, TenantRepositoryError> {
+    async fn get_tenant(&self, tenant_id: &str) -> Result<Option<Tenant>, TenantRepositoryError> {
         // Search by primary key first, then by slug (JWT tenant_id claim is the slug).
         let row = sqlx::query("SELECT * FROM tenants WHERE tenant_id = ? OR slug = ?")
             .bind(tenant_id)
@@ -139,14 +140,12 @@ impl TenantRepository for SqlTenantRepository {
             self.cached_total.store(total, Ordering::Relaxed);
         }
 
-        let rows = sqlx::query(
-            "SELECT * FROM tenants ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| TenantRepositoryError::Database(e.to_string()))?;
+        let rows = sqlx::query("SELECT * FROM tenants ORDER BY created_at DESC LIMIT ? OFFSET ?")
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| TenantRepositoryError::Database(e.to_string()))?;
 
         let tenants = rows.iter().map(Self::tenant_from_row).collect();
         Ok((tenants, total))
@@ -196,8 +195,14 @@ mod tests {
     async fn test_get_or_create_returns_existing_tenant() {
         let pool = setup().await;
         let repo = SqlTenantRepository::new(pool);
-        let (t1, _) = repo.get_or_create_by_slug("acme", "Acme Corp").await.unwrap();
-        let (t2, created) = repo.get_or_create_by_slug("acme", "Different").await.unwrap();
+        let (t1, _) = repo
+            .get_or_create_by_slug("acme", "Acme Corp")
+            .await
+            .unwrap();
+        let (t2, created) = repo
+            .get_or_create_by_slug("acme", "Different")
+            .await
+            .unwrap();
         assert!(!created);
         assert_eq!(t1.tenant_id, t2.tenant_id);
     }

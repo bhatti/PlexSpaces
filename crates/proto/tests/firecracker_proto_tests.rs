@@ -26,9 +26,8 @@
 mod tests {
     use plexspaces_proto::common::v1::Metadata;
     use plexspaces_proto::firecracker::v1::{
-        BootSource, CreateVmRequest, DeployApplicationRequest,
-        DeployApplicationResponse, Drive, UndeployApplicationRequest,
-        UndeployApplicationResponse, VmConfig, VmInstance,
+        BootSource, CreateVmRequest, DeployApplicationRequest, DeployApplicationResponse, Drive,
+        UndeployApplicationRequest, UndeployApplicationResponse, VmConfig, VmInstance,
     };
 
     /// Test: Firecracker proto has VM lifecycle RPCs

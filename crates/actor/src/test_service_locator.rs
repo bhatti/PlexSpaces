@@ -30,7 +30,7 @@
 use crate::core::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 use crate::core::{
     ActorRegistry, BehaviorRegistry, ChannelService, GrpcConnectionManager,
-    MetricsPrometheusRenderer, ObjectRegistry, ReplyWaiterRegistry, ServiceLocator,
+    MetricsPrometheusRenderer, ObjectRegistry, ServiceLocator,
     TupleSpaceProvider, VirtualActorManager,
 };
 use async_trait::async_trait;
@@ -40,21 +40,16 @@ use std::sync::Arc;
 /// Minimal stub implementation of ServiceLocator for testing
 ///
 /// ## Purpose
-/// Provides a stub that returns None for most service lookups, but includes
-/// a real ReplyWaiterRegistry so reply-waiter tests work without the full services crate.
+/// Provides a stub that returns None for most service lookups.
 /// Used only for creating ActorContext in Actor::new() and tests.
 /// Node will replace this with full ServiceLocatorImpl when spawning actors.
 #[derive(Clone)]
-pub struct TestServiceLocatorStub {
-    reply_waiter_registry: Arc<ReplyWaiterRegistry>,
-}
+pub struct TestServiceLocatorStub {}
 
 impl TestServiceLocatorStub {
     /// Create a new test stub
     pub fn new() -> Self {
-        Self {
-            reply_waiter_registry: Arc::new(ReplyWaiterRegistry::new()),
-        }
+        Self {}
     }
 }
 
@@ -66,10 +61,6 @@ impl ServiceLocator for TestServiceLocatorStub {
 
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
         None
-    }
-
-    async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
-        Some(self.reply_waiter_registry.clone())
     }
 
     async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {

@@ -194,7 +194,6 @@ impl ExitReason {
             _ => None,
         }
     }
-
 }
 
 impl std::str::FromStr for ExitReason {

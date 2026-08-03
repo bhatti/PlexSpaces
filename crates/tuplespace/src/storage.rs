@@ -96,7 +96,6 @@ pub struct MemoryStorageConfig {
 use crate::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
 
-
 /// Watch event message for distributed notifications
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WatchEventMessage {

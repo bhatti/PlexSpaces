@@ -88,7 +88,6 @@ pub async fn create_and_register_health_service(
         .register_service(health_reporter.clone())
         .await;
 
-
     (health_reporter, health_service)
 }
 

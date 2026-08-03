@@ -91,14 +91,14 @@ fn build_go_chat_room_wasm() -> Vec<u8> {
     })
 }
 
-fn load_app_spec(config_path: &std::path::Path, app_id: &str) -> plexspaces_proto::application::v1::ApplicationSpec {
-    let config_text = std::fs::read_to_string(config_path).unwrap_or_else(|e| {
-        panic!("Failed to read config {}: {}", config_path.display(), e)
-    });
+fn load_app_spec(
+    config_path: &std::path::Path,
+    app_id: &str,
+) -> plexspaces_proto::application::v1::ApplicationSpec {
+    let config_text = std::fs::read_to_string(config_path)
+        .unwrap_or_else(|e| panic!("Failed to read config {}: {}", config_path.display(), e));
     plexspaces_node::wasm_apps_loader::parse_app_config_toml(&config_text, app_id)
-        .unwrap_or_else(|e| {
-            panic!("Failed to parse config {}: {}", config_path.display(), e)
-        })
+        .unwrap_or_else(|e| panic!("Failed to parse config {}: {}", config_path.display(), e))
 }
 
 fn app_request<T: Send>(body: T, tenant_id: &str, namespace: &str) -> Request<T> {
@@ -138,19 +138,16 @@ async fn actor_ask(
         timeout: None,
     };
 
-    let response = ActorServiceTrait::ask_reply(
-        actor_service,
-        app_request(request, tenant_id, namespace),
-    )
-    .await
-    .expect("actor ask should succeed")
-    .into_inner();
+    let response =
+        ActorServiceTrait::ask_reply(actor_service, app_request(request, tenant_id, namespace))
+            .await
+            .expect("actor ask should succeed")
+            .into_inner();
 
     assert!(
         response.success,
         "actor ask should succeed for {}, got: {}",
-        actor_type_and_name,
-        response.error_message
+        actor_type_and_name, response.error_message
     );
 
     serde_json::from_slice(&response.payload)
@@ -165,7 +162,14 @@ async fn actor_tell(
     payload: serde_json::Value,
 ) {
     // Use ask with cast message_type to send fire-and-forget (we just ignore result)
-    let _ = actor_ask(actor_service, tenant_id, namespace, actor_type_and_name, payload).await;
+    let _ = actor_ask(
+        actor_service,
+        tenant_id,
+        namespace,
+        actor_type_and_name,
+        payload,
+    )
+    .await;
 }
 
 async fn deploy_chat_room_app(
@@ -218,7 +222,7 @@ async fn run_chat_room_fanout_test(
         actor_service,
         tenant_id,
         app_id,
-        "GuildActor:guild-acme",
+        "guild-acme:GuildActor",
         serde_json::json!({"op": "create_channel", "channel_id": "general"}),
     )
     .await;
@@ -233,7 +237,7 @@ async fn run_chat_room_fanout_test(
         actor_service,
         tenant_id,
         app_id,
-        "SessionActor:alice-mobile",
+        "alice-mobile:SessionActor",
         serde_json::json!({
             "op": "connect",
             "user_id": "alice",
@@ -253,7 +257,7 @@ async fn run_chat_room_fanout_test(
         actor_service,
         tenant_id,
         app_id,
-        "SessionActor:bob-desktop",
+        "bob-desktop:SessionActor",
         serde_json::json!({
             "op": "connect",
             "user_id": "bob",
@@ -274,7 +278,7 @@ async fn run_chat_room_fanout_test(
         actor_service,
         tenant_id,
         app_id,
-        "SessionActor:alice-mobile",
+        "alice-mobile:SessionActor",
         serde_json::json!({
             "op": "send_channel_message",
             "channel_id": "general",
@@ -296,7 +300,7 @@ async fn run_chat_room_fanout_test(
             actor_service,
             tenant_id,
             app_id,
-            "SessionActor:bob-desktop",
+            "bob-desktop:SessionActor",
             serde_json::json!({"op": "inbox"}),
         )
         .await;

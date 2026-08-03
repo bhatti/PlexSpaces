@@ -184,7 +184,9 @@ impl BlobService {
         repository: Arc<dyn BlobRepository>,
     ) -> Self {
         let prefix = if config.prefix.is_empty() {
-            std::env::var("HOME").map(|h| format!("{}/plexspaces/blob", h)).unwrap_or_else(|_| "/tmp/plexspaces/blob".to_string())
+            std::env::var("HOME")
+                .map(|h| format!("{}/plexspaces/blob", h))
+                .unwrap_or_else(|_| "/tmp/plexspaces/blob".to_string())
         } else {
             config.prefix.clone()
         };
@@ -204,7 +206,9 @@ impl BlobService {
 
         // Set default prefix if empty
         let prefix = if config.prefix.is_empty() {
-            std::env::var("HOME").map(|h| format!("{}/plexspaces/blob", h)).unwrap_or_else(|_| "/tmp/plexspaces/blob".to_string())
+            std::env::var("HOME")
+                .map(|h| format!("{}/plexspaces/blob", h))
+                .unwrap_or_else(|_| "/tmp/plexspaces/blob".to_string())
         } else {
             config.prefix.clone()
         };
@@ -290,7 +294,8 @@ impl BlobService {
                 if !prefix.is_empty() {
                     std::fs::create_dir_all(&prefix).map_err(|e| {
                         BlobError::ConfigError(format!(
-                            "Failed to create blob directory '{}': {}", prefix, e
+                            "Failed to create blob directory '{}': {}",
+                            prefix, e
                         ))
                     })?;
                 }
@@ -523,7 +528,10 @@ impl BlobService {
         let mut offset = 0i64;
         let page_size = 100i64;
         loop {
-            let (blobs, _count) = self.repository.list(ctx, &filters, page_size, offset).await?;
+            let (blobs, _count) = self
+                .repository
+                .list(ctx, &filters, page_size, offset)
+                .await?;
             if blobs.is_empty() {
                 return Ok(None);
             }
@@ -831,7 +839,10 @@ impl plexspaces_actor::BlobServiceTrait for BlobService {
             .await
         {
             Ok(url) => Ok(Some(url)),
-            Err(e) if e.to_string().contains("not configured") || e.to_string().contains("not supported") => {
+            Err(e)
+                if e.to_string().contains("not configured")
+                    || e.to_string().contains("not supported") =>
+            {
                 Ok(None)
             }
             Err(e) => Err(Box::new(e)),
@@ -842,4 +853,3 @@ impl plexspaces_actor::BlobServiceTrait for BlobService {
         self
     }
 }
-

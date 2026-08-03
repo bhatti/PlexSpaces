@@ -20,7 +20,6 @@ plexspaces-persistence = { workspace = true }
 plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }
 plexspaces-object-registry = { workspace = true }
 plexspaces-channel = { workspace = true }
-plexspaces-process-groups = { workspace = true }
 plexspaces-facet = { workspace = true }
 plexspaces-application = { path = "../application" }
 plexspaces-services = { path = "../services" }
@@ -32,7 +31,6 @@ plexspaces-wasm-runtime = { workspace = true, features = ["component-model"] }
 plexspaces-blob = { path = "../blob", features = ["sql-backend", "server", "presigned-urls", "s3-backend"] }
 plexspaces-firecracker = { workspace = true, optional = true }
 plexspaces-dashboard = { path = "../dashboard", optional = true }
-plexspaces-circuit-breaker = { workspace = true }
 plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 
 # Core dependencies
@@ -47,10 +45,11 @@ metrics = "0.23"
 toml = "0.8"
 serde_yaml = "0.9"
 config = "0.14"
-ulid = "1.2"
+ulid = { workspace = true }
 chrono = { workspace = true }
 libc = "0.2"  # For signal handling in shutdown coordinator
 sysinfo = "0.30"  # For system resource metrics (CPU, memory, disk)
+rand = "0.8"
 regex = "1.10"  # For config key pattern matching
 
 # gRPC for actor remoting
@@ -61,7 +60,7 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tokio-rustls = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any", "migrate"] }
+sqlx = { workspace = true }
 tonic-health = { workspace = true }
 tonic-web = { workspace = true }  # For gRPC-Web and gRPC-Gateway HTTP access
 futures = { workspace = true }  # For BoxStream in ChannelService
@@ -92,6 +91,7 @@ tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 prost = { workspace = true }
 plexspaces-persistence = { workspace = true }
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
+plexspaces-test-utils = { path = "../test-utils" }
 futures = { workspace = true }
 tempfile = "3.10"
 wat = "1.0"
@@ -105,3 +105,7 @@ path = "src/lib.rs"
 [[test]]
 name = "node_integration_tests"
 path = "tests/integration_tests.rs"
+
+[[test]]
+name = "performance_tests"
+path = "tests/performance_tests.rs"

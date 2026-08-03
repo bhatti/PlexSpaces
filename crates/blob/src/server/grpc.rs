@@ -130,9 +130,21 @@ impl BlobServiceTrait for BlobServiceImpl {
                 crate::UploadBlobParams {
                     name: req.name,
                     data: req.data,
-                    content_type: if req.content_type.is_empty() { None } else { Some(req.content_type) },
-                    blob_group: if req.blob_group.is_empty() { None } else { Some(req.blob_group) },
-                    kind: if req.kind.is_empty() { None } else { Some(req.kind) },
+                    content_type: if req.content_type.is_empty() {
+                        None
+                    } else {
+                        Some(req.content_type)
+                    },
+                    blob_group: if req.blob_group.is_empty() {
+                        None
+                    } else {
+                        Some(req.blob_group)
+                    },
+                    kind: if req.kind.is_empty() {
+                        None
+                    } else {
+                        Some(req.kind)
+                    },
                     metadata: req.metadata,
                     tags: req.tags,
                     expires_after,

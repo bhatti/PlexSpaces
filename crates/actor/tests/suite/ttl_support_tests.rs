@@ -125,7 +125,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     )
     .expect("ttl test actor id should be valid");
     let mailbox = Arc::new(
-        Mailbox::new(mailbox_config, actor_id.to_string())
+        Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
@@ -141,7 +141,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     );
 
     // Register actor before calling tell()
-    use plexspaces_actor::{ActorRegistry, ActorRegistrationParams, RequestContext};
+    use plexspaces_actor::{ActorRegistrationParams, ActorRegistry, RequestContext};
     let tell_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     if let Some(registry) = service_locator.actor_registry().await {
         let actor_id = actor_ref.id().clone();

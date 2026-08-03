@@ -35,13 +35,13 @@
 
 use crate::{Application, ApplicationError, ApplicationNode};
 use async_trait::async_trait;
-use plexspaces_common::dialable_node_address;
 use plexspaces_actor::actor_types::Actor;
 use plexspaces_actor::{
     wasm_root_supervisor_actor_type_from_application_name,
     wasm_worker_actor_type_from_application_name, ActorError, ActorId, BehaviorError, BehaviorType,
     RequestContextExt,
 };
+use plexspaces_common::dialable_node_address;
 use plexspaces_proto::application::v1::ApplicationSpec;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::supervision::v1::SupervisorSpec;
@@ -2806,11 +2806,8 @@ mod tests {
             Some(spec),
         );
 
-        // Mock node that tracks spawned actors
-        struct TrackingMockNode {
-            #[allow(dead_code)]
-            spawned_actors: Arc<tokio::sync::Mutex<Vec<String>>>,
-        }
+        // Mock node for testing
+        struct TrackingMockNode;
 
         #[async_trait]
         impl ApplicationNode for TrackingMockNode {
@@ -2823,9 +2820,7 @@ mod tests {
             }
         }
 
-        let tracking_node = Arc::new(TrackingMockNode {
-            spawned_actors: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-        });
+        let tracking_node = Arc::new(TrackingMockNode);
 
         // Test load_supervisor_tree (currently stubbed, will implement)
         // For now, this test documents the expected behavior
@@ -2900,11 +2895,8 @@ mod tests {
             None,
         );
 
-        // Mock node that tracks stopped actors
-        struct StopTrackingMockNode {
-            #[allow(dead_code)]
-            stopped_actors: Arc<tokio::sync::Mutex<Vec<String>>>,
-        }
+        // Mock node for testing stop
+        struct StopTrackingMockNode;
 
         #[async_trait]
         impl ApplicationNode for StopTrackingMockNode {
@@ -2917,9 +2909,7 @@ mod tests {
             }
         }
 
-        let tracking_node = Arc::new(StopTrackingMockNode {
-            stopped_actors: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-        });
+        let tracking_node = Arc::new(StopTrackingMockNode);
 
         // Start application (spawns actors)
         app.start(tracking_node.clone())
@@ -3049,7 +3039,6 @@ mod tests {
         // 4. Only crashed actor should restart (one-for-one)
         // 5. Other actors should continue running
     }
-
 
     /// Test: initialize_supervisor_tree creates proper supervisor with add_child
     #[tokio::test]

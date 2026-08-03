@@ -259,90 +259,37 @@ use plexspaces_proto::common::v1::Message;
 // Observability
 use tracing::info;
 
-/// Actor state - matches proto ActorState enum exactly
-///
-/// ## State Transitions
-/// ```
-/// CREATING -> ACTIVATING -> ACTIVE -> DEACTIVATING -> INACTIVE
-///                        \-> MIGRATING -> ACTIVE (on new node)
-///                        \-> FAILED -> (supervisor restarts)
-///                        \-> TERMINATED (permanent stop)
-/// ```
-///
-/// ## Design Notes
-/// - This enum matches proto `ActorState` exactly for consistency
-/// - FAILED state includes error message for debugging
-/// - All actors (virtual or not) use the same ActorState
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActorState {
-    /// Unspecified state (should never occur in valid states)
-    Unspecified,
-    /// Actor is created but not yet started (replaces "Initializing")
-    Creating,
-    /// Actor is running and processing messages
-    Active,
-    /// Actor is suspended/not processing messages (replaces "Suspended")
-    Inactive,
-    /// Actor is activating (loading state, running on_activate)
-    Activating,
-    /// Actor is deactivating (saving state, running on_deactivate)
-    Deactivating,
-    /// Actor is stopping (shutdown in progress) - NEW
-    Stopping,
-    /// Actor is migrating to another node
-    Migrating,
-    /// Actor has crashed (includes error message)
-    Failed(String),
-    /// Actor has permanently stopped (replaces "Stopped")
-    Terminated,
-}
-
-// NOTE: ActorLifecycle trait REMOVED - lifecycle is now STATIC (always present)
-// This was a design flaw: lifecycle hooks are CORE to every actor, not optional.
-// The new design has lifecycle methods directly on Actor (see impl Actor below)
-
-impl ActorState {
-    /// Convert to proto ActorState enum
-    pub fn to_proto(&self) -> plexspaces_proto::v1::actor::ActorState {
-        use plexspaces_proto::v1::actor::ActorState as ProtoState;
-        match self {
-            ActorState::Unspecified => ProtoState::ActorStateUnspecified,
-            ActorState::Creating => ProtoState::ActorStateCreating,
-            ActorState::Active => ProtoState::ActorStateActive,
-            ActorState::Inactive => ProtoState::ActorStateInactive,
-            ActorState::Activating => ProtoState::ActorStateActivating,
-            ActorState::Deactivating => ProtoState::ActorStateDeactivating,
-            ActorState::Stopping => ProtoState::ActorStateStopping,
-            ActorState::Migrating => ProtoState::ActorStateMigrating,
-            ActorState::Failed(_) => ProtoState::ActorStateFailed,
-            ActorState::Terminated => ProtoState::ActorStateTerminated,
-        }
-    }
-
-    /// Convert from proto ActorState enum
-    ///
-    /// Note: For FAILED state, error message should be retrieved from Actor.error_message field
-    pub fn from_proto(
-        proto: plexspaces_proto::v1::actor::ActorState,
-        error_message: Option<String>,
-    ) -> Self {
-        use plexspaces_proto::v1::actor::ActorState as ProtoState;
-        match proto {
-            ProtoState::ActorStateUnspecified => ActorState::Unspecified,
-            ProtoState::ActorStateCreating => ActorState::Creating,
-            ProtoState::ActorStateActive => ActorState::Active,
-            ProtoState::ActorStateInactive => ActorState::Inactive,
-            ProtoState::ActorStateActivating => ActorState::Activating,
-            ProtoState::ActorStateDeactivating => ActorState::Deactivating,
-            ProtoState::ActorStateStopping => ActorState::Stopping,
-            ProtoState::ActorStateMigrating => ActorState::Migrating,
-            ProtoState::ActorStateFailed => ActorState::Failed(error_message.unwrap_or_default()),
-            ProtoState::ActorStateTerminated => ActorState::Terminated,
-        }
-    }
-}
+mod actor_state;
+pub use actor_state::ActorState;
 
 // ActorContext is now imported from core crate (see imports at top of file)
+
+/// Mutable diagnostics state grouped under a single `RwLock` to reduce per-actor allocations.
+///
+/// These three fields are written at most once per message (`last_message_time`) or on
+/// failure (`error_message`, `resource_usage`) — health-check and metrics-scrape readers
+/// vastly outnumber writers, making `RwLock` the right choice. Grouping them into one
+/// allocation saves two heap allocations per actor (~96 B) versus three separate
+/// `Arc<RwLock<T>>` fields.
+///
+/// `exit_reason` is excluded: `actor_factory_impl::watch_actor_termination` holds a
+/// direct `Arc<RwLock<Option<ExitReason>>>` clone and reads it after the actor task
+/// joins. Merging it here would require changing that external interface.
+struct ActorMutableState {
+    resource_usage: ResourceUsage,
+    last_message_time: std::time::Instant,
+    error_message: String,
+}
+
+impl Default for ActorMutableState {
+    fn default() -> Self {
+        Self {
+            resource_usage: ResourceUsage::default(),
+            last_message_time: std::time::Instant::now(),
+            error_message: String::new(),
+        }
+    }
+}
 
 /// Core actor structure
 ///
@@ -383,29 +330,16 @@ pub struct ActorInstance {
     /// Resource contract (our innovation)
     resource_contract: Option<ResourceContract>,
 
-    /// Current resource usage
-    resource_usage: Arc<RwLock<ResourceUsage>>,
+    /// Grouped mutable diagnostics state: resource_usage, last_message_time, error_message.
+    /// One allocation and one lock instead of three.
+    mutable_state: Arc<RwLock<ActorMutableState>>,
 
-    /// Last message processed time (for health checks)
-    last_message_time: Arc<RwLock<std::time::Instant>>,
-
-    /// Exit reason when actor terminates (used by watch_actor_termination)
+    /// Exit reason when actor terminates (used by watch_actor_termination).
+    /// Kept separate because actor_factory_impl holds a direct Arc to this field.
     exit_reason: Arc<RwLock<Option<ExitReason>>>,
 
     /// Dynamically attached facets (runtime behavior composition)
     facets: Arc<RwLock<FacetContainer>>,
-
-    /// Error message when actor is in FAILED state
-    ///
-    /// ## Purpose
-    /// Provides error details when actor.state == ActorState::Failed.
-    /// Used for debugging, logging, and supervisor restart decisions.
-    ///
-    /// ## Usage
-    /// - Only populated when state == ActorState::Failed
-    /// - Empty string when state != ActorState::Failed
-    /// - Contains error message from actor crash or failure
-    error_message: Arc<RwLock<String>>,
 }
 
 struct ActorRuntimeHandle {
@@ -723,11 +657,9 @@ impl ActorInstance {
             shutdown_tx: None,
             resource_profile: ResourceProfile::ResourceProfileBalanced,
             resource_contract: None,
-            resource_usage: Arc::new(RwLock::new(ResourceUsage::default())),
-            last_message_time: Arc::new(RwLock::new(std::time::Instant::now())),
+            mutable_state: Arc::new(RwLock::new(ActorMutableState::default())),
             exit_reason: Arc::new(RwLock::new(None)),
             facets: Arc::new(RwLock::new(FacetContainer::new())),
-            error_message: Arc::new(RwLock::new(String::new())),
         }
     }
 
@@ -768,23 +700,20 @@ impl ActorInstance {
 
     /// Get current resource usage
     pub async fn resource_usage(&self) -> ResourceUsage {
-        self.resource_usage.read().await.clone()
+        self.mutable_state.read().await.resource_usage.clone()
     }
 
     /// Check actor health (Quickwit-inspired)
     pub async fn health(&self) -> ActorHealth {
-        let last_message = self.last_message_time.read().await;
-        let elapsed = last_message.elapsed();
-
-        // Check if stuck (no messages processed for 30 seconds)
+        let elapsed = self.mutable_state.read().await.last_message_time.elapsed();
         <ActorHealth as ActorHealthExt>::check_stuck(elapsed, std::time::Duration::from_secs(30))
     }
 
     /// Validate resource usage against contract
     pub async fn validate_resources(&self) -> Result<(), crate::resource::ResourceViolation> {
         if let Some(ref contract) = self.resource_contract {
-            let usage = self.resource_usage.read().await;
-            contract.validate_usage(&usage)?;
+            let state = self.mutable_state.read().await;
+            contract.validate_usage(&state.resource_usage)?;
         }
         Ok(())
     }
@@ -865,7 +794,7 @@ impl ActorInstance {
     /// ## Returns
     /// Error message string if actor is in FAILED state, empty string otherwise
     pub async fn error_message(&self) -> String {
-        self.error_message.read().await.clone()
+        self.mutable_state.read().await.error_message.clone()
     }
 
     /// Get the actor's behavior (for testing/debugging)
@@ -875,7 +804,7 @@ impl ActorInstance {
 
     /// Set error message (used when transitioning to FAILED state)
     async fn set_error_message(&self, message: String) {
-        *self.error_message.write().await = message;
+        self.mutable_state.write().await.error_message = message;
     }
 
     /// Start the actor (Erlang-style: returns JoinHandle for supervision)
@@ -922,7 +851,9 @@ impl ActorInstance {
 
         // OBSERVABILITY: Track actor creation
         metrics::counter!("plexspaces_actor_created_total",
-            "actor_id" => self.id.to_string()
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
         )
         .increment(1);
 
@@ -935,7 +866,9 @@ impl ActorInstance {
 
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => self.id.to_string(),
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
             "from" => "Creating",
             "to" => "Activating"
         )
@@ -953,12 +886,16 @@ impl ActorInstance {
                     // Init succeeded - track metrics
                     let init_duration = init_start.elapsed();
                     metrics::counter!("plexspaces_actor_init_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "status" => "success"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_init_duration_seconds",
-                        "actor_id" => self.id.to_string()
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
                     )
                     .record(init_duration.as_secs_f64());
                 }
@@ -970,16 +907,22 @@ impl ActorInstance {
 
                     // Track init failure metrics
                     metrics::counter!("plexspaces_actor_init_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "status" => "failure"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_init_duration_seconds",
-                        "actor_id" => self.id.to_string()
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
                     )
                     .record(init_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_init_errors_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -1022,7 +965,9 @@ impl ActorInstance {
 
             let facets_init_complete_duration = facets_init_complete_start.elapsed();
             metrics::histogram!("plexspaces_facet_init_complete_duration_seconds",
-                "actor_id" => self.id.to_string()
+                "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
             )
             .record(facets_init_complete_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::TRACE) {
@@ -1044,7 +989,9 @@ impl ActorInstance {
                 Ok(()) => {
                     let facets_ready_duration = facets_ready_start.elapsed();
                     metrics::histogram!("plexspaces_actor_facets_ready_duration_seconds",
-                        "actor_id" => self.id.to_string()
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
                     )
                     .record(facets_ready_duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::TRACE) {
@@ -1059,7 +1006,9 @@ impl ActorInstance {
                     // Log error but don't fail activation (behavior may have non-critical errors)
                     let facets_ready_duration = facets_ready_start.elapsed();
                     metrics::counter!("plexspaces_actor_facets_ready_errors_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -1084,7 +1033,7 @@ impl ActorInstance {
         let behavior = self.behavior.clone();
         let context = self.context.clone();
         let state = self.state.clone();
-        let last_message_time = self.last_message_time.clone();
+        let mutable_state = self.mutable_state.clone();
         let facets = self.facets.clone();
         let exit_reason_arc = self.exit_reason.clone(); // Clone exit_reason Arc for use in message loop
         let actor_id_for_logging = self.id.clone(); // Capture actor_id before spawning
@@ -1172,7 +1121,9 @@ impl ActorInstance {
                                     let facet_exit_duration = facet_exit_start.elapsed();
                                     if !facet_exit_errors.is_empty() {
                                         metrics::counter!("plexspaces_facet_exit_errors_total",
-                                            "actor_id" => actor_id_for_logging.to_string(),
+                                            "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string(),
                                             "error_count" => facet_exit_errors.len().to_string()
                                         ).increment(facet_exit_errors.len() as u64);
                                         tracing::warn!(
@@ -1190,10 +1141,14 @@ impl ActorInstance {
                                         );
                                     }
                                     metrics::histogram!("plexspaces_facet_exit_duration_seconds",
-                                        "actor_id" => actor_id_for_logging.to_string()
+                                        "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string()
                                     ).record(facet_exit_duration.as_secs_f64());
                                     metrics::counter!("plexspaces_facet_exit_total",
-                                        "actor_id" => actor_id_for_logging.to_string()
+                                        "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string()
                                     ).increment(1);
 
                                     // Call handle_exit() - actor can decide to propagate or handle
@@ -1218,11 +1173,15 @@ impl ActorInstance {
                                             // Actor decided to propagate - terminate this actor
                                             let handle_exit_duration = handle_exit_start.elapsed();
                                             metrics::counter!("plexspaces_actor_exit_handled_total",
-                                                "actor_id" => actor_id_for_logging.to_string(),
+                                                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string(),
                                                 "action" => "propagate"
                                             ).increment(1);
                                             metrics::histogram!("plexspaces_actor_exit_handle_duration_seconds",
-                                                "actor_id" => actor_id_for_logging.to_string()
+                                                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string()
                                             ).record(handle_exit_duration.as_secs_f64());
                                             tracing::info!(
                                                 actor_id = %actor_id_for_logging,
@@ -1267,11 +1226,15 @@ impl ActorInstance {
                                             // Actor decided to handle - continue running
                                             let handle_exit_duration = handle_exit_start.elapsed();
                                             metrics::counter!("plexspaces_actor_exit_handled_total",
-                                                "actor_id" => actor_id_for_logging.to_string(),
+                                                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string(),
                                                 "action" => "handle"
                                             ).increment(1);
                                             metrics::histogram!("plexspaces_actor_exit_handle_duration_seconds",
-                                                "actor_id" => actor_id_for_logging.to_string()
+                                                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string()
                                             ).record(handle_exit_duration.as_secs_f64());
                                             if tracing::enabled!(tracing::Level::DEBUG) {
                                                 tracing::debug!(
@@ -1287,11 +1250,15 @@ impl ActorInstance {
                                         Err(e) => {
                                             let handle_exit_duration = handle_exit_start.elapsed();
                                             metrics::counter!("plexspaces_actor_exit_handled_total",
-                                                "actor_id" => actor_id_for_logging.to_string(),
+                                                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string(),
                                                 "action" => "error"
                                             ).increment(1);
                                             metrics::counter!("plexspaces_actor_exit_handle_errors_total",
-                                                "actor_id" => actor_id_for_logging.to_string(),
+                                                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string(),
                                                 "error_type" => format!("{:?}", e)
                                             ).increment(1);
                                             tracing::error!(
@@ -1310,7 +1277,9 @@ impl ActorInstance {
                                 } else {
                                     // Actor doesn't trap exits - terminate immediately (Erlang default behavior)
                                     metrics::counter!("plexspaces_actor_exit_propagated_total",
-                                        "actor_id" => actor_id_for_logging.to_string(),
+                                        "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string(),
                                         "from" => from_actor_id.clone(),
                                         "trapped" => "false"
                                     ).increment(1);
@@ -1380,7 +1349,9 @@ impl ActorInstance {
                         // correlation_id so an ask() future can match it.
                         if message.message_type == "__PING__" {
                             metrics::counter!("plexspaces_actor_ping_total",
-                                "actor_id" => actor_id_for_logging.to_string()
+                                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => actor_id_for_logging.actor_type().to_string()
                             ).increment(1);
                             if !message.sender_id.is_empty() {
                                 let pong = crate::core::create_pong_message(&message);
@@ -1423,13 +1394,13 @@ impl ActorInstance {
                                 actor_id_for_logging, message.id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id
                             );
                         }
-                        mailbox.begin_processing().await;
+                        mailbox.begin_processing();
                         let result = Self::process_message(
                             message.clone(),
                             &actor_id_for_logging,
                             &behavior,
                             &context,
-                            &last_message_time,
+                            &mutable_state,
                             &facets,
                         ).await;
 
@@ -1483,7 +1454,7 @@ impl ActorInstance {
                                 }
                             }
                         }
-                        mailbox.end_processing().await;
+                        mailbox.end_processing();
 
                         if let Err(e) = &result {
                             if tracing::enabled!(tracing::Level::TRACE) {
@@ -1703,7 +1674,9 @@ impl ActorInstance {
             let facets_terminate_start_duration = facets_terminate_start_time.elapsed();
             let _ = facets_terminate_start_duration.as_millis();
             metrics::histogram!("plexspaces_facet_terminate_start_duration_seconds",
-                "actor_id" => self.id.to_string()
+                "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
             )
             .record(facets_terminate_start_duration.as_secs_f64());
         }
@@ -1721,7 +1694,9 @@ impl ActorInstance {
                     let facets_detaching_duration = facets_detaching_start.elapsed();
                     let _ = facets_detaching_duration.as_millis();
                     metrics::histogram!("plexspaces_actor_facets_detaching_duration_seconds",
-                        "actor_id" => self.id.to_string()
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
                     )
                     .record(facets_detaching_duration.as_secs_f64());
                 }
@@ -1730,7 +1705,9 @@ impl ActorInstance {
                     let facets_detaching_duration = facets_detaching_start.elapsed();
                     let _facets_detaching_duration_ms = facets_detaching_duration.as_millis();
                     metrics::counter!("plexspaces_actor_facets_detaching_errors_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -1754,28 +1731,38 @@ impl ActorInstance {
                 Ok(()) => {
                     let terminate_duration = terminate_start.elapsed();
                     metrics::counter!("plexspaces_actor_terminate_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "reason" => "shutdown"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
-                        "actor_id" => self.id.to_string()
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
                     )
                     .record(terminate_duration.as_secs_f64());
                 }
                 Err(e) => {
                     let terminate_duration = terminate_start.elapsed();
                     metrics::counter!("plexspaces_actor_terminate_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "reason" => "shutdown"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
-                        "actor_id" => self.id.to_string()
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
                     )
                     .record(terminate_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_terminate_errors_total",
-                        "actor_id" => self.id.to_string(),
+                        "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -1825,7 +1812,9 @@ impl ActorInstance {
 
             let facets_detach_duration = facets_detach_start.elapsed();
             metrics::histogram!("plexspaces_facet_detach_all_duration_seconds",
-                "actor_id" => self.id.to_string()
+                "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
             )
             .record(facets_detach_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::DEBUG) {
@@ -1844,7 +1833,9 @@ impl ActorInstance {
 
         // OBSERVABILITY: Track actor termination
         metrics::counter!("plexspaces_actor_terminated_total",
-            "actor_id" => self.id.to_string()
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => self.id.actor_type().to_string()
         )
         .increment(1);
 
@@ -2023,12 +2014,12 @@ impl ActorInstance {
 
         // Coordinate with mailbox for DurabilityFacet
         if facet_type == "durability" {
-            let mailbox_stats = self.mailbox.get_stats().await;
+            let mailbox_stats = self.mailbox.get_stats();
 
             // Record metrics
-            metrics::gauge!("plexspaces_mailbox_size", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type.clone())
+            metrics::gauge!("plexspaces_mailbox_size", "tenant_id" => self.context.tenant_id.clone(), "namespace" => self.context.namespace.clone(), "actor_type" => self.id.actor_type().to_string(), "backend" => mailbox_stats.backend_type.clone())
                 .set(mailbox_stats.total_size() as f64);
-            metrics::gauge!("plexspaces_mailbox_is_durable", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type)
+            metrics::gauge!("plexspaces_mailbox_is_durable", "tenant_id" => self.context.tenant_id.clone(), "namespace" => self.context.namespace.clone(), "actor_type" => self.id.actor_type().to_string(), "backend" => mailbox_stats.backend_type)
                 .set(if mailbox_stats.is_durable { 1.0 } else { 0.0 });
 
             // Set ReplayHandler for deterministic message replay (Phase 9.1)
@@ -2067,7 +2058,7 @@ impl ActorInstance {
             })?;
 
             // Record final mailbox stats
-            let mailbox_stats = self.mailbox.get_stats().await;
+            let mailbox_stats = self.mailbox.get_stats();
             tracing::info!(
                 actor_id = %self.id,
                 mailbox_backend = %mailbox_stats.backend_type,
@@ -2080,7 +2071,7 @@ impl ActorInstance {
             );
 
             // Record final metrics
-            metrics::gauge!("plexspaces_mailbox_size", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type.clone())
+            metrics::gauge!("plexspaces_mailbox_size", "tenant_id" => self.context.tenant_id.clone(), "namespace" => self.context.namespace.clone(), "actor_type" => self.id.actor_type().to_string(), "backend" => mailbox_stats.backend_type.clone())
                 .set(mailbox_stats.total_size() as f64);
         }
 
@@ -2174,7 +2165,9 @@ impl ActorInstance {
 
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.to_string(),
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => actor_id.actor_type().to_string(),
             "from" => "Created",
             "to" => "Activating"
         )
@@ -2193,14 +2186,18 @@ impl ActorInstance {
 
         // OBSERVABILITY: Track activation success
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.to_string(),
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => actor_id.actor_type().to_string(),
             "from" => "Activating",
             "to" => "Active"
         )
         .increment(1);
 
         metrics::gauge!("plexspaces_actor_active_total",
-            "actor_id" => actor_id.to_string()
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => actor_id.actor_type().to_string()
         )
         .increment(1.0);
 
@@ -2237,7 +2234,9 @@ impl ActorInstance {
 
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.to_string(),
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => actor_id.actor_type().to_string(),
             "from" => "Active",
             "to" => "Deactivating"
         )
@@ -2254,14 +2253,18 @@ impl ActorInstance {
 
         // OBSERVABILITY: Track deactivation success
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.to_string(),
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => actor_id.actor_type().to_string(),
             "from" => "Deactivating",
             "to" => "Terminated"
         )
         .increment(1);
 
         metrics::gauge!("plexspaces_actor_active_total",
-            "actor_id" => actor_id.to_string()
+            "tenant_id" => self.context.tenant_id.clone(),
+            "namespace" => self.context.namespace.clone(),
+            "actor_type" => actor_id.actor_type().to_string()
         )
         .decrement(1.0);
 
@@ -2304,10 +2307,10 @@ impl ActorInstance {
     /// Process a single message
     async fn process_message(
         message: Message,
-        actor_id: &str, // Actor ID passed as parameter (no longer in context)
+        actor_id: &str,
         behavior: &Arc<RwLock<Box<dyn ActorTrait>>>,
         context: &Arc<ActorContext>,
-        last_message_time: &Arc<RwLock<std::time::Instant>>,
+        mutable_state: &Arc<RwLock<ActorMutableState>>,
         facets: &Arc<RwLock<FacetContainer>>,
     ) -> Result<(), ActorError> {
         // RECURSION DETECTION: Track call depth to detect infinite loops
@@ -2398,13 +2401,15 @@ impl ActorInstance {
         // OBSERVABILITY: Track message received
         let message_type_owned = message_type.clone();
         metrics::counter!("plexspaces_actor_messages_received_total",
-            "actor_id" => actor_id_owned.clone(),
+            "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => context.actor_id().actor_type().to_string(),
             "message_type" => message_type_owned
         )
         .increment(1);
 
         // Update last message time for health monitoring
-        *last_message_time.write().await = std::time::Instant::now();
+        mutable_state.write().await.last_message_time = std::time::Instant::now();
 
         // Apply before-method facet interceptors.
         // Do not hold facets.read() across send_reply (ShortCircuit) or other awaits that may
@@ -2424,7 +2429,9 @@ impl ActorInstance {
         .map_err(|e| {
             let error_str = e.to_string();
             metrics::counter!("plexspaces_actor_facet_intercept_errors_total",
-                "actor_id" => actor_id_owned.clone(),
+                "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => context.actor_id().actor_type().to_string(),
                 "facet_error" => error_str.clone()
             )
             .increment(1);
@@ -2446,9 +2453,7 @@ impl ActorInstance {
                         sender_id: actor_id_owned.clone(),
                         receiver_id: message.sender_id.clone(),
                         correlation_id: message.correlation_id.clone(),
-                        timestamp: Some(prost_types::Timestamp::from(
-                            std::time::SystemTime::now(),
-                        )),
+                        timestamp: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
                         ..Default::default()
                     };
                     if let Err(e) = context
@@ -2545,13 +2550,17 @@ impl ActorInstance {
                     Ok(_) => {
                         let message_type_owned2 = message_type.clone();
                         metrics::counter!("plexspaces_actor_messages_processed_total",
-                            "actor_id" => actor_id_owned.clone(),
+                            "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => context.actor_id().actor_type().to_string(),
                             "message_type" => message_type_owned2.clone(),
                             "status" => "success"
                         )
                         .increment(1);
                         metrics::histogram!("plexspaces_actor_message_processing_duration_seconds",
-                            "actor_id" => actor_id_owned.clone(),
+                            "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => context.actor_id().actor_type().to_string(),
                             "message_type" => message_type_owned2.clone()
                         )
                         .record(duration.as_secs_f64());
@@ -2560,13 +2569,17 @@ impl ActorInstance {
                         let message_type_owned3 = message_type.clone();
                         let error_type = format!("{:?}", e);
                         metrics::counter!("plexspaces_actor_messages_processed_total",
-                            "actor_id" => actor_id_owned.clone(),
+                            "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => context.actor_id().actor_type().to_string(),
                             "message_type" => message_type_owned3.clone(),
                             "status" => "error"
                         )
                         .increment(1);
                         metrics::counter!("plexspaces_actor_message_processing_errors_total",
-                            "actor_id" => actor_id_owned.clone(),
+                            "tenant_id" => context.tenant_id.clone(),
+            "namespace" => context.namespace.clone(),
+            "actor_type" => context.actor_id().actor_type().to_string(),
                             "message_type" => message_type_owned3.clone(),
                             "error_type" => error_type
                         )
@@ -2590,1362 +2603,7 @@ impl ActorInstance {
 // The From<JournalError> conversion is also in core crate
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::behavior::MockBehavior;
-    use crate::core::{
-        ActorContext, ActorStateHandle as CoreActorStateHandle, BehaviorError, ServiceLocator,
-    };
-    use async_trait::async_trait;
-    use plexspaces_journaling::{DurabilityFacet, JournalStorage, SqliteJournalStorage};
-    use plexspaces_mailbox::MailboxConfig;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use std::time::Duration;
-    use ulid::Ulid;
-
-    async fn actor_with_default_service_locator(
-        id: ActorId,
-        behavior: Box<dyn crate::core::Actor>,
-        mailbox: Mailbox,
-        tenant_id: String,
-        namespace: String,
-    ) -> ActorInstance {
-        let node_id = "test-node".to_string();
-        let service_locator: Arc<dyn crate::core::ServiceLocator> =
-            Arc::new(crate::TestServiceLocatorStub::new());
-        let context = Arc::new(ActorContext::new(
-            node_id,
-            tenant_id.clone(),
-            namespace.clone(),
-            service_locator,
-            None,
-        ));
-        ActorInstance::new(id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
-    }
-
-    /// Helper to create a test message
-    fn create_test_message(payload: Vec<u8>) -> Message {
-        Message {
-            id: Ulid::new().to_string(),
-            payload,
-            ..Default::default()
-        }
-    }
-
-    /// Helper to create a test message with TTL
-    #[allow(dead_code)]
-    fn create_test_message_with_ttl(payload: Vec<u8>, ttl: std::time::Duration) -> Message {
-        let mut msg = create_test_message(payload);
-        msg.ttl = Some(prost_types::Duration {
-            seconds: ttl.as_secs() as i64,
-            nanos: ttl.subsec_nanos() as i32,
-        });
-        msg
-    }
-
-    fn runtime_actor_id(name: &str) -> ActorId {
-        ActorId::new(name, "gen_server", "test-namespace", "test-node")
-            .expect("test actor id should be valid")
-    }
-
-    struct TerminateTrackingBehavior {
-        terminated: Arc<AtomicBool>,
-    }
-
-    struct CheckpointTrackingBehavior {
-        count: i32,
-        observed_count: Arc<tokio::sync::RwLock<i32>>,
-        #[allow(dead_code)]
-        behavior_type: crate::core::BehaviorType,
-    }
-
-    impl CheckpointTrackingBehavior {
-        async fn set_observed_count(&self) {
-            *self.observed_count.write().await = self.count;
-        }
-    }
-
-    #[async_trait]
-    impl crate::core::Actor for TerminateTrackingBehavior {
-        async fn handle_message(
-            &mut self,
-            _ctx: &ActorContext,
-            _message: Message,
-        ) -> Result<(), BehaviorError> {
-            Ok(())
-        }
-
-        fn behavior_type(&self) -> crate::core::BehaviorType {
-            crate::core::BehaviorType::GenServer
-        }
-
-        async fn terminate(
-            &mut self,
-            _ctx: &ActorContext,
-            _reason: &crate::core::ExitReason,
-        ) -> Result<(), crate::core::ActorError> {
-            self.terminated.store(true, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
-    #[async_trait]
-    impl crate::core::Actor for CheckpointTrackingBehavior {
-        async fn handle_message(
-            &mut self,
-            _ctx: &ActorContext,
-            message: Message,
-        ) -> Result<(), BehaviorError> {
-            if message.payload == b"inc".to_vec() {
-                self.count += 1;
-                self.set_observed_count().await;
-            }
-            Ok(())
-        }
-
-        fn behavior_type(&self) -> crate::core::BehaviorType {
-            crate::core::BehaviorType::GenServer
-        }
-
-        async fn capture_checkpoint_state(
-            &mut self,
-            _ctx: &ActorContext,
-        ) -> Result<Option<Vec<u8>>, crate::core::ActorError> {
-            serde_json::to_vec(&serde_json::json!({ "count": self.count }))
-                .map(Some)
-                .map_err(|e| crate::core::ActorError::BehaviorError(e.to_string()))
-        }
-
-        async fn restore_checkpoint_state(
-            &mut self,
-            _ctx: &ActorContext,
-            state_data: &[u8],
-        ) -> Result<bool, crate::core::ActorError> {
-            let value: serde_json::Value = serde_json::from_slice(state_data)
-                .map_err(|e| crate::core::ActorError::BehaviorError(e.to_string()))?;
-            self.count = value
-                .get("count")
-                .and_then(|count| count.as_i64())
-                .unwrap_or_default() as i32;
-            self.set_observed_count().await;
-            Ok(true)
-        }
-    }
-
-    async fn wait_for_count(observed_count: &Arc<tokio::sync::RwLock<i32>>, expected: i32) {
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if *observed_count.read().await == expected {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("timed out waiting for actor state");
-    }
-
-    #[tokio::test]
-    async fn test_actor_lifecycle() {
-        let id = runtime_actor_id("test-actor");
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), id.to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            id.clone(),
-            behavior,
-            mailbox,
-            String::new(),
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Test initial state
-        assert_eq!(actor.state().await, ActorState::Creating);
-
-        // Start actor
-        actor.start().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Active);
-
-        // Stop actor
-        actor.stop().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Terminated);
-    }
-
-    #[tokio::test]
-    async fn test_actor_handle_stop_actor_runs_terminate() {
-        let id = runtime_actor_id("test-stop-handle");
-        let terminated = Arc::new(AtomicBool::new(false));
-        let behavior = Box::new(TerminateTrackingBehavior {
-            terminated: terminated.clone(),
-        });
-        let mailbox = Mailbox::new(MailboxConfig::default(), id.to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            id,
-            behavior,
-            mailbox,
-            String::new(),
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        actor.start().await.unwrap();
-        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
-
-        assert!(terminated.load(Ordering::SeqCst));
-        assert_eq!(actor.state().await, ActorState::Terminated);
-    }
-
-    #[tokio::test]
-    async fn test_non_virtual_durable_actor_restores_checkpoint_on_restart() {
-        let actor_id = runtime_actor_id("durable-checkpoint-actor");
-        let namespace = "test-namespace".to_string();
-        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
-        let storage: Arc<dyn JournalStorage> = Arc::new(
-            SqliteJournalStorage::new(":memory:")
-                .await
-                .expect("sqlite durability storage"),
-        );
-
-        let behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::GenServer,
-        });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut actor = actor_with_default_service_locator(
-            actor_id.clone(),
-            behavior,
-            mailbox,
-            String::new(),
-            namespace.clone(),
-        )
-        .await;
-        actor
-            .attach_facet(Box::new(DurabilityFacet::new(
-                storage.clone(),
-                serde_json::json!({
-                    "checkpoint_interval": 1,
-                    "replay_on_activation": true,
-                    "state_schema_version": 1
-                }),
-                50,
-            )))
-            .await
-            .expect("attach durability facet");
-        actor.start().await.unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        wait_for_count(&observed_count, 2).await;
-        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
-
-        let checkpoint = storage
-            .get_latest_checkpoint(&actor_id.to_string())
-            .await
-            .expect("checkpoint should be saved on stop");
-        assert!(!checkpoint.state_data.is_empty());
-        let checkpoint_payload: serde_json::Value =
-            serde_json::from_slice(&checkpoint.state_data).expect("checkpoint must be valid JSON");
-        assert_eq!(
-            checkpoint_payload
-                .get("count")
-                .and_then(|count| count.as_i64())
-                .unwrap_or_default(),
-            2
-        );
-
-        *observed_count.write().await = 0;
-        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::GenServer,
-        });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut restarted_actor = actor_with_default_service_locator(
-            actor_id.clone(),
-            restarted_behavior,
-            restarted_mailbox,
-            String::new(),
-            namespace,
-        )
-        .await;
-        restarted_actor
-            .attach_facet(Box::new(DurabilityFacet::new(
-                storage.clone(),
-                serde_json::json!({
-                    "checkpoint_interval": 1,
-                    "replay_on_activation": true,
-                    "state_schema_version": 1
-                }),
-                50,
-            )))
-            .await
-            .expect("attach durability facet");
-        restarted_actor.start().await.unwrap();
-        wait_for_count(&observed_count, 2).await;
-    }
-
-    #[tokio::test]
-    async fn test_non_virtual_non_durable_actor_restarts_from_fresh_state() {
-        let actor_id = runtime_actor_id("non-durable-checkpoint-actor");
-        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
-
-        let behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::GenServer,
-        });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut actor = actor_with_default_service_locator(
-            actor_id.clone(),
-            behavior,
-            mailbox,
-            String::new(),
-            "test-namespace".to_string(),
-        )
-        .await;
-        actor.start().await.unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        wait_for_count(&observed_count, 2).await;
-        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
-
-        *observed_count.write().await = 0;
-        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::GenServer,
-        });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut restarted_actor = actor_with_default_service_locator(
-            actor_id,
-            restarted_behavior,
-            restarted_mailbox,
-            String::new(),
-            "test-namespace".to_string(),
-        )
-        .await;
-        restarted_actor.start().await.unwrap();
-        wait_for_count(&observed_count, 0).await;
-    }
-
-    #[tokio::test]
-    async fn test_non_virtual_durable_workflow_actor_restores_checkpoint_on_restart() {
-        let actor_id = runtime_actor_id("durable-workflow-checkpoint-actor");
-        let namespace = "test-namespace".to_string();
-        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
-        let storage: Arc<dyn JournalStorage> = Arc::new(
-            SqliteJournalStorage::new(":memory:")
-                .await
-                .expect("sqlite durability storage"),
-        );
-
-        let behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::Workflow,
-        });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut actor = actor_with_default_service_locator(
-            actor_id.clone(),
-            behavior,
-            mailbox,
-            String::new(),
-            namespace.clone(),
-        )
-        .await;
-        actor
-            .attach_facet(Box::new(DurabilityFacet::new(
-                storage.clone(),
-                serde_json::json!({
-                    "checkpoint_interval": 1,
-                    "replay_on_activation": true,
-                    "state_schema_version": 1
-                }),
-                50,
-            )))
-            .await
-            .expect("attach durability facet");
-        actor.start().await.unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        wait_for_count(&observed_count, 2).await;
-        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
-
-        *observed_count.write().await = 0;
-        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::Workflow,
-        });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut restarted_actor = actor_with_default_service_locator(
-            actor_id,
-            restarted_behavior,
-            restarted_mailbox,
-            String::new(),
-            namespace,
-        )
-        .await;
-        restarted_actor
-            .attach_facet(Box::new(DurabilityFacet::new(
-                storage,
-                serde_json::json!({
-                    "checkpoint_interval": 1,
-                    "replay_on_activation": true,
-                    "state_schema_version": 1
-                }),
-                50,
-            )))
-            .await
-            .expect("attach durability facet");
-        restarted_actor.start().await.unwrap();
-        wait_for_count(&observed_count, 2).await;
-    }
-
-    #[tokio::test]
-    async fn test_non_virtual_durable_event_actor_restores_checkpoint_on_restart() {
-        let actor_id = runtime_actor_id("durable-event-checkpoint-actor");
-        let namespace = "test-namespace".to_string();
-        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
-        let storage: Arc<dyn JournalStorage> = Arc::new(
-            SqliteJournalStorage::new(":memory:")
-                .await
-                .expect("sqlite durability storage"),
-        );
-
-        let behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::GenEvent,
-        });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut actor = actor_with_default_service_locator(
-            actor_id.clone(),
-            behavior,
-            mailbox,
-            String::new(),
-            namespace.clone(),
-        )
-        .await;
-        actor
-            .attach_facet(Box::new(DurabilityFacet::new(
-                storage.clone(),
-                serde_json::json!({
-                    "checkpoint_interval": 1,
-                    "replay_on_activation": true,
-                    "state_schema_version": 1
-                }),
-                50,
-            )))
-            .await
-            .expect("attach durability facet");
-        actor.start().await.unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        actor
-            .send(create_test_message(b"inc".to_vec()))
-            .await
-            .unwrap();
-        wait_for_count(&observed_count, 2).await;
-        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
-
-        *observed_count.write().await = 0;
-        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
-            count: 0,
-            observed_count: observed_count.clone(),
-            behavior_type: crate::core::BehaviorType::GenEvent,
-        });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-            .await
-            .unwrap();
-        let mut restarted_actor = actor_with_default_service_locator(
-            actor_id,
-            restarted_behavior,
-            restarted_mailbox,
-            String::new(),
-            namespace,
-        )
-        .await;
-        restarted_actor
-            .attach_facet(Box::new(DurabilityFacet::new(
-                storage,
-                serde_json::json!({
-                    "checkpoint_interval": 1,
-                    "replay_on_activation": true,
-                    "state_schema_version": 1
-                }),
-                50,
-            )))
-            .await
-            .expect("attach durability facet");
-        restarted_actor.start().await.unwrap();
-        wait_for_count(&observed_count, 2).await;
-    }
-
-    #[tokio::test]
-    async fn test_actor_id() {
-        let id1 = runtime_actor_id("test");
-        let id2 = runtime_actor_id("test");
-        assert_eq!(id1, id2);
-        assert_eq!(id1.name(), "test");
-    }
-
-    /// Test that on_activate is ALWAYS called during actor start
-    /// This is a CORE feature - not optional
-    #[tokio::test]
-    async fn test_static_lifecycle_on_activate_always_runs() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Start actor - on_activate should ALWAYS run (transitions to Active state)
-        actor.start().await.unwrap();
-
-        // Verify state transition to Active (on_activate completed successfully)
-        assert_eq!(actor.state().await, ActorState::Active);
-    }
-
-    /// Test that on_deactivate is ALWAYS called during actor stop
-    /// This is a CORE feature - not optional
-    #[tokio::test]
-    async fn test_static_lifecycle_on_deactivate_always_runs() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        actor.start().await.unwrap();
-        actor.stop().await.unwrap();
-
-        // Verify state transition to Terminated (on_deactivate completed successfully)
-        assert_eq!(actor.state().await, ActorState::Terminated);
-    }
-
-    /// Test that lifecycle state transitions are predictable
-    #[tokio::test]
-    async fn test_static_lifecycle_state_transitions() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Initial state
-        assert_eq!(actor.state().await, ActorState::Creating);
-
-        // During start, should go: Created -> Activating -> Active
-        actor.start().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Active);
-
-        // During stop, should go: Active -> Deactivating -> Terminated
-        actor.stop().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Terminated);
-    }
-
-    /// Test that behaviors can optionally extend lifecycle
-    /// The core lifecycle always runs, but behaviors can add custom init/cleanup
-    #[tokio::test]
-    async fn test_static_lifecycle_allows_behavior_extension() {
-        // This test will pass once we implement the helper methods
-        // for behaviors to extend lifecycle (like as_lifecycle_mut())
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Should work even if behavior doesn't implement lifecycle extensions
-        actor.start().await.unwrap();
-        actor.stop().await.unwrap();
-    }
-
-    // ============================================================================
-    // RESOURCE MONITORING TESTS
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_with_resource_profile() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let profile = ResourceProfile::ResourceProfileCpuIntensive;
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        )
-        .with_resource_profile(profile);
-
-        // Verify profile was set
-        assert_eq!(
-            actor.resource_profile,
-            ResourceProfile::ResourceProfileCpuIntensive
-        );
-    }
-
-    #[tokio::test]
-    async fn test_with_resource_contract() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let contract = ResourceContract {
-            max_memory_bytes: 1024 * 1024 * 50u64, // 50 MB
-            max_cpu_percent: 80.0,
-            max_io_ops_per_sec: Some(1000),
-            guaranteed_bandwidth_mbps: Some(10),
-            max_execution_time: None,
-        };
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        )
-        .with_resource_contract(contract.clone());
-
-        // Verify contract was set
-        assert!(actor.resource_contract.is_some());
-        let stored_contract = actor.resource_contract.unwrap();
-        assert_eq!(stored_contract.max_memory_bytes, 1024 * 1024 * 50u64);
-        assert_eq!(stored_contract.max_cpu_percent, 80.0);
-        assert_eq!(stored_contract.max_io_ops_per_sec, Some(1000));
-    }
-
-    #[tokio::test]
-    async fn test_resource_usage() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Get initial resource usage
-        let usage = actor.resource_usage().await;
-
-        // Should have zero initial usage
-        assert_eq!(usage.memory_bytes, 0);
-        assert_eq!(usage.cpu_percent, 0.0);
-        assert_eq!(usage.io_ops_per_sec, 0);
-        assert_eq!(usage.network_mbps, 0);
-    }
-
-    #[tokio::test]
-    async fn test_health_check() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Check health (should be Healthy initially)
-        let health = actor.health().await;
-
-        // Actor just created, should be healthy
-        assert!(health.is_healthy());
-    }
-
-    #[tokio::test]
-    async fn test_validate_resources_without_contract() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Validate resources (should pass without contract)
-        let result = actor.validate_resources().await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_validate_resources_with_contract() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let contract = ResourceContract {
-            max_memory_bytes: 1024 * 1024 * 1000u64, // 1000 MB (high limit)
-            max_cpu_percent: 100.0,
-            max_io_ops_per_sec: Some(10000),
-            guaranteed_bandwidth_mbps: None,
-            max_execution_time: None,
-        };
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        )
-        .with_resource_contract(contract);
-
-        // Validate resources (should pass with reasonable contract)
-        let result = actor.validate_resources().await;
-        assert!(result.is_ok());
-    }
-
-    // ============================================================================
-    // ACTOR LIFECYCLE ERROR PATHS TESTS
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_start_already_active_error() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Start actor
-        actor.start().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Active);
-
-        // Try to start again (should fail)
-        let result = actor.start().await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ActorError::InvalidState(_)));
-    }
-
-    #[tokio::test]
-    async fn test_stop_already_stopped() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Start then stop
-        actor.start().await.unwrap();
-        actor.stop().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Terminated);
-
-        // Try to stop again (should succeed silently)
-        let result = actor.stop().await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_send_message() {
-        use plexspaces_mailbox::mailbox_config_default;
-
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string())
-            .await
-            .expect("Failed to create mailbox");
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Send a message
-        let msg = create_test_message(b"test message".to_vec());
-        let result = actor.send(msg).await;
-        assert!(result.is_ok());
-
-        // Verify message is in mailbox
-        assert_eq!(actor.mailbox().size().await, 1);
-    }
-
-    #[tokio::test]
-    async fn test_actor_id_getter() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor-123".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor-123"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Test id() getter
-        assert_eq!(actor.id(), &runtime_actor_id("test-actor-123"));
-    }
-
-    #[tokio::test]
-    async fn test_mailbox_getter() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Test mailbox() getter returns a reference
-        // Just verify we can access the mailbox
-        let _mailbox_ref = actor.mailbox();
-        assert!(true); // Test passes if we can get the mailbox reference
-    }
-
-    // ============================================================================
-    // BEHAVIOR STACK TESTS (become/unbecome pattern)
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_become_changes_behavior() {
-        let behavior1 = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior1,
-            mailbox,
-            "test-tenant".to_string(),
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Change behavior (using raw identifier since "become" is reserved)
-        let behavior2 = Box::new(MockBehavior::new());
-        let result = actor.r#become(behavior2).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_unbecome_restores_previous_behavior() {
-        let behavior1 = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior1,
-            mailbox,
-            "test-tenant".to_string(),
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Change behavior (using raw identifier since "become" is reserved)
-        let behavior2 = Box::new(MockBehavior::new());
-        actor.r#become(behavior2).await.unwrap();
-
-        // Restore previous behavior
-        let result = actor.unbecome().await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_unbecome_error_when_no_previous_behavior() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Try to unbecome without become (should fail)
-        let result = actor.unbecome().await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            ActorError::NoBehaviorToRestore
-        ));
-    }
-
-    // ============================================================================
-    // FACET MANAGEMENT TESTS
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_attach_facet() {
-        use async_trait::async_trait;
-        use plexspaces_facet::{Facet, FacetError};
-
-        // Simple test facet
-        struct TestFacet {
-            config: serde_json::Value,
-            priority: i32,
-        }
-
-        impl TestFacet {
-            fn new(config: serde_json::Value, priority: i32) -> Self {
-                Self { config, priority }
-            }
-        }
-
-        #[async_trait]
-        impl Facet for TestFacet {
-            fn facet_type(&self) -> &str {
-                "test-facet"
-            }
-
-            fn get_config(&self) -> serde_json::Value {
-                self.config.clone()
-            }
-
-            fn get_priority(&self) -> i32 {
-                self.priority
-            }
-
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-                self
-            }
-
-            async fn on_attach(
-                &mut self,
-                _actor_id: &str,
-                _config: serde_json::Value,
-            ) -> Result<(), FacetError> {
-                Ok(())
-            }
-
-            async fn on_detach(&mut self, _actor_id: &str) -> Result<(), FacetError> {
-                Ok(())
-            }
-
-            // Default implementations are provided by the trait for before_method and after_method
-            // So we don't need to implement them unless we want custom behavior
-        }
-
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Attach facet
-        let facet = Box::new(TestFacet::new(serde_json::json!({}), 50));
-        let result = actor.attach_facet(facet).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_list_facets() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // List facets (should be empty initially)
-        let facets = actor.list_facets().await;
-        assert_eq!(facets.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_detach_facet() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Try to detach non-existent facet (should succeed - no-op)
-        let result = actor.detach_facet("non-existent").await;
-        // Note: This might fail depending on FacetContainer implementation
-        // If it returns an error, that's also acceptable behavior
-        let _ = result; // Accept either Ok or Err
-    }
-
-    // ============================================================================
-    // MESSAGE LOOP AND PROCESSING TESTS
-    // ============================================================================
-
-    /// Test that actor actually processes messages in its message loop
-    /// This covers the message loop internals (lines 425-442)
-    #[tokio::test]
-    async fn test_actor_processes_messages_in_loop() {
-        use plexspaces_mailbox::mailbox_config_default;
-
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string())
-            .await
-            .expect("Failed to create mailbox");
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Start actor (message loop begins)
-        let _handle = actor.start().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Active);
-
-        // Send a message
-        let msg = create_test_message(b"test message".to_vec());
-        actor.send(msg).await.unwrap();
-
-        // Give actor time to process message
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        // Stop actor gracefully
-        actor.stop().await.unwrap();
-
-        // Verify final state
-        assert_eq!(actor.state().await, ActorState::Terminated);
-    }
-
-    /// Test graceful shutdown via shutdown channel
-    /// This covers shutdown path (lines 444-451)
-    #[tokio::test]
-    async fn test_actor_graceful_shutdown() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Start actor
-        let handle = actor.start().await.unwrap();
-        assert_eq!(actor.state().await, ActorState::Active);
-
-        // Stop actor (triggers shutdown signal)
-        actor.stop().await.unwrap();
-
-        // Wait for shutdown to complete
-        let result = tokio::time::timeout(tokio::time::Duration::from_secs(1), handle).await;
-
-        // Handle should complete successfully
-        assert!(result.is_ok());
-        assert_eq!(actor.state().await, ActorState::Terminated);
-    }
-
-    /// Test on_timer() hook forwards timer events to behavior
-    /// This covers timer hook (lines 612-625)
-    #[tokio::test]
-    async fn test_on_timer_hook() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = ActorInstance::new(
-            runtime_actor_id("test-actor"),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Call _on_timer hook (internal method)
-        let result = actor._on_timer("test-timer").await;
-
-        // Should succeed (MockBehavior accepts all messages)
-        assert!(result.is_ok());
-    }
-
-    /// Test message processing with sender tracking
-    /// This covers process_message lines 658-662 (sender extraction)
-    #[tokio::test]
-    async fn test_message_processing_with_sender() {
-        use plexspaces_mailbox::mailbox_config_default;
-
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string())
-            .await
-            .expect("Failed to create mailbox");
-
-        let mut actor = actor_with_default_service_locator(
-            runtime_actor_id("receiver"),
-            behavior,
-            mailbox,
-            "test-tenant".to_string(),
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Start actor
-        let _handle = actor.start().await.unwrap();
-
-        // Create message with sender
-        let mut msg = create_test_message(b"hello".to_vec());
-        msg.sender_id = "sender-actor".to_string();
-
-        // Send message
-        actor.send(msg).await.unwrap();
-
-        // Give time to process
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        // Stop actor
-        actor.stop().await.unwrap();
-    }
-
-    /// Test message processing error handling
-    /// This covers error path in message loop (lines 439-442)
-    #[tokio::test]
-    async fn test_message_processing_error_handling() {
-        use crate::core::{Actor as ActorTrait, BehaviorError, BehaviorType};
-        use async_trait::async_trait;
-        use plexspaces_mailbox::mailbox_config_default;
-
-        // Behavior that always fails
-        struct FailingBehavior;
-
-        #[async_trait]
-        impl ActorTrait for FailingBehavior {
-            async fn handle_message(
-                &mut self,
-                _ctx: &crate::core::ActorContext,
-                _msg: Message,
-            ) -> Result<(), BehaviorError> {
-                Err(BehaviorError::ProcessingError(
-                    "Intentional failure".to_string(),
-                ))
-            }
-
-            fn behavior_type(&self) -> BehaviorType {
-                BehaviorType::Custom("Failing".to_string())
-            }
-        }
-
-        let behavior = Box::new(FailingBehavior);
-        let mailbox = Mailbox::new(mailbox_config_default(), "failing-actor".to_string())
-            .await
-            .unwrap();
-
-        let mut actor = actor_with_default_service_locator(
-            ActorId::new("failing-actor", "failing", "test-namespace", "test-node").unwrap(),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-        )
-        .await;
-
-        // Start actor
-        let _handle = actor.start().await.unwrap();
-
-        // Send message (will fail in processing)
-        let msg = create_test_message(b"test".to_vec());
-        actor.send(msg).await.unwrap();
-
-        // Give time to attempt processing
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        // Actor should still be running despite error
-        assert_eq!(actor.state().await, ActorState::Active);
-
-        // Stop actor
-        actor.stop().await.unwrap();
-    }
-
-    /// Test health check tracks last message time
-    /// This covers process_message line 641 (last_message_time update)
-    #[tokio::test]
-    async fn test_health_tracking_with_messages() {
-        let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
-            .await
-            .unwrap();
-
-        let actor = ActorInstance::new(
-            ActorId::new("test-actor", "mock", "test-namespace", "test-node").unwrap(),
-            behavior,
-            mailbox,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-namespace".to_string(),
-            None,
-        );
-
-        // Check health immediately (should be Healthy)
-        let health1 = actor.health().await;
-        assert!(health1.is_healthy());
-
-        // Simulate long wait (> 30 seconds for Stuck detection)
-        // Note: We can't actually wait 30s in test, but we can verify the method works
-        let health2 = actor.health().await;
-        assert!(health2.is_healthy());
-    }
-}
+mod tests;
 
 // Implement ActorStateHandle for Actor so that ActorRegistry can check state,
 // access the mailbox, and stop the actor without importing Actor directly.

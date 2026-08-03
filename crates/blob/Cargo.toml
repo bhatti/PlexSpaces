@@ -8,15 +8,15 @@ description = "S3-compatible blob storage service for PlexSpaces framework"
 repository = "https://github.com/plexobject/plexspaces"
 
 [dependencies]
-async-trait = "0.1"
-tokio = { version = "1.41", features = ["sync", "time", "macros", "rt-multi-thread", "fs"] }
-tokio-stream = "0.1"
-thiserror = "2.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tracing = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-ulid = "1.2"
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+ulid = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
 bytes = "1.5"
@@ -39,7 +39,7 @@ metrics = "0.23"
 
 # SQL backend support
 # Note: AnyPool requires "any" feature, and sqlite driver must be enabled
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "any", "migrate"], optional = true }
+sqlx = { workspace = true, optional = true }
 
 # Proto types
 plexspaces-proto = { path = "../proto" }
@@ -64,8 +64,8 @@ env_logger = "0.11"
 serial_test = "3.0"
 hyper = { version = "1.0", features = ["full"] }
 http-body-util = "0.1"
-# Ensure sqlx with sqlite is available in tests
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
+# Ensure sqlx is available in tests
+sqlx = { workspace = true }
 # Test helpers for checking DynamoDB Local availability
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
 

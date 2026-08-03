@@ -47,8 +47,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use plexspaces_proto::actor::v1::{AskReplyRequest, AskReplyResponse, SendMessageRequest, SendMessageResponse};
-use plexspaces_proto::node::v1::{PingRequest, PingReqRequest, PingReqResponse, PingResponse, SyncMembershipRequest, SyncMembershipResponse};
+use plexspaces_proto::actor::v1::{
+    AskReplyRequest, AskReplyResponse, SendMessageRequest, SendMessageResponse,
+};
+use plexspaces_proto::node::v1::{
+    PingReqRequest, PingReqResponse, PingRequest, PingResponse, SyncMembershipRequest,
+    SyncMembershipResponse,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ActorTransportClient
@@ -179,7 +184,9 @@ impl NodeTransportClient for Arc<dyn NodeTransportClient> {
         request: SyncMembershipRequest,
         timeout: Duration,
     ) -> Result<SyncMembershipResponse, Box<dyn std::error::Error + Send + Sync>> {
-        (**self).sync_membership(node_id, address, request, timeout).await
+        (**self)
+            .sync_membership(node_id, address, request, timeout)
+            .await
     }
 }
 

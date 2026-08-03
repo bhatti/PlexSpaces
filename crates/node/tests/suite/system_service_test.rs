@@ -145,7 +145,10 @@ async fn test_get_config_with_pattern() {
 async fn test_get_health() {
     let service = create_system_service_without_node();
 
-    let request = Request::new(GetHealthRequest { request_id: ulid::Ulid::new().to_string(), components: vec![] });
+    let request = Request::new(GetHealthRequest {
+        request_id: ulid::Ulid::new().to_string(),
+        components: vec![],
+    });
 
     let response = service.get_health(request).await;
     assert!(response.is_ok());
@@ -168,7 +171,9 @@ async fn test_get_detailed_health() {
 async fn test_liveness_probe() {
     let service = create_system_service_without_node();
 
-    let request = Request::new(LivenessProbeRequest { request_id: ulid::Ulid::new().to_string() });
+    let request = Request::new(LivenessProbeRequest {
+        request_id: ulid::Ulid::new().to_string(),
+    });
 
     let response = service.liveness_probe(request).await;
     assert!(response.is_ok());
@@ -178,7 +183,9 @@ async fn test_liveness_probe() {
 async fn test_readiness_probe() {
     let service = create_system_service_without_node();
 
-    let request = Request::new(ReadinessProbeRequest { request_id: ulid::Ulid::new().to_string() });
+    let request = Request::new(ReadinessProbeRequest {
+        request_id: ulid::Ulid::new().to_string(),
+    });
 
     let response = service.readiness_probe(request).await;
     assert!(response.is_ok());
@@ -188,7 +195,9 @@ async fn test_readiness_probe() {
 async fn test_startup_probe() {
     let service = create_system_service_without_node();
 
-    let request = Request::new(StartupProbeRequest { request_id: ulid::Ulid::new().to_string() });
+    let request = Request::new(StartupProbeRequest {
+        request_id: ulid::Ulid::new().to_string(),
+    });
 
     let response = service.startup_probe(request).await;
     assert!(response.is_ok());
@@ -198,7 +207,9 @@ async fn test_startup_probe() {
 async fn test_get_node_readiness() {
     let service = create_system_service_without_node();
 
-    let request = Request::new(GetNodeReadinessRequest { request_id: ulid::Ulid::new().to_string() });
+    let request = Request::new(GetNodeReadinessRequest {
+        request_id: ulid::Ulid::new().to_string(),
+    });
 
     let response = service.get_node_readiness(request).await;
     assert!(response.is_ok());
@@ -208,7 +219,9 @@ async fn test_get_node_readiness() {
 async fn test_get_shutdown_status() {
     let service = create_system_service_without_node();
 
-    let request = Request::new(GetShutdownStatusRequest { request_id: ulid::Ulid::new().to_string() });
+    let request = Request::new(GetShutdownStatusRequest {
+        request_id: ulid::Ulid::new().to_string(),
+    });
 
     let response = service.get_shutdown_status(request).await;
     assert!(response.is_ok());

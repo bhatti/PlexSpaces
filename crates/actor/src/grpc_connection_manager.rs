@@ -60,11 +60,6 @@ impl ServiceConnectionPool {
         }
     }
 
-    /// Return a clone of a pooled channel, adding a new lazy channel if pool has room.
-    fn get(&mut self) -> Result<Channel, tonic::transport::Error> {
-        self.get_with_tls(None)
-    }
-
     /// Return a channel with optional mTLS. When `tls` is provided the address
     /// must use https:// scheme; otherwise http:// is used automatically.
     fn get_with_tls(
@@ -237,8 +232,12 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ServiceNameKeyValueService, node_id, node_address)
-            .await
+        self.get_connection(
+            ServiceType::ServiceNameKeyValueService,
+            node_id,
+            node_address,
+        )
+        .await
     }
 
     /// Get a channel for the BlobService on the given node.
@@ -358,9 +357,13 @@ mod tests {
         let node = "node-c";
         let _ = manager.get_key_value_service_connection(node, addr).await;
         let _ = manager.get_blob_service_connection(node, addr).await;
-        let _ = manager.get_service_link_service_connection(node, addr).await;
+        let _ = manager
+            .get_service_link_service_connection(node, addr)
+            .await;
         let _ = manager.get_metrics_service_connection(node, addr).await;
-        let _ = manager.get_object_registry_service_connection(node, addr).await;
+        let _ = manager
+            .get_object_registry_service_connection(node, addr)
+            .await;
         let pools = manager.pools.read().await;
         // Each typed helper must have created exactly one pool entry
         assert!(

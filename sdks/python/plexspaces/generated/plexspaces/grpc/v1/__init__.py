@@ -550,33 +550,31 @@ class InterceptorRequest(betterproto.Message):
      - Includes TLS certificate information for mTLS authentication
     """
 
-    method: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     gRPC method full path (e.g., "/plexspaces.actor.v1.ActorService/SpawnActor")
     """
 
+    method: str = betterproto.string_field(2)
     headers: Dict[str, str] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Request headers/metadata"""
 
-    remote_addr: str = betterproto.string_field(3)
+    remote_addr: str = betterproto.string_field(4)
     """Remote client address"""
 
-    timestamp: datetime = betterproto.message_field(4)
+    timestamp: datetime = betterproto.message_field(5)
     """Request timestamp"""
 
-    request_id: str = betterproto.string_field(5)
-    """Request ID for correlation"""
-
-    peer_certificate: str = betterproto.string_field(6)
+    peer_certificate: str = betterproto.string_field(7)
     """
     TLS peer certificate (PEM format) for mTLS authentication
      Extracted from TLS connection during handshake
      Empty if connection is not using TLS or mTLS is not enabled
     """
 
-    peer_service_id: str = betterproto.string_field(7)
+    peer_service_id: str = betterproto.string_field(8)
     """
     Service identity extracted from peer certificate (CN or SAN)
      Set by TLS layer after certificate validation
@@ -597,24 +595,22 @@ class InterceptorResponse(betterproto.Message):
      - Interceptors can add response headers
     """
 
-    status_code: int = betterproto.int32_field(1)
+    request_id: str = betterproto.string_field(1)
     """Response status code"""
 
+    status_code: int = betterproto.int32_field(2)
     headers: Dict[str, str] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Response headers/metadata"""
 
-    timestamp: datetime = betterproto.message_field(3)
+    timestamp: datetime = betterproto.message_field(4)
     """Response timestamp"""
 
-    duration: timedelta = betterproto.message_field(4)
+    duration: timedelta = betterproto.message_field(5)
     """Request duration (calculated by interceptor chain)"""
 
-    request_id: str = betterproto.string_field(5)
-    """Request ID for correlation with InterceptorRequest"""
-
-    method: str = betterproto.string_field(6)
+    method: str = betterproto.string_field(7)
     """
     gRPC method full path (echoed from the originating InterceptorRequest)
     """

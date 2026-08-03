@@ -172,4 +172,3 @@ pub async fn invoke(node_addr: &str, actor_id: &str, payload: &str) -> Result<()
 
     Ok(())
 }
-

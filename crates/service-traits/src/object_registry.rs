@@ -82,7 +82,14 @@ pub trait ObjectRegistry: Send + Sync {
         limit: usize,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let registrations = self
-            .discover(ctx, DiscoverOptions { object_type: Some(object_type), limit: 10_000, ..Default::default() })
+            .discover(
+                ctx,
+                DiscoverOptions {
+                    object_type: Some(object_type),
+                    limit: 10_000,
+                    ..Default::default()
+                },
+            )
             .await?;
         let mut tenant_ids = std::collections::BTreeSet::new();
         for registration in registrations {
@@ -99,7 +106,14 @@ pub trait ObjectRegistry: Send + Sync {
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let registrations = self
-            .discover(ctx, DiscoverOptions { object_type: Some(object_type), limit: 10_000, ..Default::default() })
+            .discover(
+                ctx,
+                DiscoverOptions {
+                    object_type: Some(object_type),
+                    limit: 10_000,
+                    ..Default::default()
+                },
+            )
             .await?;
         let mut tenant_ids = std::collections::BTreeSet::new();
         for registration in registrations {
@@ -122,7 +136,13 @@ pub trait ObjectRegistry: Send + Sync {
         ctx: &RequestContext,
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let registrations = self
-            .discover(ctx, DiscoverOptions { limit: 10_000, ..Default::default() })
+            .discover(
+                ctx,
+                DiscoverOptions {
+                    limit: 10_000,
+                    ..Default::default()
+                },
+            )
             .await?;
         let mut removed = 0_u64;
         for registration in registrations {

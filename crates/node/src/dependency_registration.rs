@@ -575,7 +575,6 @@ fn parse_host_port(host_port: &str, default_port: u16) -> Result<(String, u16), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_proto::system::v1::HealthProbeConfig;
 
     #[tokio::test]
     async fn test_dependency_checker() {

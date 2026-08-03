@@ -10,7 +10,7 @@ use plexspaces_actor::{
     HttpHeader, OutboundHttpClient, OutboundHttpClientError as CoreOutboundError,
     OutboundHttpRequest, OutboundHttpResponse,
 };
-use plexspaces_circuit_breaker::CircuitBreaker;
+use plexspaces_common::circuit_breaker::CircuitBreaker;
 use plexspaces_proto::node::v1::{OutboundTransport, RuntimeConfig, ServiceLinkConfig};
 use rand::thread_rng;
 use reqwest::redirect::Policy;

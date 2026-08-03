@@ -101,7 +101,7 @@ async fn test_stop_idempotent_multiple_calls() {
     let actor_impl = EdgeCaseActor::new();
     let terminate_count = actor_impl.terminate_count.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -137,7 +137,7 @@ async fn test_stop_when_already_stopped() {
     let actor_impl = EdgeCaseActor::new();
     let terminate_count = actor_impl.terminate_count.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -173,7 +173,7 @@ async fn test_stop_when_not_started() {
     let actor_impl = EdgeCaseActor::new();
     let terminate_count = actor_impl.terminate_count.clone();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -201,7 +201,7 @@ async fn test_start_after_stop_fails() {
     // Test that starting an actor after it's been stopped fails
     let actor_impl = EdgeCaseActor::new();
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -251,7 +251,7 @@ async fn test_init_error_properly_handled() {
         }
     }
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -307,7 +307,7 @@ async fn test_terminate_error_doesnt_prevent_shutdown() {
         }
     }
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(

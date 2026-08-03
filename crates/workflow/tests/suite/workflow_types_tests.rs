@@ -80,7 +80,8 @@ async fn test_signal_immediate_resolution() -> Result<(), Box<dyn std::error::Er
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "signal-immediate",
             "1.0",
             json!({}),
@@ -141,7 +142,8 @@ async fn test_signal_timeout() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = std::time::Instant::now();
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "signal-timeout", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "signal-timeout", "1.0", json!({}))
+            .await?;
     let elapsed = start.elapsed();
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
@@ -186,7 +188,8 @@ async fn test_signal_delayed_resolution() -> Result<(), Box<dyn std::error::Erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "signal-delayed",
             "1.0",
             json!({}),
@@ -270,7 +273,8 @@ async fn test_signal_with_payload() -> Result<(), Box<dyn std::error::Error>> {
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "signal-payload",
             "1.0",
             json!({}),
@@ -364,7 +368,8 @@ async fn test_multiple_signals_in_sequence() -> Result<(), Box<dyn std::error::E
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "multi-signal",
             "1.0",
             json!({}),
@@ -421,7 +426,8 @@ async fn test_signal_no_timeout() -> Result<(), Box<dyn std::error::Error>> {
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "signal-no-timeout",
             "1.0",
             json!({}),
@@ -480,7 +486,8 @@ async fn test_signal_merges_input_with_payload() -> Result<(), Box<dyn std::erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "signal-merge",
             "1.0",
             json!({}),
@@ -558,9 +565,14 @@ async fn test_simple_single_step_workflow() -> Result<(), Box<dyn std::error::Er
 
     storage.save_definition(&ctx, &definition).await?;
 
-    let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "hello-world", "1.0", json!({"name": "World"}))
-            .await?;
+    let execution_id = WorkflowExecutor::start_execution(
+        &storage,
+        &ctx,
+        "hello-world",
+        "1.0",
+        json!({"name": "World"}),
+    )
+    .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -603,7 +615,8 @@ async fn test_execution_status_transitions() -> Result<(), Box<dyn std::error::E
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "status-test",
             "1.0",
             json!({}),
@@ -673,7 +686,8 @@ async fn test_all_execution_statuses() -> Result<(), Box<dyn std::error::Error>>
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "status-full-test",
             "1.0",
             json!({}),
@@ -692,7 +706,8 @@ async fn test_all_execution_statuses() -> Result<(), Box<dyn std::error::Error>>
     assert_eq!(execution.execution_status().as_sql_str(), "CANCELLED");
 
     let execution_id2 = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "status-full-test",
             "1.0",
             json!({}),
@@ -711,7 +726,8 @@ async fn test_all_execution_statuses() -> Result<(), Box<dyn std::error::Error>>
     assert_eq!(execution.execution_status().as_sql_str(), "TIMED_OUT");
 
     let execution_id3 = storage
-        .create_execution(&ctx, 
+        .create_execution(
+            &ctx,
             "status-full-test",
             "1.0",
             json!({}),
@@ -942,7 +958,8 @@ async fn test_map_max_concurrency() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = std::time::Instant::now();
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "map-concurrency", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "map-concurrency", "1.0", json!({}))
+            .await?;
     let elapsed = start.elapsed();
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
@@ -1022,7 +1039,8 @@ async fn test_parallel_three_branches() -> Result<(), Box<dyn std::error::Error>
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-test", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-test", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1068,7 +1086,8 @@ async fn test_parallel_with_one_failure() -> Result<(), Box<dyn std::error::Erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-fail", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-fail", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1115,7 +1134,8 @@ async fn test_parallel_output_aggregation() -> Result<(), Box<dyn std::error::Er
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-aggregate", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-aggregate", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1158,7 +1178,8 @@ async fn test_parallel_empty_branches() -> Result<(), Box<dyn std::error::Error>
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-empty", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-empty", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1192,7 +1213,8 @@ async fn test_parallel_concurrent_execution() -> Result<(), Box<dyn std::error::
 
     let start = std::time::Instant::now();
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-timing", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "parallel-timing", "1.0", json!({}))
+            .await?;
     let elapsed = start.elapsed();
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
@@ -1274,7 +1296,8 @@ async fn test_choice_simple_condition() -> Result<(), Box<dyn std::error::Error>
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-simple", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-simple", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1344,7 +1367,8 @@ async fn test_choice_default_path() -> Result<(), Box<dyn std::error::Error>> {
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-default", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-default", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1420,7 +1444,8 @@ async fn test_choice_numeric_comparison() -> Result<(), Box<dyn std::error::Erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-numeric", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-numeric", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1488,7 +1513,8 @@ async fn test_choice_boolean() -> Result<(), Box<dyn std::error::Error>> {
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-boolean", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-boolean", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1546,7 +1572,8 @@ async fn test_choice_no_matching_choice_no_default() -> Result<(), Box<dyn std::
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "choice-no-default", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-no-default", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1604,7 +1631,8 @@ async fn test_wait_fixed_duration() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "wait-duration", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "wait-duration", "1.0", json!({}))
+            .await?;
     let elapsed = start.elapsed();
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
@@ -1849,7 +1877,8 @@ async fn test_wait_passes_input_through() -> Result<(), Box<dyn std::error::Erro
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "wait-passthrough", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "wait-passthrough", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -1930,9 +1959,14 @@ async fn test_three_step_sequential_workflow() -> Result<(), Box<dyn std::error:
     );
     storage.save_definition(&ctx, &definition).await?;
 
-    let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "three-step", "1.0", json!({"user_id": 123}))
-            .await?;
+    let execution_id = WorkflowExecutor::start_execution(
+        &storage,
+        &ctx,
+        "three-step",
+        "1.0",
+        json!({"user_id": 123}),
+    )
+    .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -2037,7 +2071,8 @@ async fn test_workflow_fails_when_step_fails() -> Result<(), Box<dyn std::error:
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "failing-workflow", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "failing-workflow", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
@@ -2083,7 +2118,8 @@ async fn test_step_retry_on_failure() -> Result<(), Box<dyn std::error::Error>> 
     storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, &ctx, "retry-workflow", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "retry-workflow", "1.0", json!({}))
+            .await?;
 
     let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(

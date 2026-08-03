@@ -280,24 +280,27 @@ class ActorHandle(betterproto.Message):
 class CreatePoolRequest(betterproto.Message):
     """CreatePool request"""
 
-    config: "PoolConfig" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    config: "PoolConfig" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CreatePoolResponse(betterproto.Message):
     """CreatePool response"""
 
-    pool_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    pool_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CheckoutRequest(betterproto.Message):
     """Checkout request"""
 
-    pool_name: str = betterproto.string_field(1)
-    timeout: timedelta = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
+    timeout: timedelta = betterproto.message_field(3)
     metadata: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
@@ -305,8 +308,9 @@ class CheckoutRequest(betterproto.Message):
 class CheckoutResponse(betterproto.Message):
     """Checkout response"""
 
-    actor: "ActorHandle" = betterproto.message_field(1, group="result")
-    error: "CheckoutError" = betterproto.message_field(2, group="result")
+    request_id: str = betterproto.string_field(1)
+    actor: "ActorHandle" = betterproto.message_field(2, group="result")
+    error: "CheckoutError" = betterproto.message_field(3, group="result")
 
 
 @dataclass(eq=False, repr=False)
@@ -321,10 +325,11 @@ class CheckoutError(betterproto.Message):
 class CheckinRequest(betterproto.Message):
     """Checkin request"""
 
-    pool_name: str = betterproto.string_field(1)
-    actor_id: str = betterproto.string_field(2)
-    checkout_id: str = betterproto.string_field(3)
-    healthy: bool = betterproto.bool_field(4)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(3)
+    checkout_id: str = betterproto.string_field(4)
+    healthy: bool = betterproto.bool_field(5)
     """Optional: actor health status"""
 
 
@@ -332,106 +337,120 @@ class CheckinRequest(betterproto.Message):
 class CheckinResponse(betterproto.Message):
     """Checkin response"""
 
-    checked_in: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    checked_in: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStatsRequest(betterproto.Message):
     """GetStats request"""
 
-    pool_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStatsResponse(betterproto.Message):
     """GetStats response"""
 
-    metrics: "PoolMetrics" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    metrics: "PoolMetrics" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ScaleRequest(betterproto.Message):
     """Scale request (manual scaling)"""
 
-    pool_name: str = betterproto.string_field(1)
-    absolute_size: int = betterproto.uint32_field(2, group="scale_type")
-    relative_size: int = betterproto.int32_field(3, group="scale_type")
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
+    absolute_size: int = betterproto.uint32_field(3, group="scale_type")
+    relative_size: int = betterproto.int32_field(4, group="scale_type")
 
 
 @dataclass(eq=False, repr=False)
 class ScaleResponse(betterproto.Message):
     """Scale response"""
 
-    new_size: int = betterproto.uint32_field(1)
-    actors_added: int = betterproto.uint32_field(2)
-    actors_removed: int = betterproto.uint32_field(3)
+    request_id: str = betterproto.string_field(1)
+    new_size: int = betterproto.uint32_field(2)
+    actors_added: int = betterproto.uint32_field(3)
+    actors_removed: int = betterproto.uint32_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class PauseScalingRequest(betterproto.Message):
     """PauseScaling request"""
 
-    pool_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class PauseScalingResponse(betterproto.Message):
     """PauseScaling response"""
 
-    paused: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    paused: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ResumeScalingRequest(betterproto.Message):
     """ResumeScaling request"""
 
-    pool_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ResumeScalingResponse(betterproto.Message):
     """ResumeScaling response"""
 
-    resumed: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    resumed: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DrainRequest(betterproto.Message):
     """Drain request"""
 
-    pool_name: str = betterproto.string_field(1)
-    timeout: timedelta = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
+    timeout: timedelta = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class DrainResponse(betterproto.Message):
     """Drain response"""
 
-    drained: bool = betterproto.bool_field(1)
-    actors_drained: int = betterproto.uint32_field(2)
+    request_id: str = betterproto.string_field(1)
+    drained: bool = betterproto.bool_field(2)
+    actors_drained: int = betterproto.uint32_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class DeletePoolRequest(betterproto.Message):
     """DeletePool request"""
 
-    pool_name: str = betterproto.string_field(1)
-    force: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
+    force: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class DeletePoolResponse(betterproto.Message):
     """DeletePool response"""
 
-    deleted: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    deleted: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class StreamMetricsRequest(betterproto.Message):
     """StreamMetrics request"""
 
-    pool_name: str = betterproto.string_field(1)
-    interval: timedelta = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    pool_name: str = betterproto.string_field(2)
+    interval: timedelta = betterproto.message_field(3)
 
 
 class PoolServiceStub(betterproto.ServiceStub):

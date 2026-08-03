@@ -45,27 +45,16 @@
 //!
 //! ### Ask Pattern Reply Routing
 //!
-//! **Simplified Design**: We always create a temporary sender ActorRef for `ask()` calls, whether
-//! called from an actor or non-actor context. This simplifies the code and ensures consistent behavior.
-//!
-//! **Important**: ReplyWaiter is used ONLY for async waiting, NOT for routing.
+//! `ask()` uses `PendingAsks` — a DashMap of ULID-keyed oneshot channels. No actor object or
+//! mailbox is created per ask.
 //!
 //! Reply routing flow:
-//! 1. **Request Phase**: `ask()` always creates temporary sender ActorRef and ReplyWaiter
-//!    - Temporary sender uses a canonical temporary-sender ActorId
-//!    - Temporary sender is always local (created on node where `ask()` is called)
-//!    - Receiver can be local or remote (extracted from `message.receiver_id`)
-//! 2. **Routing Phase**: `ActorService::send_reply()` routes reply to temporary sender's ActorRef
-//!    - Local: Lookup temporary sender ActorRef → `tell()`
-//!    - Remote: gRPC → remote node → lookup temporary sender ActorRef → `tell()`
-//! 3. **Delivery Phase**: `tell()` checks if receiver is temporary sender → routes to ReplyWaiter
-//!    - Simple rule: if `message.receiver_id` is temporary sender ID → REPLY → route to ReplyWaiter
-//!    - Otherwise → REQUEST or normal message → send to mailbox
-//! 4. **Waiting Phase**: ReplyWaiter wakes up waiting `ask()` caller
-//!
-//! **Key Simplification**: We only check `message.receiver_id` to determine if it's a reply. When
-//! `tell()` is called on a temporary sender ActorRef, the receiver will be that temporary sender ID,
-//! so checking receiver covers all cases. This reduces complexity from 5 checks to 1.
+//! 1. **Request Phase**: `ask()` generates a ULID correlation_id and registers a oneshot channel
+//!    in `PendingAsks`. A virtual temporary-sender `ActorId` carries the correlation_id in its name.
+//! 2. **Routing Phase**: The request is dispatched to the target actor's mailbox.
+//! 3. **Delivery Phase**: `dispatch_local_message` intercepts the reply by checking
+//!    `ActorId::is_temporary_sender()` on the receiver_id, then calls `PendingAsks::resolve()`.
+//! 4. **Waiting Phase**: `ask()` awaits the oneshot receiver and returns the reply.
 //!
 //! ### Local vs Remote
 //! - **Local**: Same process, same memory space
@@ -95,9 +84,9 @@
 //!
 //! - **Remote tell()**: Delegates to `ActorRegistry::tell()` (handles local/remote routing)
 //!
-//! - **ask()**: Delegates to `ActorRegistry::ask()` (creates temp sender + ReplyWaiter)
-//!   - Local: direct mailbox dispatch
-//!   - Remote: via ActorService.send() + ReplyWaiter
+//! - **ask()**: Delegates to `ActorRegistry::ask()` (registers oneshot channel in `PendingAsks`)
+//!   - Local: direct mailbox dispatch; reply intercepted by `dispatch_local_message`
+//!   - Remote: via gRPC `AskReply` (no `PendingAsks` entry created)
 //!
 //! **ActorService's Role:**
 //! - **gRPC Gateway**: Receives external gRPC requests and routes them into the local node
@@ -224,9 +213,7 @@
 //! - Sending is lock-free (tokio::mpsc channel)
 //! - No shared mutable state (immutable after creation)
 
-use crate::core::{
-    ActorId, ActorStateHandle, MessageSender, RequestContextExt,
-};
+use crate::core::{ActorId, ActorStateHandle, MessageSender, RequestContextExt};
 use async_trait::async_trait;
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
@@ -255,8 +242,17 @@ pub enum ActorRefError {
     SendFailed(String),
 
     /// The actor's mailbox is full and cannot accept new messages.
-    #[error("Mailbox full")]
-    MailboxFull,
+    /// `retry_after_ms` is the hint from MailboxConfig; callers should back off
+    /// at least this long before retrying. Maps to gRPC RESOURCE_EXHAUSTED (code 8).
+    #[error("Mailbox full (depth={depth}, capacity={capacity}, retry_after_ms={retry_after_ms})")]
+    MailboxFull {
+        /// Current queue depth at the time of rejection.
+        depth: usize,
+        /// Configured mailbox capacity.
+        capacity: usize,
+        /// Suggested back-off before retrying, in milliseconds.
+        retry_after_ms: u64,
+    },
 
     /// The actor has already terminated and cannot receive messages.
     #[error("Actor terminated")]
@@ -500,53 +496,6 @@ impl ActorRef {
         &self.id
     }
 
-    /// Check if this ActorRef has a waiting ReplyWaiter for the given correlation_id
-    /// and notify it with the reply message.
-    ///
-    /// ## Purpose
-    /// Used by ActorService to route replies to waiting ask() callers.
-    /// **Note**: This is a fallback method. The primary mechanism uses ReplyWaiterRegistry
-    /// for global reply routing, which handles cases where ActorRef instances differ.
-    ///
-    /// ## Returns
-    /// - true if waiter was found and notified
-    /// - false if no waiter found for this correlation_id
-    pub async fn try_notify_reply_waiter(&self, correlation_id: &str, reply: Message) -> bool {
-        let message_id = reply.id.clone();
-        let message_type = reply.message_type.clone();
-        let sender_id = reply.sender_id.clone();
-        let receiver_id = reply.receiver_id.clone();
-        // Always use ReplyWaiterRegistry - no fallback
-        if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
-            let notified = waiter_registry.notify(correlation_id, reply).await;
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                if notified {
-                    tracing::debug!(
-                        "[TRY_NOTIFY_REPLY_WAITER] Successfully notified waiter: message_id={}, message_type={}, correlation_id={}, sender_id={}, receiver_id={}",
-                        message_id, message_type, correlation_id, sender_id, receiver_id
-                    );
-                } else {
-                    tracing::debug!(
-                        "[TRY_NOTIFY_REPLY_WAITER] No waiter found: message_id={}, message_type={}, correlation_id={}, sender_id={}, receiver_id={}",
-                        message_id, message_type, correlation_id, sender_id, receiver_id
-                    );
-                }
-            }
-            return notified;
-        }
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "[TRY_NOTIFY_REPLY_WAITER] ReplyWaiterRegistry not available: message_id={}, message_type={}, correlation_id={}, sender_id={}, receiver_id={}",
-                message_id, message_type, correlation_id, sender_id, receiver_id
-            );
-        }
-        tracing::warn!(
-            "ReplyWaiterRegistry not available - cannot notify waiter for correlation_id: {}",
-            correlation_id
-        );
-        false
-    }
-
     /// Check if this is a local actor
     pub fn is_local(&self) -> bool {
         matches!(self.inner, ActorRefInner::Local { .. })
@@ -555,17 +504,6 @@ impl ActorRef {
     /// Check if this is a remote actor
     pub fn is_remote(&self) -> bool {
         matches!(self.inner, ActorRefInner::Remote { .. })
-    }
-
-    /// Check if an actor ID is a temporary sender ID (format: "{TEMP_SENDER_PREFIX}-{correlation_id}@{node_id}")
-    ///
-    /// ## Purpose
-    /// Temporary sender IDs are used when ask() is called from outside an actor context
-    /// to prevent self-messaging. They have a distinct format that never matches actor IDs.
-    fn is_temporary_sender_id(actor_id: &str) -> bool {
-        crate::core::ActorId::from_canonical(actor_id)
-            .map(|id| id.is_temporary_sender())
-            .unwrap_or(false)
     }
 
     /// Get namespace for this actor
@@ -701,25 +639,12 @@ impl ActorRef {
     /// - **Local actors**: Direct mailbox delivery (fast, microseconds)
     /// - **Remote actors**: Uses gRPC client (network, milliseconds)
     ///
-    /// ## Reply Handling via ReplyWaiterRegistry
+    /// ## Reply routing
     ///
-    /// **Important**: ReplyWaiter is NOT used for routing. Routing is handled by
-    /// `ActorService::send_reply()`. This method only routes replies to ReplyWaiter once
-    /// they arrive.
-    ///
-    /// When a reply message arrives with a correlation_id:
-    /// 1. Check if this is a REQUEST (receiver == this actor) or REPLY (receiver != this actor)
-    /// 2. If REPLY: Check ReplyWaiterRegistry for waiting ReplyWaiter with matching correlation_id
-    /// 3. If found, route reply directly to ReplyWaiter (bypasses mailbox)
-    /// 4. ReplyWaiter wakes up the waiting `ask()` caller
-    ///
-    /// **Distinguishing Requests from Replies**:
-    /// - **REQUEST**: receiver == this actor AND sender != this actor → send to mailbox
-    /// - **REPLY**: receiver != this actor (or is temporary sender ID) → check ReplyWaiterRegistry
-    ///
-    /// **Design Note**: ReplyWaiterRegistry is used (not per-ActorRef maps) to handle cases where
-    /// `ask()` is called on one ActorRef instance but the reply is routed to a different ActorRef
-    /// instance (e.g., when ActorRefs are cloned or created separately).
+    /// Replies addressed to a temporary-sender ActorId are intercepted in
+    /// `ActorRegistry::dispatch_local_message` before any mailbox lookup.
+    /// `PendingAsks::resolve()` delivers the reply directly to the waiting oneshot
+    /// channel registered by `ask()`. Normal messages are delivered to the mailbox.
     ///
     /// ## Examples
     /// ```rust,ignore
@@ -796,55 +721,6 @@ impl ActorRef {
         );
         let _guard = span.enter();
 
-        // Get ReplyWaiterRegistry once for all reply routing checks
-        let waiter_registry: Option<Arc<crate::core::ReplyWaiterRegistry>> =
-            self.service_locator().reply_waiter_registry().await;
-
-        // SIMPLIFIED ROUTING: Since we always create temporary sender for ask(), routing is simple:
-        // - If receiver is temporary sender → REPLY → route to ReplyWaiter (bypass mailbox)
-        // - Otherwise → REQUEST or normal message → send to mailbox
-        // Route replies to temporary senders via ReplyWaiter
-        // Check if receiver is a temporary sender ID (format: "{TEMP_SENDER_PREFIX}-{correlation_id}@{node_id}")
-        if Self::is_temporary_sender_id(&message.receiver_id) {
-            if !message.correlation_id.is_empty() {
-                let corr_id = &message.correlation_id;
-                if let Some(ref waiter_registry) = waiter_registry {
-                    let message_clone = message.clone();
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            "[TELL] Attempting to route reply to temporary sender: message_id={}, message_type={}, correlation_id={}, receiver={}, message_correlation_id={:?}, sender={}",
-                            message.id, message.message_type, corr_id, message.receiver_id, message.correlation_id, message.sender_id
-                        );
-                    }
-
-                    if waiter_registry.notify(corr_id, message_clone).await {
-                        if tracing::enabled!(tracing::Level::TRACE) {
-                            tracing::trace!(
-                                "[TELL] REPLY TO TEMPORARY SENDER ROUTED: correlation_id={}, receiver={}",
-                                corr_id, message.receiver_id
-                            );
-                        }
-                        return Ok(());
-                    } else {
-                        tracing::warn!(
-                            "🟢 [TELL] Failed to route reply to temporary sender: correlation_id={}, receiver={}",
-                            corr_id, message.receiver_id
-                        );
-                    }
-                } else {
-                    tracing::warn!(
-                        "🟢 [TELL] ReplyWaiterRegistry not available: correlation_id={}, receiver={}",
-                        corr_id, message.receiver_id
-                    );
-                }
-            } else {
-                return Err(ActorRefError::SendFailed(format!(
-                    "Temporary sender '{}' received reply without correlation_id",
-                    message.receiver_id
-                )));
-            }
-        }
-
         // Local node id for remote-path misconfiguration checks
         let local_node_id = self.get_local_node_id().await;
 
@@ -883,11 +759,19 @@ impl ActorRef {
                 // Use proto Message directly - no conversion needed
                 let send_result = mailbox.send(message).await
                     .map_err(|e| {
-                        tracing::error!(
-                            "🟢 [TELL] MAILBOX SEND FAILED: actor_ref_id={}, sender={:?}, receiver={}, error={}",
-                            actor_id, msg_sender, msg_receiver, e
-                        );
-                        ActorRefError::SendFailed(format!("Mailbox send failed: {}", e))
+                        use plexspaces_mailbox::MailboxError;
+                        match e {
+                            MailboxError::Full { depth, capacity, retry_after_ms } => {
+                                ActorRefError::MailboxFull { depth, capacity, retry_after_ms }
+                            }
+                            _ => {
+                                tracing::error!(
+                                    "🟢 [TELL] MAILBOX SEND FAILED: actor_ref_id={}, sender={:?}, receiver={}, error={}",
+                                    actor_id, msg_sender, msg_receiver, e
+                                );
+                                ActorRefError::SendFailed(format!("Mailbox send failed: {}", e))
+                            }
+                        }
                     });
                 if tracing::enabled!(tracing::Level::TRACE) {
                     tracing::trace!(
@@ -940,12 +824,16 @@ impl ActorRef {
                     return Err(ActorRefError::VisibilityDenied(msg));
                 }
 
-                let registry = service_locator
-                    .actor_registry()
-                    .await
-                    .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry unavailable".to_string()))?;
+                let registry = service_locator.actor_registry().await.ok_or_else(|| {
+                    ActorRefError::SendFailed("ActorRegistry unavailable".to_string())
+                })?;
                 let target_id = crate::core::ActorId::from_canonical(&self.id.to_string())
-                    .map_err(|e| ActorRefError::InvalidActorId(format!("Invalid actor ID '{}': {}", self.id, e)))?;
+                    .map_err(|e| {
+                        ActorRefError::InvalidActorId(format!(
+                            "Invalid actor ID '{}': {}",
+                            self.id, e
+                        ))
+                    })?;
                 registry
                     .tell(ctx, &target_id, message)
                     .await
@@ -977,15 +865,12 @@ impl ActorRef {
             }
             | ActorRefInner::Remote {
                 service_locator, ..
-            } => {
-                service_locator
-                    .actor_registry()
-                    .await
-                    .map(|registry| registry.local_node_id().to_string())
-            }
+            } => service_locator
+                .actor_registry()
+                .await
+                .map(|registry| registry.local_node_id().to_string()),
         }
     }
-
 
     /// Send a message and wait for a reply (request-reply pattern)
     ///
@@ -1003,30 +888,20 @@ impl ActorRef {
     /// ## How It Works
     ///
     /// ### Request Phase
-    /// 1. Generates unique `correlation_id` for this request
-    /// 2. Creates a `ReplyWaiter` and registers it in `ReplyWaiterRegistry` keyed by `correlation_id`
-    /// 3. Sets `correlation_id` in the request message
-    /// 4. For external callers (no actor): Creates a canonical temporary-sender ActorId
-    /// 5. Sends request via `tell()` (local) or gRPC (remote)
-    ///
-    /// ### Reply Routing Phase
-    /// **ReplyWaiter is NOT used for routing.** Routing is handled by `ActorService::send_reply()`:
-    ///
-    /// - **Local sender**: `send_reply()` looks up sender's ActorRef in registry → calls `tell()` on it
-    /// - **Remote sender**: `send_reply()` uses gRPC to send reply to remote node → remote `tell()` receives it
+    /// 1. Generates a ULID `correlation_id` for this request.
+    /// 2. Registers a oneshot channel in `PendingAsks` keyed by `correlation_id`.
+    /// 3. Sets `sender_id` to a virtual temporary-sender `ActorId` (no live actor created).
+    /// 4. Dispatches the request to the target actor's mailbox (local) or via gRPC AskReply (remote).
     ///
     /// ### Reply Delivery Phase
-    /// When the reply arrives at `ActorRef::tell()`:
-    /// 1. `tell()` checks if message is a REPLY (receiver != this actor) and has a `correlation_id`
-    /// 2. If REPLY: `tell()` checks `ReplyWaiterRegistry` for waiting ReplyWaiter with matching `correlation_id`
-    /// 3. If found, routes reply directly to ReplyWaiter (bypasses mailbox)
-    /// 4. ReplyWaiter stores the reply and notifies the waiting `ask()` caller
-    /// 5. `ask()` returns the reply message
+    /// 1. The target actor calls `ctx.send_reply()`, routing the reply to the temporary-sender id.
+    /// 2. `ActorRegistry::dispatch_local_message` intercepts: `ActorId::is_temporary_sender()` → true.
+    /// 3. `PendingAsks::resolve(correlation_id, reply)` fires the oneshot channel.
+    /// 4. `ask()` receives the reply via `rx.await`.
     ///
     /// ### Waiting Phase
-    /// 5. Waits for reply with timeout using `ReplyWaiter::wait()`
-    /// 6. On timeout: Cleans up ReplyWaiter and returns `ActorRefError::Timeout`
-    /// 7. On reply: Returns the reply message
+    /// Awaits the oneshot receiver with `tokio::time::timeout`. On expiry: `PendingAsks::cancel()`
+    /// is called and `ActorRefError::Timeout` is returned.
     ///
     /// ## Examples
     /// ```rust,ignore
@@ -1116,8 +991,10 @@ impl ActorRef {
                 crate::actor_registry::ActorRegistryError::Timeout => ActorRefError::Timeout,
                 crate::actor_registry::ActorRegistryError::ActorNotFound(id) => {
                     ActorRefError::ActorNotFound(
-                        crate::core::ActorId::from_canonical(&id)
-                            .unwrap_or_else(|_| crate::core::ActorId::new(&id, "unknown", "default", "unknown").unwrap_or_else(|_| target_actor_id.clone()))
+                        crate::core::ActorId::from_canonical(&id).unwrap_or_else(|_| {
+                            crate::core::ActorId::new(&id, "unknown", "default", "unknown")
+                                .unwrap_or_else(|_| target_actor_id.clone())
+                        }),
                     )
                 }
                 other => ActorRefError::SendFailed(other.to_string()),
@@ -1128,13 +1005,17 @@ impl ActorRef {
         match &result {
             Ok(_) => {
                 metrics::counter!("plexspaces_actor_ref_ask_total",
-                    "actor_id" => actor_id.to_string(),
+                    "tenant_id" => ctx.tenant_id.clone(),
+                    "namespace" => actor_id.namespace().to_string(),
+                    "actor_type" => actor_id.actor_type().to_string(),
                     "message_type" => message_type.clone(),
                     "status" => "success"
                 )
                 .increment(1);
                 metrics::histogram!("plexspaces_actor_ref_ask_duration_seconds",
-                    "actor_id" => actor_id.to_string()
+                    "tenant_id" => ctx.tenant_id.clone(),
+                    "namespace" => actor_id.namespace().to_string(),
+                    "actor_type" => actor_id.actor_type().to_string()
                 )
                 .record(duration.as_secs_f64());
                 if tracing::enabled!(tracing::Level::DEBUG) {
@@ -1148,13 +1029,17 @@ impl ActorRef {
                     _ => "other",
                 };
                 metrics::counter!("plexspaces_actor_ref_ask_total",
-                    "actor_id" => actor_id.to_string(),
+                    "tenant_id" => ctx.tenant_id.clone(),
+                    "namespace" => actor_id.namespace().to_string(),
+                    "actor_type" => actor_id.actor_type().to_string(),
                     "message_type" => message_type.clone(),
                     "status" => "error"
                 )
                 .increment(1);
                 metrics::counter!("plexspaces_actor_ref_ask_errors_total",
-                    "actor_id" => actor_id.to_string(),
+                    "tenant_id" => ctx.tenant_id.clone(),
+                    "namespace" => actor_id.namespace().to_string(),
+                    "actor_type" => actor_id.actor_type().to_string(),
                     "error_type" => error_type
                 )
                 .increment(1);
@@ -1164,7 +1049,6 @@ impl ActorRef {
 
         result
     }
-
 }
 
 impl std::fmt::Debug for ActorRef {
@@ -1322,7 +1206,7 @@ mod tests {
     pub(crate) async fn create_test_mailbox() -> Arc<Mailbox> {
         use plexspaces_mailbox::mailbox_config_default;
         Arc::new(
-            Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string())
+            Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
                 .await
                 .expect("Failed to create mailbox"),
         )
@@ -1440,7 +1324,7 @@ mod tests {
     #[tokio::test]
     async fn test_actor_ref_exposes_scope_and_local_state_handle_via_message_sender() {
         let mailbox = Arc::new(
-            Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap(),
         );
@@ -1698,7 +1582,6 @@ mod tests {
         assert!(debug_str.contains("Local"));
     }
 
-
     // ============================================================================
     // TESTS FOR NEW tell() AND ask() WITH ActorContext
     // ============================================================================
@@ -1873,12 +1756,11 @@ mod tests {
     /// TEST 13: tell() - reply routing (correlation_id) using unified API
     #[tokio::test]
     async fn test_tell_reply_routing() {
-        // Test that messages with correlation_id can be routed as replies
-        // This is handled by ReplyWaiterRegistry in the unified API
+        // Test that messages with correlation_id can be routed as replies via PendingAsks.
         let correlation_id = "test-corr-123".to_string();
         let reply_mailbox_id = format!("reply-mailbox-{}", Ulid::new());
         let _reply_mailbox = Arc::new(
-            Mailbox::new(MailboxConfig::default(), reply_mailbox_id)
+            Mailbox::new(MailboxConfig::default(), reply_mailbox_id, String::new(), String::new(), None)
                 .await
                 .expect("Failed to create reply mailbox"),
         );
@@ -1923,8 +1805,8 @@ mod tests {
         reply_message.correlation_id = correlation_id.clone();
         reply_message.sender_id = test_actor_id_string("other-actor", "node1"); // Different sender to avoid self-messaging check
 
-        // Send via ActorRef - ReplyWaiterRegistry routes it if there's a pending ask
-        // For this test, we just verify the message can be sent
+        // Send via ActorRef — PendingAsks would intercept if there's a pending ask.
+        // For this test, we just verify the message can be sent to the mailbox.
         let ctx = tell_test_ctx();
         target_ref.tell(&ctx, reply_message.clone()).await.unwrap();
 
@@ -2068,7 +1950,7 @@ mod tests {
     async fn test_ask_with_context_timeout() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        // ActorRef manages its own reply_waiters via ReplyWaiterRegistry
+        // PendingAsks (in ActorRegistry) handles oneshot channels for in-flight asks.
 
         let actor_ref = ActorRef::local(
             test_actor_id("target-actor", "node1"),
@@ -2107,7 +1989,7 @@ mod tests {
     async fn test_ask_with_context_timeout_behavior() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        // ActorRef manages its own reply_waiters via ReplyWaiterRegistry
+        // PendingAsks (in ActorRegistry) handles oneshot channels for in-flight asks.
 
         let actor_ref = ActorRef::local(
             test_actor_id("target-actor", "node1"),
@@ -2303,232 +2185,4 @@ mod tests {
         assert_ne!(actor1.node_id(), actor2.node_id());
     }
 
-    // ============================================================================
-    // PER-ACTORREF REPLY MAP TESTS (Envelope Refactoring)
-    // ============================================================================
-
-    /// TEST 21: try_notify_reply_waiter - basic functionality
-    #[tokio::test]
-    async fn test_try_notify_reply_waiter_basic() {
-        let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local(
-            test_actor_id("test-actor", "node1"),
-            "",
-            "test",
-            mailbox,
-            service_locator.clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Create a ReplyWaiter and register it in ReplyWaiterRegistry
-        let correlation_id = "corr-123".to_string();
-        let waiter = crate::core::ReplyWaiter::new();
-        let waiter_clone = waiter.clone();
-
-        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-            waiter_registry
-                .register(correlation_id.clone(), waiter)
-                .await;
-        }
-
-        // Spawn task to wait for reply
-        let wait_handle =
-            tokio::spawn(async move { waiter_clone.wait(std::time::Duration::from_secs(5)).await });
-
-        // Give the waiter time to start waiting
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        // Notify the waiter (uses ReplyWaiterRegistry)
-        let reply = create_test_message(b"reply".to_vec());
-        let notified = actor_ref
-            .try_notify_reply_waiter(&correlation_id, reply.clone())
-            .await;
-        assert!(notified, "Waiter should be notified");
-
-        // Verify reply was received
-        let received_reply = wait_handle.await.unwrap().unwrap();
-        assert_eq!(received_reply.payload, reply.payload);
-    }
-
-    /// TEST 22: try_notify_reply_waiter - unknown correlation_id
-    #[tokio::test]
-    async fn test_try_notify_reply_waiter_unknown_correlation_id() {
-        let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local(
-            test_actor_id("test-actor", "node1"),
-            "",
-            "test",
-            mailbox,
-            service_locator.clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Try to notify with unknown correlation_id
-        let reply = create_test_message(b"reply".to_vec());
-        let notified = actor_ref
-            .try_notify_reply_waiter("unknown-corr-id", reply)
-            .await;
-        assert!(!notified, "Should return false for unknown correlation_id");
-    }
-
-    /// TEST 23: try_notify_reply_waiter - multiple correlation_ids
-    #[tokio::test]
-    async fn test_try_notify_reply_waiter_multiple_correlation_ids() {
-        let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local(
-            test_actor_id("test-actor", "node1"),
-            "",
-            "test",
-            mailbox,
-            service_locator.clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register multiple waiters in ReplyWaiterRegistry
-        let corr_id1 = "corr-1".to_string();
-        let corr_id2 = "corr-2".to_string();
-        let corr_id3 = "corr-3".to_string();
-
-        let waiter1 = crate::core::ReplyWaiter::new();
-        let waiter2 = crate::core::ReplyWaiter::new();
-        let waiter3 = crate::core::ReplyWaiter::new();
-
-        let waiter1_clone = waiter1.clone();
-        let waiter2_clone = waiter2.clone();
-        let waiter3_clone = waiter3.clone();
-
-        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-            waiter_registry.register(corr_id1.clone(), waiter1).await;
-            waiter_registry.register(corr_id2.clone(), waiter2).await;
-            waiter_registry.register(corr_id3.clone(), waiter3).await;
-        }
-
-        // Spawn tasks to wait for replies
-        let wait_handle1 =
-            tokio::spawn(
-                async move { waiter1_clone.wait(std::time::Duration::from_secs(5)).await },
-            );
-        let wait_handle2 =
-            tokio::spawn(
-                async move { waiter2_clone.wait(std::time::Duration::from_secs(5)).await },
-            );
-        let wait_handle3 =
-            tokio::spawn(
-                async move { waiter3_clone.wait(std::time::Duration::from_secs(5)).await },
-            );
-
-        // Give waiters time to start
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        // Notify each waiter
-        let reply1 = create_test_message(b"reply1".to_vec());
-        let reply2 = create_test_message(b"reply2".to_vec());
-        let reply3 = create_test_message(b"reply3".to_vec());
-
-        assert!(
-            actor_ref
-                .try_notify_reply_waiter(&corr_id1, reply1.clone())
-                .await
-        );
-        assert!(
-            actor_ref
-                .try_notify_reply_waiter(&corr_id2, reply2.clone())
-                .await
-        );
-        assert!(
-            actor_ref
-                .try_notify_reply_waiter(&corr_id3, reply3.clone())
-                .await
-        );
-
-        // Verify all replies were received
-        assert_eq!(wait_handle1.await.unwrap().unwrap().payload, reply1.payload);
-        assert_eq!(wait_handle2.await.unwrap().unwrap().payload, reply2.payload);
-        assert_eq!(wait_handle3.await.unwrap().unwrap().payload, reply3.payload);
-    }
-
-    /// TEST 24: try_notify_reply_waiter - concurrent notifications
-    #[tokio::test]
-    async fn test_try_notify_reply_waiter_concurrent() {
-        let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local(
-            test_actor_id("test-actor", "node1"),
-            "",
-            "test",
-            mailbox,
-            service_locator.clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register multiple waiters in ReplyWaiterRegistry
-        let mut handles: Vec<(tokio::task::JoinHandle<bool>, String)> = Vec::new();
-
-        for i in 0..10 {
-            let corr_id = format!("corr-{}", i);
-            let waiter = crate::core::ReplyWaiter::new();
-            let _waiter_clone = waiter.clone();
-
-            if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-                waiter_registry.register(corr_id.clone(), waiter).await;
-            }
-
-            let actor_ref_clone = actor_ref.clone();
-            let corr_id_clone = corr_id.clone();
-            let handle = tokio::spawn(async move {
-                let reply = create_test_message(format!("reply-{}", i).into_bytes());
-                actor_ref_clone
-                    .try_notify_reply_waiter(&corr_id_clone, reply)
-                    .await
-            });
-
-            handles.push((handle, corr_id));
-        }
-
-        // Wait for all notifications to complete
-        for (handle, corr_id) in handles {
-            let notified = handle.await.unwrap();
-            assert!(notified, "Waiter for {} should be notified", corr_id);
-        }
-    }
-
-    /// TEST 25: try_notify_reply_waiter - timeout handling
-    #[tokio::test]
-    async fn test_try_notify_reply_waiter_timeout() {
-        let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator().await;
-        let _actor_ref = ActorRef::local(
-            test_actor_id("test-actor", "node1"),
-            "",
-            "test",
-            mailbox,
-            service_locator.clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        // Register a waiter in ReplyWaiterRegistry
-        let correlation_id = "corr-timeout".to_string();
-        let waiter = crate::core::ReplyWaiter::new();
-        let waiter_clone = waiter.clone();
-
-        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-            waiter_registry
-                .register(correlation_id.clone(), waiter)
-                .await;
-        }
-
-        // Spawn task that will timeout
-        let wait_handle = tokio::spawn(async move {
-            waiter_clone
-                .wait(std::time::Duration::from_millis(100))
-                .await
-        });
-
-        // Wait for timeout
-        let result = wait_handle.await.unwrap();
-        assert!(result.is_err(), "Should timeout");
-    }
 }

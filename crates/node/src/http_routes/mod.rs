@@ -50,7 +50,11 @@ pub fn all_http_routes(
 ) -> Router {
     let tenant_repo = auth_state.as_ref().map(|s| s.tenant_repo.clone());
     let base = actor_router(actor_service, auth_disabled, jwt_key_pair.clone())
-        .merge(node_router(service_locator.clone(), auth_disabled, jwt_key_pair.clone()))
+        .merge(node_router(
+            service_locator.clone(),
+            auth_disabled,
+            jwt_key_pair.clone(),
+        ))
         .merge(deploy_router(
             service_locator,
             node_connectivity,
@@ -118,7 +122,13 @@ fn static_apps_router(registry: StaticRegistry) -> Router {
         };
         let canonical_dir = match std::fs::canonicalize(&dir) {
             Ok(p) => p,
-            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error".to_string()).into_response(),
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error".to_string(),
+                )
+                    .into_response()
+            }
         };
         if !canonical.starts_with(&canonical_dir) {
             return (StatusCode::FORBIDDEN, "Forbidden".to_string()).into_response();
@@ -126,11 +136,7 @@ fn static_apps_router(registry: StaticRegistry) -> Router {
         match tokio::fs::read(&canonical).await {
             Ok(bytes) => {
                 let mime = mime_from_path(&canonical);
-                (
-                    [(axum::http::header::CONTENT_TYPE, mime)],
-                    bytes,
-                )
-                    .into_response()
+                ([(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response()
             }
             Err(_) => (StatusCode::NOT_FOUND, "Not Found".to_string()).into_response(),
         }
@@ -160,9 +166,7 @@ fn static_apps_router(registry: StaticRegistry) -> Router {
     }
 
     // Redirect /apps/:app_id (no trailing slash) → /apps/:app_id/
-    async fn redirect_to_slash(
-        Path(app_id): Path<String>,
-    ) -> impl IntoResponse {
+    async fn redirect_to_slash(Path(app_id): Path<String>) -> impl IntoResponse {
         let location = format!("/apps/{}/", app_id);
         (
             StatusCode::MOVED_PERMANENTLY,
@@ -187,9 +191,14 @@ mod static_serve_unit_tests {
     async fn make_registry_with_index(html: &str) -> (StaticRegistry, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
         let index_path = tmp.path().join("index.html");
-        tokio::fs::write(&index_path, html.as_bytes()).await.unwrap();
+        tokio::fs::write(&index_path, html.as_bytes())
+            .await
+            .unwrap();
         let registry: StaticRegistry = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
-        registry.write().await.insert("my-app".to_string(), tmp.path().to_path_buf());
+        registry
+            .write()
+            .await
+            .insert("my-app".to_string(), tmp.path().to_path_buf());
         (registry, tmp)
     }
 
@@ -199,18 +208,25 @@ mod static_serve_unit_tests {
         let router = static_apps_router(registry);
 
         let resp = router
-            .oneshot(Request::get("/apps/my-app/").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/apps/my-app/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let ct = resp.headers()
+        let ct = resp
+            .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         assert!(ct.contains("text/html"), "expected text/html, got: {}", ct);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(body.as_ref(), b"<html>ok</html>");
     }
 
@@ -220,12 +236,17 @@ mod static_serve_unit_tests {
         let router = static_apps_router(registry);
 
         let resp = router
-            .oneshot(Request::get("/apps/my-app").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/apps/my-app")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::MOVED_PERMANENTLY);
-        let location = resp.headers()
+        let location = resp
+            .headers()
             .get("location")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
@@ -238,7 +259,11 @@ mod static_serve_unit_tests {
         let router = static_apps_router(registry);
 
         let resp = router
-            .oneshot(Request::get("/apps/my-app/missing.txt").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/apps/my-app/missing.txt")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -251,7 +276,11 @@ mod static_serve_unit_tests {
         let router = static_apps_router(registry);
 
         let resp = router
-            .oneshot(Request::get("/apps/not-deployed/").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/apps/not-deployed/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -261,21 +290,35 @@ mod static_serve_unit_tests {
     #[tokio::test]
     async fn test_js_file_served_with_js_content_type() {
         let tmp = tempfile::TempDir::new().unwrap();
-        tokio::fs::write(tmp.path().join("client.js"), b"console.log('hi')").await.unwrap();
+        tokio::fs::write(tmp.path().join("client.js"), b"console.log('hi')")
+            .await
+            .unwrap();
         let registry: StaticRegistry = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
-        registry.write().await.insert("my-app".to_string(), tmp.path().to_path_buf());
+        registry
+            .write()
+            .await
+            .insert("my-app".to_string(), tmp.path().to_path_buf());
         let router = static_apps_router(registry);
 
         let resp = router
-            .oneshot(Request::get("/apps/my-app/client.js").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/apps/my-app/client.js")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let ct = resp.headers()
+        let ct = resp
+            .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        assert!(ct.contains("javascript"), "expected javascript, got: {}", ct);
+        assert!(
+            ct.contains("javascript"),
+            "expected javascript, got: {}",
+            ct
+        );
     }
 }

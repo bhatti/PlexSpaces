@@ -82,8 +82,18 @@ async fn wait_for_down(
 
 #[tokio::test]
 async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
-    let node1 = Arc::new(NodeBuilder::new("demonitor-node1").with_auth_disabled().build().await);
-    let node2 = Arc::new(NodeBuilder::new("demonitor-node2").with_auth_disabled().build().await);
+    let node1 = Arc::new(
+        NodeBuilder::new("demonitor-node1")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
+    let node2 = Arc::new(
+        NodeBuilder::new("demonitor-node2")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
 
@@ -91,14 +101,14 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
     let sup_id = test_runtime_actor_id("remote-s", "demonitor-node1");
 
     let sup_mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), sup_id.to_string())
+        Mailbox::new(MailboxConfig::default(), sup_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
     register_actor_with_message_sender(&node1, &sup_id, sup_mailbox).await;
 
     let worker_mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
@@ -167,8 +177,18 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
 
 #[tokio::test]
 async fn test_cross_node_link_registers_on_both_actor_registries() {
-    let node1 = Arc::new(NodeBuilder::new("link-node1").with_auth_disabled().build().await);
-    let node2 = Arc::new(NodeBuilder::new("link-node2").with_auth_disabled().build().await);
+    let node1 = Arc::new(
+        NodeBuilder::new("link-node1")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
+    let node2 = Arc::new(
+        NodeBuilder::new("link-node2")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let node1_listen = start_actor_grpc_server(node1.clone()).await;
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
@@ -177,12 +197,12 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
     let b_id = test_runtime_actor_id("link-b", "link-node2");
 
     let ma = Arc::new(
-        Mailbox::new(MailboxConfig::default(), a_id.to_string())
+        Mailbox::new(MailboxConfig::default(), a_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
     let mb = Arc::new(
-        Mailbox::new(MailboxConfig::default(), b_id.to_string())
+        Mailbox::new(MailboxConfig::default(), b_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
@@ -251,7 +271,7 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-    let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    let ctx = RequestContext::new_without_auth(String::new(), "default".to_string());
     node1
         .link(&ctx, &a_id, &b_id)
         .await
@@ -279,8 +299,18 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
 /// routing to the supervisor's canonical `ActorId`).
 #[tokio::test]
 async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
-    let node1 = Arc::new(NodeBuilder::new("down-node1").with_auth_disabled().build().await);
-    let node2 = Arc::new(NodeBuilder::new("down-node2").with_auth_disabled().build().await);
+    let node1 = Arc::new(
+        NodeBuilder::new("down-node1")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
+    let node2 = Arc::new(
+        NodeBuilder::new("down-node2")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let node1_listen = start_actor_grpc_server(node1.clone()).await;
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
@@ -289,14 +319,14 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
     let supervisor_id = test_runtime_actor_id("down-supervisor", "down-node1");
 
     let supervisor_mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), supervisor_id.to_string())
+        Mailbox::new(MailboxConfig::default(), supervisor_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
     register_actor_with_message_sender(&node1, &supervisor_id, supervisor_mailbox.clone()).await;
 
     let worker_mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
@@ -367,7 +397,7 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
     reg2.handle_actor_termination(&worker_id, ExitReason::Normal)
         .await;
 
-    let down = wait_for_down(&supervisor_mailbox, Duration::from_secs(3))
+    let down = wait_for_down(&supervisor_mailbox, Duration::from_secs(2))
         .await
         .expect("supervisor on node1 should receive __DOWN__ after remote worker termination");
     assert!(

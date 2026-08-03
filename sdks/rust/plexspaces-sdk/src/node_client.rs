@@ -234,7 +234,9 @@ impl NodeClient {
         match SystemServiceClient::connect(addr.to_string()).await {
             Ok(mut client) => {
                 // Call core SystemService.liveness_probe() API
-                let request = Request::new(LivenessProbeRequest { request_id: ulid::Ulid::new().to_string() });
+                let request = Request::new(LivenessProbeRequest {
+                    request_id: ulid::Ulid::new().to_string(),
+                });
                 match tokio_timeout(timeout_duration, client.liveness_probe(request)).await {
                     Ok(Ok(resp)) => {
                         let inner: LivenessProbeResponse = resp.into_inner();
@@ -308,7 +310,9 @@ impl NodeClient {
 
             // Call core SystemService.readiness_probe() API
             if let Some(ref mut client) = self.system_client {
-                let request = Request::new(ReadinessProbeRequest { request_id: ulid::Ulid::new().to_string() });
+                let request = Request::new(ReadinessProbeRequest {
+                    request_id: ulid::Ulid::new().to_string(),
+                });
                 match client.readiness_probe(request).await {
                     Ok(resp) => {
                         let inner: ReadinessProbeResponse = resp.into_inner();

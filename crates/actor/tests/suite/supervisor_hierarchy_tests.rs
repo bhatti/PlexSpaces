@@ -180,8 +180,7 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -213,8 +212,7 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -272,8 +270,7 @@ async fn test_startup_rollback_on_failure() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -312,8 +309,7 @@ async fn test_startup_rollback_on_failure() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -385,8 +381,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id_for_mailbox.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id_for_mailbox.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -440,8 +435,7 @@ async fn test_shutdown_brutal_kill() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -500,8 +494,7 @@ async fn test_shutdown_timeout() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -575,8 +568,7 @@ async fn test_single_child_supervisor() {
                         .build()
                         .expect("Failed to create runtime for mailbox");
                     rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     ))
                 })
                 .join()
@@ -638,8 +630,7 @@ async fn test_deep_hierarchy_4_levels() {
                             .build()
                             .expect("Failed to create runtime for mailbox");
                         rt.block_on(Mailbox::new(
-                            MailboxConfig::default(),
-                            format!("mailbox-{}", actor_id.clone()),
+                            MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                         ))
                     })
                     .join()

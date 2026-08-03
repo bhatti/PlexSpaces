@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Actor Runtime API
@@ -2595,12 +2595,13 @@ type CreateShardGroupRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
 	// Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
-	Config    *DataParallelConfig `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
-	ActorType string              `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	RequestId string              `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Config    *DataParallelConfig `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
+	ActorType string              `protobuf:"bytes,3,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
 	// Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
-	ShardConfig   *ActorConfig      `protobuf:"bytes,3,opt,name=shard_config,json=shardConfig,proto3" json:"shard_config,omitempty"`
-	InitialState  []byte            `protobuf:"bytes,4,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
-	Metadata      map[string]string `protobuf:"bytes,5,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ShardConfig   *ActorConfig      `protobuf:"bytes,4,opt,name=shard_config,json=shardConfig,proto3" json:"shard_config,omitempty"`
+	InitialState  []byte            `protobuf:"bytes,5,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
+	Metadata      map[string]string `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2633,6 +2634,13 @@ func (x *CreateShardGroupRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CreateShardGroupRequest.ProtoReflect.Descriptor instead.
 func (*CreateShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreateShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *CreateShardGroupRequest) GetConfig() *DataParallelConfig {
@@ -2672,7 +2680,8 @@ func (x *CreateShardGroupRequest) GetMetadata() map[string]string {
 
 type CreateShardGroupResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Group         *ShardGroup            `protobuf:"bytes,1,opt,name=group,proto3" json:"group,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Group         *ShardGroup            `protobuf:"bytes,2,opt,name=group,proto3" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2707,6 +2716,13 @@ func (*CreateShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{10}
 }
 
+func (x *CreateShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *CreateShardGroupResponse) GetGroup() *ShardGroup {
 	if x != nil {
 		return x.Group
@@ -2716,9 +2732,10 @@ func (x *CreateShardGroupResponse) GetGroup() *ShardGroup {
 
 type DeleteShardGroupRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	GroupId         string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	Force           bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
-	ShutdownTimeout *durationpb.Duration   `protobuf:"bytes,3,opt,name=shutdown_timeout,json=shutdownTimeout,proto3" json:"shutdown_timeout,omitempty"`
+	RequestId       string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId         string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	Force           bool                   `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
+	ShutdownTimeout *durationpb.Duration   `protobuf:"bytes,4,opt,name=shutdown_timeout,json=shutdownTimeout,proto3" json:"shutdown_timeout,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2753,6 +2770,13 @@ func (*DeleteShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{11}
 }
 
+func (x *DeleteShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *DeleteShardGroupRequest) GetGroupId() string {
 	if x != nil {
 		return x.GroupId
@@ -2776,7 +2800,8 @@ func (x *DeleteShardGroupRequest) GetShutdownTimeout() *durationpb.Duration {
 
 type GetShardGroupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId       string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2811,6 +2836,13 @@ func (*GetShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{12}
 }
 
+func (x *GetShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetShardGroupRequest) GetGroupId() string {
 	if x != nil {
 		return x.GroupId
@@ -2820,7 +2852,8 @@ func (x *GetShardGroupRequest) GetGroupId() string {
 
 type GetShardGroupResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Group         *ShardGroup            `protobuf:"bytes,1,opt,name=group,proto3" json:"group,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Group         *ShardGroup            `protobuf:"bytes,2,opt,name=group,proto3" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2855,6 +2888,13 @@ func (*GetShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{13}
 }
 
+func (x *GetShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetShardGroupResponse) GetGroup() *ShardGroup {
 	if x != nil {
 		return x.Group
@@ -2864,9 +2904,10 @@ func (x *GetShardGroupResponse) GetGroup() *ShardGroup {
 
 type ListShardGroupsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActorType     string                 `protobuf:"bytes,1,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
-	State         ShardGroupState        `protobuf:"varint,2,opt,name=state,proto3,enum=plexspaces.actor.v1.ShardGroupState" json:"state,omitempty"`
-	Page          *v1.PageRequest        `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorType     string                 `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	State         ShardGroupState        `protobuf:"varint,3,opt,name=state,proto3,enum=plexspaces.actor.v1.ShardGroupState" json:"state,omitempty"`
+	Page          *v1.PageRequest        `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2901,6 +2942,13 @@ func (*ListShardGroupsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{14}
 }
 
+func (x *ListShardGroupsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ListShardGroupsRequest) GetActorType() string {
 	if x != nil {
 		return x.ActorType
@@ -2924,8 +2972,9 @@ func (x *ListShardGroupsRequest) GetPage() *v1.PageRequest {
 
 type ListShardGroupsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Groups        []*ShardGroup          `protobuf:"bytes,1,rep,name=groups,proto3" json:"groups,omitempty"`
-	Page          *v1.PageResponse       `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Groups        []*ShardGroup          `protobuf:"bytes,2,rep,name=groups,proto3" json:"groups,omitempty"`
+	Page          *v1.PageResponse       `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2960,6 +3009,13 @@ func (*ListShardGroupsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{15}
 }
 
+func (x *ListShardGroupsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ListShardGroupsResponse) GetGroups() []*ShardGroup {
 	if x != nil {
 		return x.Groups
@@ -2976,11 +3032,12 @@ func (x *ListShardGroupsResponse) GetPage() *v1.PageResponse {
 
 type SendToShardRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	GroupId         string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	PartitionKey    []byte                 `protobuf:"bytes,2,opt,name=partition_key,json=partitionKey,proto3" json:"partition_key,omitempty"`
-	Message         *v1.Message            `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	WaitForResponse bool                   `protobuf:"varint,4,opt,name=wait_for_response,json=waitForResponse,proto3" json:"wait_for_response,omitempty"`
-	Timeout         *durationpb.Duration   `protobuf:"bytes,5,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	RequestId       string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId         string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	PartitionKey    []byte                 `protobuf:"bytes,3,opt,name=partition_key,json=partitionKey,proto3" json:"partition_key,omitempty"`
+	Message         *v1.Message            `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	WaitForResponse bool                   `protobuf:"varint,5,opt,name=wait_for_response,json=waitForResponse,proto3" json:"wait_for_response,omitempty"`
+	Timeout         *durationpb.Duration   `protobuf:"bytes,6,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -3013,6 +3070,13 @@ func (x *SendToShardRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SendToShardRequest.ProtoReflect.Descriptor instead.
 func (*SendToShardRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SendToShardRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *SendToShardRequest) GetGroupId() string {
@@ -3052,9 +3116,10 @@ func (x *SendToShardRequest) GetTimeout() *durationpb.Duration {
 
 type SendToShardResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint32                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	ShardActorId  string                 `protobuf:"bytes,2,opt,name=shard_actor_id,json=shardActorId,proto3" json:"shard_actor_id,omitempty"`
-	Response      *v1.Message            `protobuf:"bytes,3,opt,name=response,proto3" json:"response,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ShardId       uint32                 `protobuf:"varint,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	ShardActorId  string                 `protobuf:"bytes,3,opt,name=shard_actor_id,json=shardActorId,proto3" json:"shard_actor_id,omitempty"`
+	Response      *v1.Message            `protobuf:"bytes,4,opt,name=response,proto3" json:"response,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3089,6 +3154,13 @@ func (*SendToShardResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{17}
 }
 
+func (x *SendToShardResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *SendToShardResponse) GetShardId() uint32 {
 	if x != nil {
 		return x.ShardId
@@ -3112,11 +3184,12 @@ func (x *SendToShardResponse) GetResponse() *v1.Message {
 
 type ScatterGatherRequest struct {
 	state         protoimpl.MessageState        `protogen:"open.v1"`
-	GroupId       string                        `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	Query         *v1.Message                   `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
-	Timeout       *durationpb.Duration          `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	Aggregation   ShardGroupAggregationStrategy `protobuf:"varint,4,opt,name=aggregation,proto3,enum=plexspaces.actor.v1.ShardGroupAggregationStrategy" json:"aggregation,omitempty"`
-	MinResponses  uint32                        `protobuf:"varint,5,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
+	RequestId     string                        `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId       string                        `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	Query         *v1.Message                   `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"`
+	Timeout       *durationpb.Duration          `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Aggregation   ShardGroupAggregationStrategy `protobuf:"varint,5,opt,name=aggregation,proto3,enum=plexspaces.actor.v1.ShardGroupAggregationStrategy" json:"aggregation,omitempty"`
+	MinResponses  uint32                        `protobuf:"varint,6,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3149,6 +3222,13 @@ func (x *ScatterGatherRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ScatterGatherRequest.ProtoReflect.Descriptor instead.
 func (*ScatterGatherRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ScatterGatherRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ScatterGatherRequest) GetGroupId() string {
@@ -3188,12 +3268,13 @@ func (x *ScatterGatherRequest) GetMinResponses() uint32 {
 
 type ShardQueryResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint32                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	ShardActorId  string                 `protobuf:"bytes,2,opt,name=shard_actor_id,json=shardActorId,proto3" json:"shard_actor_id,omitempty"`
-	Response      *v1.Message            `protobuf:"bytes,3,opt,name=response,proto3" json:"response,omitempty"`
-	Latency       *durationpb.Duration   `protobuf:"bytes,4,opt,name=latency,proto3" json:"latency,omitempty"`
-	Success       bool                   `protobuf:"varint,5,opt,name=success,proto3" json:"success,omitempty"`
-	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ShardId       uint32                 `protobuf:"varint,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	ShardActorId  string                 `protobuf:"bytes,3,opt,name=shard_actor_id,json=shardActorId,proto3" json:"shard_actor_id,omitempty"`
+	Response      *v1.Message            `protobuf:"bytes,4,opt,name=response,proto3" json:"response,omitempty"`
+	Latency       *durationpb.Duration   `protobuf:"bytes,5,opt,name=latency,proto3" json:"latency,omitempty"`
+	Success       bool                   `protobuf:"varint,6,opt,name=success,proto3" json:"success,omitempty"`
+	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3226,6 +3307,13 @@ func (x *ShardQueryResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ShardQueryResponse.ProtoReflect.Descriptor instead.
 func (*ShardQueryResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ShardQueryResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ShardQueryResponse) GetShardId() uint32 {
@@ -3340,9 +3428,10 @@ func (x *ScatterGatherStats) GetMaxLatency() *durationpb.Duration {
 
 type ScatterGatherResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	Result         *v1.Message            `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
-	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,2,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
-	Stats          *ScatterGatherStats    `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Result         *v1.Message            `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,3,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
+	Stats          *ScatterGatherStats    `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3377,6 +3466,13 @@ func (*ScatterGatherResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{21}
 }
 
+func (x *ScatterGatherResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ScatterGatherResponse) GetResult() *v1.Message {
 	if x != nil {
 		return x.Result
@@ -3403,16 +3499,17 @@ func (x *ScatterGatherResponse) GetStats() *ScatterGatherStats {
 type BulkUpdateShardGroupRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Group to update
-	GroupId string `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId   string `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
 	// Update messages: partition_key -> message
 	// Messages will be routed to appropriate shards based on partition_key
-	Updates map[string]*v1.Message `protobuf:"bytes,2,rep,name=updates,proto3" json:"updates,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Updates map[string]*v1.Message `protobuf:"bytes,3,rep,name=updates,proto3" json:"updates,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Consistency level for updates
-	ConsistencyLevel ConsistencyLevel `protobuf:"varint,3,opt,name=consistency_level,json=consistencyLevel,proto3,enum=plexspaces.actor.v1.ConsistencyLevel" json:"consistency_level,omitempty"`
+	ConsistencyLevel ConsistencyLevel `protobuf:"varint,4,opt,name=consistency_level,json=consistencyLevel,proto3,enum=plexspaces.actor.v1.ConsistencyLevel" json:"consistency_level,omitempty"`
 	// Timeout for updates
-	Timeout *durationpb.Duration `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Timeout *durationpb.Duration `protobuf:"bytes,5,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	// Wait for responses (true = wait for all, false = fire-and-forget)
-	WaitForResponses bool `protobuf:"varint,5,opt,name=wait_for_responses,json=waitForResponses,proto3" json:"wait_for_responses,omitempty"`
+	WaitForResponses bool `protobuf:"varint,6,opt,name=wait_for_responses,json=waitForResponses,proto3" json:"wait_for_responses,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -3445,6 +3542,13 @@ func (x *BulkUpdateShardGroupRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use BulkUpdateShardGroupRequest.ProtoReflect.Descriptor instead.
 func (*BulkUpdateShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *BulkUpdateShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *BulkUpdateShardGroupRequest) GetGroupId() string {
@@ -3485,15 +3589,16 @@ func (x *BulkUpdateShardGroupRequest) GetWaitForResponses() bool {
 type BulkUpdateShardGroupResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Number of updates sent
-	UpdatesSent uint32 `protobuf:"varint,1,opt,name=updates_sent,json=updatesSent,proto3" json:"updates_sent,omitempty"`
+	RequestId   string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	UpdatesSent uint32 `protobuf:"varint,2,opt,name=updates_sent,json=updatesSent,proto3" json:"updates_sent,omitempty"`
 	// Number of successful updates
-	UpdatesSucceeded uint32 `protobuf:"varint,2,opt,name=updates_succeeded,json=updatesSucceeded,proto3" json:"updates_succeeded,omitempty"`
+	UpdatesSucceeded uint32 `protobuf:"varint,3,opt,name=updates_succeeded,json=updatesSucceeded,proto3" json:"updates_succeeded,omitempty"`
 	// Number of failed updates
-	UpdatesFailed uint32 `protobuf:"varint,3,opt,name=updates_failed,json=updatesFailed,proto3" json:"updates_failed,omitempty"`
+	UpdatesFailed uint32 `protobuf:"varint,4,opt,name=updates_failed,json=updatesFailed,proto3" json:"updates_failed,omitempty"`
 	// Per-shard statistics
-	ShardStats []*ShardUpdateStats `protobuf:"bytes,4,rep,name=shard_stats,json=shardStats,proto3" json:"shard_stats,omitempty"`
+	ShardStats []*ShardUpdateStats `protobuf:"bytes,5,rep,name=shard_stats,json=shardStats,proto3" json:"shard_stats,omitempty"`
 	// Errors (if any)
-	Errors        []string `protobuf:"bytes,5,rep,name=errors,proto3" json:"errors,omitempty"`
+	Errors        []string `protobuf:"bytes,6,rep,name=errors,proto3" json:"errors,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3526,6 +3631,13 @@ func (x *BulkUpdateShardGroupResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use BulkUpdateShardGroupResponse.ProtoReflect.Descriptor instead.
 func (*BulkUpdateShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *BulkUpdateShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *BulkUpdateShardGroupResponse) GetUpdatesSent() uint32 {
@@ -3644,13 +3756,14 @@ func (x *ShardUpdateStats) GetUpdatesFailed() uint32 {
 type MapShardGroupRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Group to map over
-	GroupId string `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId   string `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
 	// Map function message (sent to each shard)
-	MapFunction *v1.Message `protobuf:"bytes,2,opt,name=map_function,json=mapFunction,proto3" json:"map_function,omitempty"`
+	MapFunction *v1.Message `protobuf:"bytes,3,opt,name=map_function,json=mapFunction,proto3" json:"map_function,omitempty"`
 	// Timeout for map operation
-	Timeout *durationpb.Duration `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Timeout *durationpb.Duration `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	// Minimum number of shards that must respond (0 = all required)
-	MinResponses  uint32 `protobuf:"varint,4,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
+	MinResponses  uint32 `protobuf:"varint,5,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3685,6 +3798,13 @@ func (*MapShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{25}
 }
 
+func (x *MapShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *MapShardGroupRequest) GetGroupId() string {
 	if x != nil {
 		return x.GroupId
@@ -3716,9 +3836,10 @@ func (x *MapShardGroupRequest) GetMinResponses() uint32 {
 type MapShardGroupResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Mapped results from each shard
-	ShardResults []*ShardQueryResponse `protobuf:"bytes,1,rep,name=shard_results,json=shardResults,proto3" json:"shard_results,omitempty"`
+	RequestId    string                `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ShardResults []*ShardQueryResponse `protobuf:"bytes,2,rep,name=shard_results,json=shardResults,proto3" json:"shard_results,omitempty"`
 	// Statistics
-	Stats         *ScatterGatherStats `protobuf:"bytes,2,opt,name=stats,proto3" json:"stats,omitempty"`
+	Stats         *ScatterGatherStats `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3751,6 +3872,13 @@ func (x *MapShardGroupResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use MapShardGroupResponse.ProtoReflect.Descriptor instead.
 func (*MapShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *MapShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *MapShardGroupResponse) GetShardResults() []*ShardQueryResponse {
@@ -3813,10 +3941,11 @@ func (x *CollectiveTargetField) GetValuePath() string {
 
 type BroadcastShardGroupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	Message       *v1.Message            `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Timeout       *durationpb.Duration   `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	MinAcks       uint32                 `protobuf:"varint,4,opt,name=min_acks,json=minAcks,proto3" json:"min_acks,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId       string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	Message       *v1.Message            `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Timeout       *durationpb.Duration   `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	MinAcks       uint32                 `protobuf:"varint,5,opt,name=min_acks,json=minAcks,proto3" json:"min_acks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3851,6 +3980,13 @@ func (*BroadcastShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{28}
 }
 
+func (x *BroadcastShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *BroadcastShardGroupRequest) GetGroupId() string {
 	if x != nil {
 		return x.GroupId
@@ -3881,8 +4017,9 @@ func (x *BroadcastShardGroupRequest) GetMinAcks() uint32 {
 
 type BroadcastShardGroupResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,1,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
-	Stats          *ScatterGatherStats    `protobuf:"bytes,2,opt,name=stats,proto3" json:"stats,omitempty"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,2,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
+	Stats          *ScatterGatherStats    `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3917,6 +4054,13 @@ func (*BroadcastShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{29}
 }
 
+func (x *BroadcastShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *BroadcastShardGroupResponse) GetShardResponses() []*ShardQueryResponse {
 	if x != nil {
 		return x.ShardResponses
@@ -3933,12 +4077,13 @@ func (x *BroadcastShardGroupResponse) GetStats() *ScatterGatherStats {
 
 type ReduceShardGroupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	MapFunction   *v1.Message            `protobuf:"bytes,2,opt,name=map_function,json=mapFunction,proto3" json:"map_function,omitempty"`
-	Timeout       *durationpb.Duration   `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	MinResponses  uint32                 `protobuf:"varint,4,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
-	Reduction     CollectiveReduction    `protobuf:"varint,5,opt,name=reduction,proto3,enum=plexspaces.actor.v1.CollectiveReduction" json:"reduction,omitempty"`
-	Target        *CollectiveTargetField `protobuf:"bytes,6,opt,name=target,proto3" json:"target,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId       string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	MapFunction   *v1.Message            `protobuf:"bytes,3,opt,name=map_function,json=mapFunction,proto3" json:"map_function,omitempty"`
+	Timeout       *durationpb.Duration   `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	MinResponses  uint32                 `protobuf:"varint,5,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
+	Reduction     CollectiveReduction    `protobuf:"varint,6,opt,name=reduction,proto3,enum=plexspaces.actor.v1.CollectiveReduction" json:"reduction,omitempty"`
+	Target        *CollectiveTargetField `protobuf:"bytes,7,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3971,6 +4116,13 @@ func (x *ReduceShardGroupRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ReduceShardGroupRequest.ProtoReflect.Descriptor instead.
 func (*ReduceShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ReduceShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ReduceShardGroupRequest) GetGroupId() string {
@@ -4017,9 +4169,10 @@ func (x *ReduceShardGroupRequest) GetTarget() *CollectiveTargetField {
 
 type ReduceShardGroupResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	Result         *v1.Message            `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
-	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,2,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
-	Stats          *ScatterGatherStats    `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Result         *v1.Message            `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,3,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
+	Stats          *ScatterGatherStats    `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4054,6 +4207,13 @@ func (*ReduceShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{31}
 }
 
+func (x *ReduceShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ReduceShardGroupResponse) GetResult() *v1.Message {
 	if x != nil {
 		return x.Result
@@ -4077,12 +4237,13 @@ func (x *ReduceShardGroupResponse) GetStats() *ScatterGatherStats {
 
 type AllReduceShardGroupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	MapFunction   *v1.Message            `protobuf:"bytes,2,opt,name=map_function,json=mapFunction,proto3" json:"map_function,omitempty"`
-	Timeout       *durationpb.Duration   `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	MinResponses  uint32                 `protobuf:"varint,4,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
-	Reduction     CollectiveReduction    `protobuf:"varint,5,opt,name=reduction,proto3,enum=plexspaces.actor.v1.CollectiveReduction" json:"reduction,omitempty"`
-	Target        *CollectiveTargetField `protobuf:"bytes,6,opt,name=target,proto3" json:"target,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId       string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	MapFunction   *v1.Message            `protobuf:"bytes,3,opt,name=map_function,json=mapFunction,proto3" json:"map_function,omitempty"`
+	Timeout       *durationpb.Duration   `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	MinResponses  uint32                 `protobuf:"varint,5,opt,name=min_responses,json=minResponses,proto3" json:"min_responses,omitempty"`
+	Reduction     CollectiveReduction    `protobuf:"varint,6,opt,name=reduction,proto3,enum=plexspaces.actor.v1.CollectiveReduction" json:"reduction,omitempty"`
+	Target        *CollectiveTargetField `protobuf:"bytes,7,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4115,6 +4276,13 @@ func (x *AllReduceShardGroupRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use AllReduceShardGroupRequest.ProtoReflect.Descriptor instead.
 func (*AllReduceShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *AllReduceShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *AllReduceShardGroupRequest) GetGroupId() string {
@@ -4161,9 +4329,10 @@ func (x *AllReduceShardGroupRequest) GetTarget() *CollectiveTargetField {
 
 type AllReduceShardGroupResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	Result         *v1.Message            `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
-	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,2,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
-	Stats          *ScatterGatherStats    `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Result         *v1.Message            `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,3,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
+	Stats          *ScatterGatherStats    `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4198,6 +4367,13 @@ func (*AllReduceShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{33}
 }
 
+func (x *AllReduceShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *AllReduceShardGroupResponse) GetResult() *v1.Message {
 	if x != nil {
 		return x.Result
@@ -4221,11 +4397,12 @@ func (x *AllReduceShardGroupResponse) GetStats() *ScatterGatherStats {
 
 type BarrierShardGroupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	BarrierId     string                 `protobuf:"bytes,2,opt,name=barrier_id,json=barrierId,proto3" json:"barrier_id,omitempty"`
-	Round         uint64                 `protobuf:"varint,3,opt,name=round,proto3" json:"round,omitempty"`
-	Timeout       *durationpb.Duration   `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	MinAcks       uint32                 `protobuf:"varint,5,opt,name=min_acks,json=minAcks,proto3" json:"min_acks,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId       string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	BarrierId     string                 `protobuf:"bytes,3,opt,name=barrier_id,json=barrierId,proto3" json:"barrier_id,omitempty"`
+	Round         uint64                 `protobuf:"varint,4,opt,name=round,proto3" json:"round,omitempty"`
+	Timeout       *durationpb.Duration   `protobuf:"bytes,5,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	MinAcks       uint32                 `protobuf:"varint,6,opt,name=min_acks,json=minAcks,proto3" json:"min_acks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4258,6 +4435,13 @@ func (x *BarrierShardGroupRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use BarrierShardGroupRequest.ProtoReflect.Descriptor instead.
 func (*BarrierShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *BarrierShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *BarrierShardGroupRequest) GetGroupId() string {
@@ -4297,8 +4481,9 @@ func (x *BarrierShardGroupRequest) GetMinAcks() uint32 {
 
 type BarrierShardGroupResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,1,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
-	Stats          *ScatterGatherStats    `protobuf:"bytes,2,opt,name=stats,proto3" json:"stats,omitempty"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ShardResponses []*ShardQueryResponse  `protobuf:"bytes,2,rep,name=shard_responses,json=shardResponses,proto3" json:"shard_responses,omitempty"`
+	Stats          *ScatterGatherStats    `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4333,6 +4518,13 @@ func (*BarrierShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{35}
 }
 
+func (x *BarrierShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *BarrierShardGroupResponse) GetShardResponses() []*ShardQueryResponse {
 	if x != nil {
 		return x.ShardResponses
@@ -4351,13 +4543,14 @@ func (x *BarrierShardGroupResponse) GetStats() *ScatterGatherStats {
 type ScaleShardGroupRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Group to scale
-	GroupId string `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	GroupId   string `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
 	// New shard count
-	NewShardCount uint32 `protobuf:"varint,2,opt,name=new_shard_count,json=newShardCount,proto3" json:"new_shard_count,omitempty"`
+	NewShardCount uint32 `protobuf:"varint,3,opt,name=new_shard_count,json=newShardCount,proto3" json:"new_shard_count,omitempty"`
 	// Rebalancing policy
-	RebalancePolicy RebalancePolicy `protobuf:"varint,3,opt,name=rebalance_policy,json=rebalancePolicy,proto3,enum=plexspaces.actor.v1.RebalancePolicy" json:"rebalance_policy,omitempty"`
+	RebalancePolicy RebalancePolicy `protobuf:"varint,4,opt,name=rebalance_policy,json=rebalancePolicy,proto3,enum=plexspaces.actor.v1.RebalancePolicy" json:"rebalance_policy,omitempty"`
 	// Configuration for new shards (if scaling up)
-	NewShardConfig *ActorConfig `protobuf:"bytes,4,opt,name=new_shard_config,json=newShardConfig,proto3" json:"new_shard_config,omitempty"`
+	NewShardConfig *ActorConfig `protobuf:"bytes,5,opt,name=new_shard_config,json=newShardConfig,proto3" json:"new_shard_config,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4392,6 +4585,13 @@ func (*ScaleShardGroupRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{36}
 }
 
+func (x *ScaleShardGroupRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ScaleShardGroupRequest) GetGroupId() string {
 	if x != nil {
 		return x.GroupId
@@ -4423,9 +4623,10 @@ func (x *ScaleShardGroupRequest) GetNewShardConfig() *ActorConfig {
 type ScaleShardGroupResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Updated shard group
-	Group *ShardGroup `protobuf:"bytes,1,opt,name=group,proto3" json:"group,omitempty"`
+	RequestId string      `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Group     *ShardGroup `protobuf:"bytes,2,opt,name=group,proto3" json:"group,omitempty"`
 	// Rebalancing status
-	RebalanceStatus *RebalanceStatus `protobuf:"bytes,2,opt,name=rebalance_status,json=rebalanceStatus,proto3" json:"rebalance_status,omitempty"`
+	RebalanceStatus *RebalanceStatus `protobuf:"bytes,3,opt,name=rebalance_status,json=rebalanceStatus,proto3" json:"rebalance_status,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -4458,6 +4659,13 @@ func (x *ScaleShardGroupResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ScaleShardGroupResponse.ProtoReflect.Descriptor instead.
 func (*ScaleShardGroupResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *ScaleShardGroupResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ScaleShardGroupResponse) GetGroup() *ShardGroup {
@@ -4570,13 +4778,14 @@ func (x *ActorMetrics) GetCpuUsagePercent() float64 {
 type SpawnActorRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Full spawn contract: identity, role, namespace, tenant_id, behavior_kind, args, facets, labels, config, visibility.
-	Spec *ActorSpawnSpec `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"`
+	RequestId string          `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Spec      *ActorSpawnSpec `protobuf:"bytes,2,opt,name=spec,proto3" json:"spec,omitempty"`
 	// Optional namespace override for this RPC only.
 	// If non-empty, the server merges this into spec.namespace for the spawn operation; if empty, spec.namespace is used.
-	Namespace string `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Namespace string `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// Number of identical replicas to spawn (default: 1 when 0).
 	// When > 1, spawns N actors with auto-generated instance names derived from spec.identity.name (prefix pattern).
-	InstancesCount uint32 `protobuf:"varint,3,opt,name=instances_count,json=instancesCount,proto3" json:"instances_count,omitempty"`
+	InstancesCount uint32 `protobuf:"varint,4,opt,name=instances_count,json=instancesCount,proto3" json:"instances_count,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4609,6 +4818,13 @@ func (x *SpawnActorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SpawnActorRequest.ProtoReflect.Descriptor instead.
 func (*SpawnActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *SpawnActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *SpawnActorRequest) GetSpec() *ActorSpawnSpec {
@@ -4651,10 +4867,11 @@ type SpawnActorResponse struct {
 	// Reference to spawned actor (format: "actor_id@node_id")
 	// Example: "general-1@node2", "worker-abc@prod-7"
 	// Use this for messaging: actor_ref.tell(msg), actor_ref.ask(msg)
-	ActorRef string `protobuf:"bytes,1,opt,name=actor_ref,json=actorRef,proto3" json:"actor_ref,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorRef  string `protobuf:"bytes,2,opt,name=actor_ref,json=actorRef,proto3" json:"actor_ref,omitempty"`
 	// Full actor details (state, config, metrics)
 	// Useful for inspection and monitoring
-	Actor         *Actor `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
+	Actor         *Actor `protobuf:"bytes,3,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4689,6 +4906,13 @@ func (*SpawnActorResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{40}
 }
 
+func (x *SpawnActorResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *SpawnActorResponse) GetActorRef() string {
 	if x != nil {
 		return x.ActorRef
@@ -4705,7 +4929,8 @@ func (x *SpawnActorResponse) GetActor() *Actor {
 
 type SpawnActorsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Requests      []*SpawnActorRequest   `protobuf:"bytes,1,rep,name=requests,proto3" json:"requests,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Requests      []*SpawnActorRequest   `protobuf:"bytes,2,rep,name=requests,proto3" json:"requests,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4738,6 +4963,13 @@ func (x *SpawnActorsRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SpawnActorsRequest.ProtoReflect.Descriptor instead.
 func (*SpawnActorsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *SpawnActorsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *SpawnActorsRequest) GetRequests() []*SpawnActorRequest {
@@ -4809,7 +5041,8 @@ func (x *SpawnActorResult) GetResponse() *SpawnActorResponse {
 
 type SpawnActorsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Results       []*SpawnActorResult    `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Results       []*SpawnActorResult    `protobuf:"bytes,2,rep,name=results,proto3" json:"results,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4844,6 +5077,13 @@ func (*SpawnActorsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{43}
 }
 
+func (x *SpawnActorsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *SpawnActorsResponse) GetResults() []*SpawnActorResult {
 	if x != nil {
 		return x.Results
@@ -4853,10 +5093,11 @@ func (x *SpawnActorsResponse) GetResults() []*SpawnActorResult {
 
 // Request to get an actor
 type GetActorRequest struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	ActorId string                 `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId   string                 `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	// Namespace for tenant isolation (tenant_id from JWT)
-	Namespace     string `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Namespace     string `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4891,6 +5132,13 @@ func (*GetActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{44}
 }
 
+func (x *GetActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetActorRequest) GetActorId() string {
 	if x != nil {
 		return x.ActorId
@@ -4907,7 +5155,8 @@ func (x *GetActorRequest) GetNamespace() string {
 
 type GetActorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actor         *Actor                 `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Actor         *Actor                 `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4942,6 +5191,13 @@ func (*GetActorResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{45}
 }
 
+func (x *GetActorResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetActorResponse) GetActor() *Actor {
 	if x != nil {
 		return x.Actor
@@ -4952,13 +5208,14 @@ func (x *GetActorResponse) GetActor() *Actor {
 // Request to list actors
 type ListActorsRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
-	PageRequest *v1.PageRequest        `protobuf:"bytes,1,opt,name=page_request,json=pageRequest,proto3" json:"page_request,omitempty"`
-	ActorType   string                 `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
-	State       ActorState             `protobuf:"varint,3,opt,name=state,proto3,enum=plexspaces.actor.v1.ActorState" json:"state,omitempty"`
-	NodeId      string                 `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	RequestId   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	PageRequest *v1.PageRequest        `protobuf:"bytes,2,opt,name=page_request,json=pageRequest,proto3" json:"page_request,omitempty"`
+	ActorType   string                 `protobuf:"bytes,3,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	State       ActorState             `protobuf:"varint,4,opt,name=state,proto3,enum=plexspaces.actor.v1.ActorState" json:"state,omitempty"`
+	NodeId      string                 `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	// Namespace for tenant isolation (tenant_id from JWT)
 	// Only actors in this namespace will be returned
-	Namespace     string `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Namespace     string `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4991,6 +5248,13 @@ func (x *ListActorsRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ListActorsRequest.ProtoReflect.Descriptor instead.
 func (*ListActorsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ListActorsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ListActorsRequest) GetPageRequest() *v1.PageRequest {
@@ -5030,8 +5294,9 @@ func (x *ListActorsRequest) GetNamespace() string {
 
 type ListActorsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actors        []*Actor               `protobuf:"bytes,1,rep,name=actors,proto3" json:"actors,omitempty"`
-	PageResponse  *v1.PageResponse       `protobuf:"bytes,2,opt,name=page_response,json=pageResponse,proto3" json:"page_response,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Actors        []*Actor               `protobuf:"bytes,2,rep,name=actors,proto3" json:"actors,omitempty"`
+	PageResponse  *v1.PageResponse       `protobuf:"bytes,3,opt,name=page_response,json=pageResponse,proto3" json:"page_response,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5066,6 +5331,13 @@ func (*ListActorsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{47}
 }
 
+func (x *ListActorsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ListActorsResponse) GetActors() []*Actor {
 	if x != nil {
 		return x.Actors
@@ -5084,32 +5356,33 @@ func (x *ListActorsResponse) GetPageResponse() *v1.PageResponse {
 type SendMessageRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
-	Namespace string `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Namespace string `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// Actor type or actor id to target.
 	// If this value contains '@', it is treated as a direct actor id first.
-	ActorType string `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	ActorType string `protobuf:"bytes,3,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
 	// Optional HTTP method metadata for gateway-originated requests.
-	HttpMethod string `protobuf:"bytes,3,opt,name=http_method,json=httpMethod,proto3" json:"http_method,omitempty"`
+	HttpMethod string `protobuf:"bytes,4,opt,name=http_method,json=httpMethod,proto3" json:"http_method,omitempty"`
 	// Request payload bytes.
-	Payload []byte `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Payload []byte `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	// Request headers or message metadata.
-	Headers map[string]string `protobuf:"bytes,5,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Headers map[string]string `protobuf:"bytes,6,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Query parameters from HTTP requests.
-	QueryParams map[string]string `protobuf:"bytes,6,rep,name=query_params,json=queryParams,proto3" json:"query_params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	QueryParams map[string]string `protobuf:"bytes,7,rep,name=query_params,json=queryParams,proto3" json:"query_params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Full request path for gateway-originated requests.
-	Path string `protobuf:"bytes,7,opt,name=path,proto3" json:"path,omitempty"`
+	Path string `protobuf:"bytes,8,opt,name=path,proto3" json:"path,omitempty"`
 	// Remaining path segment after actor_type.
-	Subpath string `protobuf:"bytes,8,opt,name=subpath,proto3" json:"subpath,omitempty"`
+	Subpath string `protobuf:"bytes,9,opt,name=subpath,proto3" json:"subpath,omitempty"`
 	// Optional sender actor id for remoting and tracing.
-	SenderId string `protobuf:"bytes,9,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	SenderId string `protobuf:"bytes,10,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
 	// Optional application or transport message type.
-	MessageType string `protobuf:"bytes,10,opt,name=message_type,json=messageType,proto3" json:"message_type,omitempty"`
+	MessageType string `protobuf:"bytes,11,opt,name=message_type,json=messageType,proto3" json:"message_type,omitempty"`
 	// Optional correlation id preserved for remoting.
-	CorrelationId string `protobuf:"bytes,11,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	CorrelationId string `protobuf:"bytes,12,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
 	// Optional reply_to preserved for remoting.
-	ReplyTo string `protobuf:"bytes,12,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
+	ReplyTo string `protobuf:"bytes,13,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
 	// Optional client-provided message id.
-	MessageId string `protobuf:"bytes,13,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	MessageId string `protobuf:"bytes,14,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	// Optional actor instance name. When set together with actor_type and namespace,
 	// the handler constructs the canonical actor ID directly:
 	//
@@ -5117,7 +5390,7 @@ type SendMessageRequest struct {
 	//
 	// This avoids ambiguous lookups and makes addressing explicit.
 	// If empty, falls back to registry lookup by actor_type within the namespace.
-	ActorName     string `protobuf:"bytes,20,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
+	ActorName     string `protobuf:"bytes,21,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5150,6 +5423,13 @@ func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SendMessageRequest.ProtoReflect.Descriptor instead.
 func (*SendMessageRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *SendMessageRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *SendMessageRequest) GetNamespace() string {
@@ -5252,10 +5532,11 @@ func (x *SendMessageRequest) GetActorName() string {
 
 type SendMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	MessageId     string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	ActorId       string                 `protobuf:"bytes,3,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	MessageId     string                 `protobuf:"bytes,3,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	ActorId       string                 `protobuf:"bytes,4,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5290,6 +5571,13 @@ func (*SendMessageResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{49}
 }
 
+func (x *SendMessageResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *SendMessageResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
@@ -5320,10 +5608,11 @@ func (x *SendMessageResponse) GetErrorMessage() string {
 
 // Request for streaming messages (high-throughput)
 type StreamMessageRequest struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Message *v1.Message            `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Message   *v1.Message            `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	// Sequence number for ordering (client-generated)
-	Sequence      uint64 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Sequence      uint64 `protobuf:"varint,3,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5358,6 +5647,13 @@ func (*StreamMessageRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{50}
 }
 
+func (x *StreamMessageRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *StreamMessageRequest) GetMessage() *v1.Message {
 	if x != nil {
 		return x.Message
@@ -5375,13 +5671,14 @@ func (x *StreamMessageRequest) GetSequence() uint64 {
 // Response for streaming messages
 type StreamMessageResponse struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
-	MessageId string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	MessageId string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	// Acknowledgement of sequence number
-	Sequence uint64 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Sequence uint64 `protobuf:"varint,3,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	// Status: "delivered", "failed", "queued"
-	Status string `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Status string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
 	// Optional error message
-	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Error         string `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5416,6 +5713,13 @@ func (*StreamMessageResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{51}
 }
 
+func (x *StreamMessageResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *StreamMessageResponse) GetMessageId() string {
 	if x != nil {
 		return x.MessageId
@@ -5446,11 +5750,12 @@ func (x *StreamMessageResponse) GetError() string {
 
 // Request to delete actor
 type DeleteActorRequest struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	ActorId string                 `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	Force   bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId   string                 `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	Force     bool                   `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
 	// Namespace for tenant isolation (tenant_id from JWT)
-	Namespace     string `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Namespace     string `protobuf:"bytes,4,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5483,6 +5788,13 @@ func (x *DeleteActorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DeleteActorRequest.ProtoReflect.Descriptor instead.
 func (*DeleteActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *DeleteActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *DeleteActorRequest) GetActorId() string {
@@ -6207,9 +6519,10 @@ func (x *ActorMigrating) GetTargetNode() string {
 //     for forward compatibility with a possible push-style callback path.
 type MonitorActorRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
-	ActorId            string                 `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	SupervisorId       string                 `protobuf:"bytes,2,opt,name=supervisor_id,json=supervisorId,proto3" json:"supervisor_id,omitempty"`
-	SupervisorCallback string                 `protobuf:"bytes,3,opt,name=supervisor_callback,json=supervisorCallback,proto3" json:"supervisor_callback,omitempty"`
+	RequestId          string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId            string                 `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	SupervisorId       string                 `protobuf:"bytes,3,opt,name=supervisor_id,json=supervisorId,proto3" json:"supervisor_id,omitempty"`
+	SupervisorCallback string                 `protobuf:"bytes,4,opt,name=supervisor_callback,json=supervisorCallback,proto3" json:"supervisor_callback,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -6242,6 +6555,13 @@ func (x *MonitorActorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use MonitorActorRequest.ProtoReflect.Descriptor instead.
 func (*MonitorActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *MonitorActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *MonitorActorRequest) GetActorId() string {
@@ -6278,7 +6598,8 @@ func (x *MonitorActorRequest) GetSupervisorCallback() string {
 // - Can be used for future demonitor() operation
 type MonitorActorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	MonitorRef    string                 `protobuf:"bytes,1,opt,name=monitor_ref,json=monitorRef,proto3" json:"monitor_ref,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	MonitorRef    string                 `protobuf:"bytes,2,opt,name=monitor_ref,json=monitorRef,proto3" json:"monitor_ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6313,6 +6634,13 @@ func (*MonitorActorResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{63}
 }
 
+func (x *MonitorActorResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *MonitorActorResponse) GetMonitorRef() string {
 	if x != nil {
 		return x.MonitorRef
@@ -6328,9 +6656,10 @@ func (x *MonitorActorResponse) GetMonitorRef() string {
 // returned by MonitorActor.
 type DemonitorActorRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActorId       string                 `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	SupervisorId  string                 `protobuf:"bytes,2,opt,name=supervisor_id,json=supervisorId,proto3" json:"supervisor_id,omitempty"`
-	MonitorRef    string                 `protobuf:"bytes,3,opt,name=monitor_ref,json=monitorRef,proto3" json:"monitor_ref,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId       string                 `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	SupervisorId  string                 `protobuf:"bytes,3,opt,name=supervisor_id,json=supervisorId,proto3" json:"supervisor_id,omitempty"`
+	MonitorRef    string                 `protobuf:"bytes,4,opt,name=monitor_ref,json=monitorRef,proto3" json:"monitor_ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6363,6 +6692,13 @@ func (x *DemonitorActorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DemonitorActorRequest.ProtoReflect.Descriptor instead.
 func (*DemonitorActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *DemonitorActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *DemonitorActorRequest) GetActorId() string {
@@ -6494,7 +6830,8 @@ func (x *ActorDownNotification) GetIsLinkSignal() bool {
 type GetActorStatesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// List of canonical actor IDs to check
-	ActorIds      []string `protobuf:"bytes,1,rep,name=actor_ids,json=actorIds,proto3" json:"actor_ids,omitempty"`
+	RequestId     string   `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorIds      []string `protobuf:"bytes,2,rep,name=actor_ids,json=actorIds,proto3" json:"actor_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6529,6 +6866,13 @@ func (*GetActorStatesRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{66}
 }
 
+func (x *GetActorStatesRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *GetActorStatesRequest) GetActorIds() []string {
 	if x != nil {
 		return x.ActorIds
@@ -6541,7 +6885,8 @@ type GetActorStatesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Map of canonical actor_id -> ActorState (uses existing ActorState enum)
 	// ACTOR_STATE_UNSPECIFIED / ACTOR_STATE_TERMINATED / not present = actor not found on this node
-	States        map[string]ActorState `protobuf:"bytes,1,rep,name=states,proto3" json:"states,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value,enum=plexspaces.actor.v1.ActorState"`
+	RequestId     string                `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	States        map[string]ActorState `protobuf:"bytes,2,rep,name=states,proto3" json:"states,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value,enum=plexspaces.actor.v1.ActorState"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6574,6 +6919,13 @@ func (x *GetActorStatesResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetActorStatesResponse.ProtoReflect.Descriptor instead.
 func (*GetActorStatesResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *GetActorStatesResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *GetActorStatesResponse) GetStates() map[string]ActorState {
@@ -6705,8 +7057,9 @@ func (x *ActorLink) GetMetadata() map[string]string {
 // / ```
 type LinkActorRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActorId       string                 `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	LinkedActorId string                 `protobuf:"bytes,2,opt,name=linked_actor_id,json=linkedActorId,proto3" json:"linked_actor_id,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId       string                 `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	LinkedActorId string                 `protobuf:"bytes,3,opt,name=linked_actor_id,json=linkedActorId,proto3" json:"linked_actor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6741,6 +7094,13 @@ func (*LinkActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{69}
 }
 
+func (x *LinkActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *LinkActorRequest) GetActorId() string {
 	if x != nil {
 		return x.ActorId
@@ -6758,7 +7118,8 @@ func (x *LinkActorRequest) GetLinkedActorId() string {
 // / Response to LinkActor request
 type LinkActorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6793,6 +7154,13 @@ func (*LinkActorResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{70}
 }
 
+func (x *LinkActorResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *LinkActorResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
@@ -6810,8 +7178,9 @@ func (x *LinkActorResponse) GetSuccess() bool {
 // / Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
 type UnlinkActorRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActorId       string                 `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	LinkedActorId string                 `protobuf:"bytes,2,opt,name=linked_actor_id,json=linkedActorId,proto3" json:"linked_actor_id,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId       string                 `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	LinkedActorId string                 `protobuf:"bytes,3,opt,name=linked_actor_id,json=linkedActorId,proto3" json:"linked_actor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6846,6 +7215,13 @@ func (*UnlinkActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{71}
 }
 
+func (x *UnlinkActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *UnlinkActorRequest) GetActorId() string {
 	if x != nil {
 		return x.ActorId
@@ -6863,7 +7239,8 @@ func (x *UnlinkActorRequest) GetLinkedActorId() string {
 // / Response to UnlinkActor request
 type UnlinkActorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6898,6 +7275,13 @@ func (*UnlinkActorResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{72}
 }
 
+func (x *UnlinkActorResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *UnlinkActorResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
@@ -6909,7 +7293,8 @@ func (x *UnlinkActorResponse) GetSuccess() bool {
 type CheckActorExistsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Actor ID to check
-	ActorId       string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId       string `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6944,6 +7329,13 @@ func (*CheckActorExistsRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{73}
 }
 
+func (x *CheckActorExistsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *CheckActorExistsRequest) GetActorId() string {
 	if x != nil {
 		return x.ActorId
@@ -6955,11 +7347,12 @@ func (x *CheckActorExistsRequest) GetActorId() string {
 type CheckActorExistsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Actor exists (virtual or active)
-	Exists bool `protobuf:"varint,1,opt,name=exists,proto3" json:"exists,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Exists    bool   `protobuf:"varint,2,opt,name=exists,proto3" json:"exists,omitempty"`
 	// Actor is currently active (in memory)
-	IsActive bool `protobuf:"varint,2,opt,name=is_active,json=isActive,proto3" json:"is_active,omitempty"`
+	IsActive bool `protobuf:"varint,3,opt,name=is_active,json=isActive,proto3" json:"is_active,omitempty"`
 	// Actor has VirtualActorFacet (is virtual)
-	IsVirtual     bool `protobuf:"varint,3,opt,name=is_virtual,json=isVirtual,proto3" json:"is_virtual,omitempty"`
+	IsVirtual     bool `protobuf:"varint,4,opt,name=is_virtual,json=isVirtual,proto3" json:"is_virtual,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6992,6 +7385,13 @@ func (x *CheckActorExistsResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CheckActorExistsResponse.ProtoReflect.Descriptor instead.
 func (*CheckActorExistsResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{74}
+}
+
+func (x *CheckActorExistsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *CheckActorExistsResponse) GetExists() bool {
@@ -7029,54 +7429,55 @@ type AskReplyRequest struct {
 	// Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
 	// Can be empty - defaults to empty string if not provided
 	// Tenant ID comes from gRPC auth (JWT middleware) or default config, not from request
-	Namespace string `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Namespace string `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})
 	// Used to lookup actors via ActorRegistry discover_actors_by_type
-	ActorType string `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	ActorType string `protobuf:"bytes,3,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
 	// HTTP method metadata (GET, POST, or PUT)
-	HttpMethod string `protobuf:"bytes,3,opt,name=http_method,json=httpMethod,proto3" json:"http_method,omitempty"`
+	HttpMethod string `protobuf:"bytes,4,opt,name=http_method,json=httpMethod,proto3" json:"http_method,omitempty"`
 	// Request payload
 	// For GET: JSON string of query parameters
 	// For POST/PUT: Request body bytes
-	Payload []byte `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Payload []byte `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	// HTTP headers
 	// Converted from HTTP request headers
-	Headers map[string]string `protobuf:"bytes,5,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Headers map[string]string `protobuf:"bytes,6,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Query parameters (for GET requests)
 	// Converted to JSON and stored in payload
-	QueryParams map[string]string `protobuf:"bytes,6,rep,name=query_params,json=queryParams,proto3" json:"query_params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	QueryParams map[string]string `protobuf:"bytes,7,rep,name=query_params,json=queryParams,proto3" json:"query_params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Full HTTP path for the request (optional)
 	// Example: "/api/v1/actors/default/counter/custom/path"
 	// Allows actors to perform custom routing based on the complete URL
-	Path string `protobuf:"bytes,7,opt,name=path,proto3" json:"path,omitempty"`
+	Path string `protobuf:"bytes,8,opt,name=path,proto3" json:"path,omitempty"`
 	// Subpath after the actor_type segment (optional)
 	// Example: for "/api/v1/actors/default/counter/metrics/latest"
 	//
 	//	subpath = "metrics/latest"
 	//
 	// This will be used in future for advanced per-actor routing capabilities.
-	Subpath string `protobuf:"bytes,8,opt,name=subpath,proto3" json:"subpath,omitempty"`
+	Subpath string `protobuf:"bytes,9,opt,name=subpath,proto3" json:"subpath,omitempty"`
 	// Optional sender actor id for remoting and tracing.
-	SenderId string `protobuf:"bytes,9,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	SenderId string `protobuf:"bytes,10,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
 	// Optional transport message type.
-	MessageType string `protobuf:"bytes,10,opt,name=message_type,json=messageType,proto3" json:"message_type,omitempty"`
+	MessageType string `protobuf:"bytes,11,opt,name=message_type,json=messageType,proto3" json:"message_type,omitempty"`
 	// Optional correlation id preserved for remoting.
-	CorrelationId string `protobuf:"bytes,11,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	CorrelationId string `protobuf:"bytes,12,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
 	// Optional reply_to preserved for remoting.
-	ReplyTo string `protobuf:"bytes,12,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
+	ReplyTo string `protobuf:"bytes,13,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
 	// Optional client-provided message id.
-	MessageId string `protobuf:"bytes,13,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	MessageId string `protobuf:"bytes,14,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	// Optional timeout for request-reply (ask) operations.
 	// Defaults to 5 seconds if not specified. Use for long-running operations like training.
 	// HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
-	Timeout *durationpb.Duration `protobuf:"bytes,14,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Timeout *durationpb.Duration `protobuf:"bytes,15,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	// Optional actor instance name. When set together with actor_type and namespace,
 	// the handler constructs the canonical actor ID directly:
 	//
 	//	actor_name//actor_type::namespace@node_id
 	//
 	// If empty, falls back to registry lookup by actor_type within the namespace.
-	ActorName     string `protobuf:"bytes,20,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
+	ActorName     string `protobuf:"bytes,21,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7109,6 +7510,13 @@ func (x *AskReplyRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use AskReplyRequest.ProtoReflect.Descriptor instead.
 func (*AskReplyRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{75}
+}
+
+func (x *AskReplyRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *AskReplyRequest) GetNamespace() string {
@@ -7223,16 +7631,17 @@ func (x *AskReplyRequest) GetActorName() string {
 type AskReplyResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Success status
-	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success   bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	// Response payload (for GET/ask requests)
 	// Contains the reply message from actor
-	Payload []byte `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	Payload []byte `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
 	// Response headers (optional metadata)
-	Headers map[string]string `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Headers map[string]string `protobuf:"bytes,4,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Actor ID that was invoked (format: "actor_id@node_id")
-	ActorId string `protobuf:"bytes,4,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	ActorId string `protobuf:"bytes,5,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	// Error message (if success is false)
-	ErrorMessage  string `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	ErrorMessage  string `protobuf:"bytes,6,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7265,6 +7674,13 @@ func (x *AskReplyResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use AskReplyResponse.ProtoReflect.Descriptor instead.
 func (*AskReplyResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{76}
+}
+
+func (x *AskReplyResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *AskReplyResponse) GetSuccess() bool {
@@ -8307,178 +8723,230 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aA\n" +
 	"\x13AffinityLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xec\x03\n" +
-	"\x17CreateShardGroupRequest\x12J\n" +
-	"\x06config\x18\x01 \x01(\v2'.plexspaces.actor.v1.DataParallelConfigB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\x06config\x12,\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x94\x04\n" +
+	"\x17CreateShardGroupRequest\x12&\n" +
 	"\n" +
-	"actor_type\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tactorType\x12C\n" +
-	"\fshard_config\x18\x03 \x01(\v2 .plexspaces.actor.v1.ActorConfigR\vshardConfig\x12#\n" +
-	"\rinitial_state\x18\x04 \x01(\fR\finitialState\x12V\n" +
-	"\bmetadata\x18\x05 \x03(\v2:.plexspaces.actor.v1.CreateShardGroupRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12J\n" +
+	"\x06config\x18\x02 \x01(\v2'.plexspaces.actor.v1.DataParallelConfigB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\x06config\x12,\n" +
+	"\n" +
+	"actor_type\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tactorType\x12C\n" +
+	"\fshard_config\x18\x04 \x01(\v2 .plexspaces.actor.v1.ActorConfigR\vshardConfig\x12#\n" +
+	"\rinitial_state\x18\x05 \x01(\fR\finitialState\x12V\n" +
+	"\bmetadata\x18\x06 \x03(\v2:.plexspaces.actor.v1.CreateShardGroupRequest.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:X\x92AU\n" +
 	"S*\x1aCreate Shard Group Request2\x1fRequest to create a shard group\xd2\x01\x06config\xd2\x01\n" +
-	"actor_type\"\x98\x01\n" +
-	"\x18CreateShardGroupResponse\x12:\n" +
-	"\x05group\x18\x01 \x01(\v2\x1f.plexspaces.actor.v1.ShardGroupB\x03\xe0A\x02R\x05group:@\x92A=\n" +
-	";*\x1bCreate Shard Group Response2\x1cCreated shard group metadata\"\xee\x01\n" +
-	"\x17DeleteShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\x12D\n" +
-	"\x10shutdown_timeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\x0fshutdownTimeout:M\x92AJ\n" +
-	"H*\x1aDelete Shard Group Request2\x1fRequest to delete a shard group\xd2\x01\bgroup_id\"\x8b\x01\n" +
-	"\x14GetShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId:I\x92AF\n" +
-	"D*\x17Get Shard Group Request2\x1eRequest to fetch a shard group\xd2\x01\bgroup_id\"\x89\x01\n" +
-	"\x15GetShardGroupResponse\x12:\n" +
-	"\x05group\x18\x01 \x01(\v2\x1f.plexspaces.actor.v1.ShardGroupB\x03\xe0A\x02R\x05group:4\x92A1\n" +
-	"/*\x18Get Shard Group Response2\x13Shard group details\"\xf6\x01\n" +
-	"\x16ListShardGroupsRequest\x12)\n" +
+	"actor_type\"\xc0\x01\n" +
+	"\x18CreateShardGroupResponse\x12&\n" +
 	"\n" +
-	"actor_type\x18\x01 \x01(\tB\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12:\n" +
+	"\x05group\x18\x02 \x01(\v2\x1f.plexspaces.actor.v1.ShardGroupB\x03\xe0A\x02R\x05group:@\x92A=\n" +
+	";*\x1bCreate Shard Group Response2\x1cCreated shard group metadata\"\x96\x02\n" +
+	"\x17DeleteShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\x12D\n" +
+	"\x10shutdown_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x0fshutdownTimeout:M\x92AJ\n" +
+	"H*\x1aDelete Shard Group Request2\x1fRequest to delete a shard group\xd2\x01\bgroup_id\"\xb3\x01\n" +
+	"\x14GetShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId:I\x92AF\n" +
+	"D*\x17Get Shard Group Request2\x1eRequest to fetch a shard group\xd2\x01\bgroup_id\"\xb1\x01\n" +
+	"\x15GetShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12:\n" +
+	"\x05group\x18\x02 \x01(\v2\x1f.plexspaces.actor.v1.ShardGroupB\x03\xe0A\x02R\x05group:4\x92A1\n" +
+	"/*\x18Get Shard Group Response2\x13Shard group details\"\x9e\x02\n" +
+	"\x16ListShardGroupsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12)\n" +
+	"\n" +
+	"actor_type\x18\x02 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\tactorType\x12:\n" +
-	"\x05state\x18\x02 \x01(\x0e2$.plexspaces.actor.v1.ShardGroupStateR\x05state\x125\n" +
-	"\x04page\x18\x03 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page:>\x92A;\n" +
-	"9*\x19List Shard Groups Request2\x1cRequest to list shard groups\"\xc9\x01\n" +
-	"\x17ListShardGroupsResponse\x127\n" +
-	"\x06groups\x18\x01 \x03(\v2\x1f.plexspaces.actor.v1.ShardGroupR\x06groups\x126\n" +
-	"\x04page\x18\x02 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page:=\x92A:\n" +
-	"8*\x1aList Shard Groups Response2\x1aPaged list of shard groups\"\x8f\x03\n" +
-	"\x12SendToShardRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12/\n" +
-	"\rpartition_key\x18\x02 \x01(\fB\n" +
+	"\x05state\x18\x03 \x01(\x0e2$.plexspaces.actor.v1.ShardGroupStateR\x05state\x125\n" +
+	"\x04page\x18\x04 \x01(\v2!.plexspaces.common.v1.PageRequestR\x04page:>\x92A;\n" +
+	"9*\x19List Shard Groups Request2\x1cRequest to list shard groups\"\xf1\x01\n" +
+	"\x17ListShardGroupsResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x127\n" +
+	"\x06groups\x18\x02 \x03(\v2\x1f.plexspaces.actor.v1.ShardGroupR\x06groups\x126\n" +
+	"\x04page\x18\x03 \x01(\v2\".plexspaces.common.v1.PageResponseR\x04page:=\x92A:\n" +
+	"8*\x1aList Shard Groups Response2\x1aPaged list of shard groups\"\xb7\x03\n" +
+	"\x12SendToShardRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12/\n" +
+	"\rpartition_key\x18\x03 \x01(\fB\n" +
 	"\xe0A\x02\xbaH\x04z\x02\x10\x01R\fpartitionKey\x12B\n" +
-	"\amessage\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\amessage\x12*\n" +
-	"\x11wait_for_response\x18\x04 \x01(\bR\x0fwaitForResponse\x123\n" +
-	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\atimeout:y\x92Av\n" +
-	"t*\x15Send To Shard Request26Request to route a message to a shard by partition key\xd2\x01\bgroup_id\xd2\x01\rpartition_key\xd2\x01\amessage\"\xc6\x01\n" +
-	"\x13SendToShardResponse\x12\x19\n" +
-	"\bshard_id\x18\x01 \x01(\rR\ashardId\x12$\n" +
-	"\x0eshard_actor_id\x18\x02 \x01(\tR\fshardActorId\x129\n" +
-	"\bresponse\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageR\bresponse:3\x92A0\n" +
-	".*\x16Send To Shard Response2\x14Shard routing result\"\x95\x03\n" +
-	"\x14ScatterGatherRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12>\n" +
-	"\x05query\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\x05query\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12T\n" +
-	"\vaggregation\x18\x04 \x01(\x0e22.plexspaces.actor.v1.ShardGroupAggregationStrategyR\vaggregation\x12#\n" +
-	"\rmin_responses\x18\x05 \x01(\rR\fminResponses:c\x92A`\n" +
-	"^*\x16Scatter Gather Request21Request to query all shards and aggregate results\xd2\x01\bgroup_id\xd2\x01\x05query\"\xf5\x01\n" +
-	"\x12ShardQueryResponse\x12\x19\n" +
-	"\bshard_id\x18\x01 \x01(\rR\ashardId\x12$\n" +
-	"\x0eshard_actor_id\x18\x02 \x01(\tR\fshardActorId\x129\n" +
-	"\bresponse\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageR\bresponse\x123\n" +
-	"\alatency\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\alatency\x12\x18\n" +
-	"\asuccess\x18\x05 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"\xc7\x01\n" +
+	"\amessage\x18\x04 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\amessage\x12*\n" +
+	"\x11wait_for_response\x18\x05 \x01(\bR\x0fwaitForResponse\x123\n" +
+	"\atimeout\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\atimeout:y\x92Av\n" +
+	"t*\x15Send To Shard Request26Request to route a message to a shard by partition key\xd2\x01\bgroup_id\xd2\x01\rpartition_key\xd2\x01\amessage\"\xee\x01\n" +
+	"\x13SendToShardResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x19\n" +
+	"\bshard_id\x18\x02 \x01(\rR\ashardId\x12$\n" +
+	"\x0eshard_actor_id\x18\x03 \x01(\tR\fshardActorId\x129\n" +
+	"\bresponse\x18\x04 \x01(\v2\x1d.plexspaces.common.v1.MessageR\bresponse:3\x92A0\n" +
+	".*\x16Send To Shard Response2\x14Shard routing result\"\xbd\x03\n" +
+	"\x14ScatterGatherRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12>\n" +
+	"\x05query\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\x05query\x123\n" +
+	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12T\n" +
+	"\vaggregation\x18\x05 \x01(\x0e22.plexspaces.actor.v1.ShardGroupAggregationStrategyR\vaggregation\x12#\n" +
+	"\rmin_responses\x18\x06 \x01(\rR\fminResponses:c\x92A`\n" +
+	"^*\x16Scatter Gather Request21Request to query all shards and aggregate results\xd2\x01\bgroup_id\xd2\x01\x05query\"\x9d\x02\n" +
+	"\x12ShardQueryResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x19\n" +
+	"\bshard_id\x18\x02 \x01(\rR\ashardId\x12$\n" +
+	"\x0eshard_actor_id\x18\x03 \x01(\tR\fshardActorId\x129\n" +
+	"\bresponse\x18\x04 \x01(\v2\x1d.plexspaces.common.v1.MessageR\bresponse\x123\n" +
+	"\alatency\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\alatency\x12\x18\n" +
+	"\asuccess\x18\x06 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\a \x01(\tR\x05error\"\xc7\x01\n" +
 	"\x12ScatterGatherStats\x12%\n" +
 	"\x0eshards_queried\x18\x01 \x01(\rR\rshardsQueried\x12)\n" +
 	"\x10shards_responded\x18\x02 \x01(\rR\x0fshardsResponded\x12#\n" +
 	"\rshards_failed\x18\x03 \x01(\rR\fshardsFailed\x12:\n" +
 	"\vmax_latency\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\n" +
-	"maxLatency\"\xa1\x02\n" +
-	"\x15ScatterGatherResponse\x125\n" +
-	"\x06result\x18\x01 \x01(\v2\x1d.plexspaces.common.v1.MessageR\x06result\x12P\n" +
-	"\x0fshard_responses\x18\x02 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
-	"\x05stats\x18\x03 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:@\x92A=\n" +
-	";*\x17Scatter Gather Response2 Aggregated scatter-gather result\"\xac\x04\n" +
-	"\x1bBulkUpdateShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12\\\n" +
-	"\aupdates\x18\x02 \x03(\v2=.plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntryB\x03\xe0A\x02R\aupdates\x12R\n" +
-	"\x11consistency_level\x18\x03 \x01(\x0e2%.plexspaces.actor.v1.ConsistencyLevelR\x10consistencyLevel\x123\n" +
-	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12,\n" +
-	"\x12wait_for_responses\x18\x05 \x01(\bR\x10waitForResponses\x1aY\n" +
+	"maxLatency\"\xc9\x02\n" +
+	"\x15ScatterGatherResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x125\n" +
+	"\x06result\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageR\x06result\x12P\n" +
+	"\x0fshard_responses\x18\x03 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
+	"\x05stats\x18\x04 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:@\x92A=\n" +
+	";*\x17Scatter Gather Response2 Aggregated scatter-gather result\"\xd4\x04\n" +
+	"\x1bBulkUpdateShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12\\\n" +
+	"\aupdates\x18\x03 \x03(\v2=.plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntryB\x03\xe0A\x02R\aupdates\x12R\n" +
+	"\x11consistency_level\x18\x04 \x01(\x0e2%.plexspaces.actor.v1.ConsistencyLevelR\x10consistencyLevel\x123\n" +
+	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12,\n" +
+	"\x12wait_for_responses\x18\x06 \x01(\bR\x10waitForResponses\x1aY\n" +
 	"\fUpdatesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
 	"\x05value\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageR\x05value:\x028\x01:s\x92Ap\n" +
-	"n*\x1fBulk Update Shard Group Request26Request to apply multiple updates across a shard group\xd2\x01\bgroup_id\xd2\x01\aupdates\"\xd2\x02\n" +
-	"\x1cBulkUpdateShardGroupResponse\x12!\n" +
-	"\fupdates_sent\x18\x01 \x01(\rR\vupdatesSent\x12+\n" +
-	"\x11updates_succeeded\x18\x02 \x01(\rR\x10updatesSucceeded\x12%\n" +
-	"\x0eupdates_failed\x18\x03 \x01(\rR\rupdatesFailed\x12F\n" +
-	"\vshard_stats\x18\x04 \x03(\v2%.plexspaces.actor.v1.ShardUpdateStatsR\n" +
+	"n*\x1fBulk Update Shard Group Request26Request to apply multiple updates across a shard group\xd2\x01\bgroup_id\xd2\x01\aupdates\"\xfa\x02\n" +
+	"\x1cBulkUpdateShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12!\n" +
+	"\fupdates_sent\x18\x02 \x01(\rR\vupdatesSent\x12+\n" +
+	"\x11updates_succeeded\x18\x03 \x01(\rR\x10updatesSucceeded\x12%\n" +
+	"\x0eupdates_failed\x18\x04 \x01(\rR\rupdatesFailed\x12F\n" +
+	"\vshard_stats\x18\x05 \x03(\v2%.plexspaces.actor.v1.ShardUpdateStatsR\n" +
 	"shardStats\x12\x16\n" +
-	"\x06errors\x18\x05 \x03(\tR\x06errors:[\x92AX\n" +
+	"\x06errors\x18\x06 \x03(\tR\x06errors:[\x92AX\n" +
 	"V* Bulk Update Shard Group Response22Update statistics for a bulk shard-group operation\"\xca\x01\n" +
 	"\x10ShardUpdateStats\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\rR\ashardId\x12$\n" +
 	"\x0eshard_actor_id\x18\x02 \x01(\tR\fshardActorId\x12!\n" +
 	"\fupdates_sent\x18\x03 \x01(\rR\vupdatesSent\x12+\n" +
 	"\x11updates_succeeded\x18\x04 \x01(\rR\x10updatesSucceeded\x12%\n" +
-	"\x0eupdates_failed\x18\x05 \x01(\rR\rupdatesFailed\"\xcc\x02\n" +
-	"\x14MapShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12K\n" +
-	"\fmap_function\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\vmapFunction\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12#\n" +
-	"\rmin_responses\x18\x04 \x01(\rR\fminResponses:c\x92A`\n" +
-	"^*\x17Map Shard Group Request2)Request to apply a function to all shards\xd2\x01\bgroup_id\xd2\x01\fmap_function\"\xed\x01\n" +
-	"\x15MapShardGroupResponse\x12L\n" +
-	"\rshard_results\x18\x01 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\fshardResults\x12=\n" +
-	"\x05stats\x18\x02 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:G\x92AD\n" +
+	"\x0eupdates_failed\x18\x05 \x01(\rR\rupdatesFailed\"\xf4\x02\n" +
+	"\x14MapShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12K\n" +
+	"\fmap_function\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\vmapFunction\x123\n" +
+	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12#\n" +
+	"\rmin_responses\x18\x05 \x01(\rR\fminResponses:c\x92A`\n" +
+	"^*\x17Map Shard Group Request2)Request to apply a function to all shards\xd2\x01\bgroup_id\xd2\x01\fmap_function\"\x95\x02\n" +
+	"\x15MapShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12L\n" +
+	"\rshard_results\x18\x02 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\fshardResults\x12=\n" +
+	"\x05stats\x18\x03 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:G\x92AD\n" +
 	"B*\x18Map Shard Group Response2&Results from mapping across all shards\"6\n" +
 	"\x15CollectiveTargetField\x12\x1d\n" +
 	"\n" +
-	"value_path\x18\x01 \x01(\tR\tvaluePath\"\xc3\x02\n" +
-	"\x1aBroadcastShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12B\n" +
-	"\amessage\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\amessage\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x19\n" +
-	"\bmin_acks\x18\x04 \x01(\rR\aminAcks:g\x92Ad\n" +
-	"b*\x1dBroadcast Shard Group Request2,Request to broadcast a message to all shards\xd2\x01\bgroup_id\xd2\x01\amessage\"\x84\x02\n" +
-	"\x1bBroadcastShardGroupResponse\x12P\n" +
-	"\x0fshard_responses\x18\x01 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
-	"\x05stats\x18\x02 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:T\x92AQ\n" +
-	"O*\x1eBroadcast Shard Group Response2-Per-shard responses for a broadcast operation\"\xe2\x03\n" +
-	"\x17ReduceShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12K\n" +
-	"\fmap_function\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\vmapFunction\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12#\n" +
-	"\rmin_responses\x18\x04 \x01(\rR\fminResponses\x12F\n" +
-	"\treduction\x18\x05 \x01(\x0e2(.plexspaces.actor.v1.CollectiveReductionR\treduction\x12B\n" +
-	"\x06target\x18\x06 \x01(\v2*.plexspaces.actor.v1.CollectiveTargetFieldR\x06target:j\x92Ag\n" +
-	"e*\x1aReduce Shard Group Request2-Request to reduce values across a shard group\xd2\x01\bgroup_id\xd2\x01\fmap_function\"\xae\x02\n" +
-	"\x18ReduceShardGroupResponse\x125\n" +
-	"\x06result\x18\x01 \x01(\v2\x1d.plexspaces.common.v1.MessageR\x06result\x12P\n" +
-	"\x0fshard_responses\x18\x02 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
-	"\x05stats\x18\x03 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:J\x92AG\n" +
-	"E*\x1bReduce Shard Group Response2&Reduced result and per-shard responses\"\xea\x03\n" +
-	"\x1aAllReduceShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12K\n" +
-	"\fmap_function\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\vmapFunction\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12#\n" +
-	"\rmin_responses\x18\x04 \x01(\rR\fminResponses\x12F\n" +
-	"\treduction\x18\x05 \x01(\x0e2(.plexspaces.actor.v1.CollectiveReductionR\treduction\x12B\n" +
-	"\x06target\x18\x06 \x01(\v2*.plexspaces.actor.v1.CollectiveTargetFieldR\x06target:o\x92Al\n" +
-	"j*\x1eAll Reduce Shard Group Request2.Request to run all-reduce across a shard group\xd2\x01\bgroup_id\xd2\x01\fmap_function\"\xb8\x02\n" +
-	"\x1bAllReduceShardGroupResponse\x125\n" +
-	"\x06result\x18\x01 \x01(\v2\x1d.plexspaces.common.v1.MessageR\x06result\x12P\n" +
-	"\x0fshard_responses\x18\x02 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
-	"\x05stats\x18\x03 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:Q\x92AN\n" +
-	"L*\x1fAll Reduce Shard Group Response2)All-reduce result and per-shard responses\"\xc8\x02\n" +
-	"\x18BarrierShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12,\n" +
+	"value_path\x18\x01 \x01(\tR\tvaluePath\"\xeb\x02\n" +
+	"\x1aBroadcastShardGroupRequest\x12&\n" +
 	"\n" +
-	"barrier_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\tbarrierId\x12\x14\n" +
-	"\x05round\x18\x03 \x01(\x04R\x05round\x123\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12B\n" +
+	"\amessage\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\amessage\x123\n" +
 	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x19\n" +
-	"\bmin_acks\x18\x05 \x01(\rR\aminAcks:n\x92Ak\n" +
+	"\bmin_acks\x18\x05 \x01(\rR\aminAcks:g\x92Ad\n" +
+	"b*\x1dBroadcast Shard Group Request2,Request to broadcast a message to all shards\xd2\x01\bgroup_id\xd2\x01\amessage\"\xac\x02\n" +
+	"\x1bBroadcastShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12P\n" +
+	"\x0fshard_responses\x18\x02 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
+	"\x05stats\x18\x03 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:T\x92AQ\n" +
+	"O*\x1eBroadcast Shard Group Response2-Per-shard responses for a broadcast operation\"\x8a\x04\n" +
+	"\x17ReduceShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12K\n" +
+	"\fmap_function\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\vmapFunction\x123\n" +
+	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12#\n" +
+	"\rmin_responses\x18\x05 \x01(\rR\fminResponses\x12F\n" +
+	"\treduction\x18\x06 \x01(\x0e2(.plexspaces.actor.v1.CollectiveReductionR\treduction\x12B\n" +
+	"\x06target\x18\a \x01(\v2*.plexspaces.actor.v1.CollectiveTargetFieldR\x06target:j\x92Ag\n" +
+	"e*\x1aReduce Shard Group Request2-Request to reduce values across a shard group\xd2\x01\bgroup_id\xd2\x01\fmap_function\"\xd6\x02\n" +
+	"\x18ReduceShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x125\n" +
+	"\x06result\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageR\x06result\x12P\n" +
+	"\x0fshard_responses\x18\x03 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
+	"\x05stats\x18\x04 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:J\x92AG\n" +
+	"E*\x1bReduce Shard Group Response2&Reduced result and per-shard responses\"\x92\x04\n" +
+	"\x1aAllReduceShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12K\n" +
+	"\fmap_function\x18\x03 \x01(\v2\x1d.plexspaces.common.v1.MessageB\t\xe0A\x02\xbaH\x03\xc8\x01\x01R\vmapFunction\x123\n" +
+	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12#\n" +
+	"\rmin_responses\x18\x05 \x01(\rR\fminResponses\x12F\n" +
+	"\treduction\x18\x06 \x01(\x0e2(.plexspaces.actor.v1.CollectiveReductionR\treduction\x12B\n" +
+	"\x06target\x18\a \x01(\v2*.plexspaces.actor.v1.CollectiveTargetFieldR\x06target:o\x92Al\n" +
+	"j*\x1eAll Reduce Shard Group Request2.Request to run all-reduce across a shard group\xd2\x01\bgroup_id\xd2\x01\fmap_function\"\xe0\x02\n" +
+	"\x1bAllReduceShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x125\n" +
+	"\x06result\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageR\x06result\x12P\n" +
+	"\x0fshard_responses\x18\x03 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
+	"\x05stats\x18\x04 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:Q\x92AN\n" +
+	"L*\x1fAll Reduce Shard Group Response2)All-reduce result and per-shard responses\"\xf0\x02\n" +
+	"\x18BarrierShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x12,\n" +
+	"\n" +
+	"barrier_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\tbarrierId\x12\x14\n" +
+	"\x05round\x18\x04 \x01(\x04R\x05round\x123\n" +
+	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x19\n" +
+	"\bmin_acks\x18\x06 \x01(\rR\aminAcks:n\x92Ak\n" +
 	"i*\x1bBarrier Shard Group Request22Request to synchronize a shard group barrier round\xd2\x01\bgroup_id\xd2\x01\n" +
-	"barrier_id\"\xf4\x01\n" +
-	"\x19BarrierShardGroupResponse\x12P\n" +
-	"\x0fshard_responses\x18\x01 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
-	"\x05stats\x18\x02 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:F\x92AC\n" +
-	"A*\x1cBarrier Shard Group Response2!Barrier synchronization responses\"\xf2\x02\n" +
-	"\x16ScaleShardGroupRequest\x12(\n" +
-	"\bgroup_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x122\n" +
-	"\x0fnew_shard_count\x18\x02 \x01(\rB\n" +
+	"barrier_id\"\x9c\x02\n" +
+	"\x19BarrierShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12P\n" +
+	"\x0fshard_responses\x18\x02 \x03(\v2'.plexspaces.actor.v1.ShardQueryResponseR\x0eshardResponses\x12=\n" +
+	"\x05stats\x18\x03 \x01(\v2'.plexspaces.actor.v1.ScatterGatherStatsR\x05stats:F\x92AC\n" +
+	"A*\x1cBarrier Shard Group Response2!Barrier synchronization responses\"\x9a\x03\n" +
+	"\x16ScaleShardGroupRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bgroup_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\agroupId\x122\n" +
+	"\x0fnew_shard_count\x18\x03 \x01(\rB\n" +
 	"\xe0A\x02\xbaH\x04*\x02(\x01R\rnewShardCount\x12O\n" +
-	"\x10rebalance_policy\x18\x03 \x01(\x0e2$.plexspaces.actor.v1.RebalancePolicyR\x0frebalancePolicy\x12J\n" +
-	"\x10new_shard_config\x18\x04 \x01(\v2 .plexspaces.actor.v1.ActorConfigR\x0enewShardConfig:]\x92AZ\n" +
-	"X*\x19Scale Shard Group Request2\x1eRequest to scale a shard group\xd2\x01\bgroup_id\xd2\x01\x0fnew_shard_count\"\xee\x01\n" +
-	"\x17ScaleShardGroupResponse\x125\n" +
-	"\x05group\x18\x01 \x01(\v2\x1f.plexspaces.actor.v1.ShardGroupR\x05group\x12O\n" +
-	"\x10rebalance_status\x18\x02 \x01(\v2$.plexspaces.actor.v1.RebalanceStatusR\x0frebalanceStatus:K\x92AH\n" +
+	"\x10rebalance_policy\x18\x04 \x01(\x0e2$.plexspaces.actor.v1.RebalancePolicyR\x0frebalancePolicy\x12J\n" +
+	"\x10new_shard_config\x18\x05 \x01(\v2 .plexspaces.actor.v1.ActorConfigR\x0enewShardConfig:]\x92AZ\n" +
+	"X*\x19Scale Shard Group Request2\x1eRequest to scale a shard group\xd2\x01\bgroup_id\xd2\x01\x0fnew_shard_count\"\x96\x02\n" +
+	"\x17ScaleShardGroupResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x125\n" +
+	"\x05group\x18\x02 \x01(\v2\x1f.plexspaces.actor.v1.ShardGroupR\x05group\x12O\n" +
+	"\x10rebalance_status\x18\x03 \x01(\v2$.plexspaces.actor.v1.RebalanceStatusR\x0frebalanceStatus:K\x92AH\n" +
 	"F*\x1aScale Shard Group Response2(Updated shard group and rebalance status\"\xdc\x03\n" +
 	"\fActorMetrics\x12-\n" +
 	"\x12messages_processed\x18\x01 \x01(\x04R\x11messagesProcessed\x12'\n" +
@@ -8488,61 +8956,79 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\rlast_activity\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\flastActivity\x12:\n" +
 	"\x12memory_usage_bytes\x18\x06 \x01(\x04B\f\xbaH\t2\a\x18\x80\x80\x80\x80\x80 R\x10memoryUsageBytes\x12C\n" +
 	"\x11cpu_usage_percent\x18\a \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00R\x0fcpuUsagePercent:6\x92A3\n" +
-	"1*\rActor Metrics2 Performance metrics for an actor\"\xf1\x02\n" +
-	"\x11SpawnActorRequest\x12<\n" +
-	"\x04spec\x18\x01 \x01(\v2#.plexspaces.actor.v1.ActorSpawnSpecB\x03\xe0A\x02R\x04spec\x12)\n" +
-	"\tnamespace\x18\x02 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x126\n" +
-	"\x0finstances_count\x18\x03 \x01(\rB\r\xe0A\x01\xbaH\a*\x05\x18\x80\b(\x00R\x0einstancesCount:\xba\x01\x92A\xb6\x01\n" +
-	"\xb3\x01*\x1aSpawn Remote Actor Request2\x8d\x01Spawn actor on the node receiving this gRPC request using ActorSpawnSpec as the single contract (identity, facets, args, config, visibility).\xd2\x01\x04spec\"\xc7\x01\n" +
-	"\x12SpawnActorResponse\x12*\n" +
-	"\tactor_ref\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x04R\bactorRef\x120\n" +
-	"\x05actor\x18\x02 \x01(\v2\x1a.plexspaces.actor.v1.ActorR\x05actor:S\x92AP\n" +
-	"N*\x1bSpawn Remote Actor Response2#Reference to remotely spawned actor\xd2\x01\tactor_ref\"X\n" +
-	"\x12SpawnActorsRequest\x12B\n" +
-	"\brequests\x18\x01 \x03(\v2&.plexspaces.actor.v1.SpawnActorRequestR\brequests\"\x87\x01\n" +
+	"1*\rActor Metrics2 Performance metrics for an actor\"\x99\x03\n" +
+	"\x11SpawnActorRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12<\n" +
+	"\x04spec\x18\x02 \x01(\v2#.plexspaces.actor.v1.ActorSpawnSpecB\x03\xe0A\x02R\x04spec\x12)\n" +
+	"\tnamespace\x18\x03 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x126\n" +
+	"\x0finstances_count\x18\x04 \x01(\rB\r\xe0A\x01\xbaH\a*\x05\x18\x80\b(\x00R\x0einstancesCount:\xba\x01\x92A\xb6\x01\n" +
+	"\xb3\x01*\x1aSpawn Remote Actor Request2\x8d\x01Spawn actor on the node receiving this gRPC request using ActorSpawnSpec as the single contract (identity, facets, args, config, visibility).\xd2\x01\x04spec\"\xef\x01\n" +
+	"\x12SpawnActorResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12*\n" +
+	"\tactor_ref\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x04R\bactorRef\x120\n" +
+	"\x05actor\x18\x03 \x01(\v2\x1a.plexspaces.actor.v1.ActorR\x05actor:S\x92AP\n" +
+	"N*\x1bSpawn Remote Actor Response2#Reference to remotely spawned actor\xd2\x01\tactor_ref\"\x80\x01\n" +
+	"\x12SpawnActorsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12B\n" +
+	"\brequests\x18\x02 \x03(\v2&.plexspaces.actor.v1.SpawnActorRequestR\brequests\"\x87\x01\n" +
 	"\x10SpawnActorResult\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12C\n" +
-	"\bresponse\x18\x03 \x01(\v2'.plexspaces.actor.v1.SpawnActorResponseR\bresponse\"V\n" +
-	"\x13SpawnActorsResponse\x12?\n" +
-	"\aresults\x18\x01 \x03(\v2%.plexspaces.actor.v1.SpawnActorResultR\aresults\"\xaf\x01\n" +
-	"\x0fGetActorRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12)\n" +
-	"\tnamespace\x18\x02 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace:G\x92AD\n" +
-	"B*\x11Get Actor Request2\"Request to retrieve an actor by ID\xd2\x01\bactor_id\"D\n" +
-	"\x10GetActorResponse\x120\n" +
-	"\x05actor\x18\x01 \x01(\v2\x1a.plexspaces.actor.v1.ActorR\x05actor\"\xca\x02\n" +
-	"\x11ListActorsRequest\x12D\n" +
-	"\fpage_request\x18\x01 \x01(\v2!.plexspaces.common.v1.PageRequestR\vpageRequest\x12'\n" +
+	"\bresponse\x18\x03 \x01(\v2'.plexspaces.actor.v1.SpawnActorResponseR\bresponse\"~\n" +
+	"\x13SpawnActorsResponse\x12&\n" +
 	"\n" +
-	"actor_type\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\tactorType\x125\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x1f.plexspaces.actor.v1.ActorStateR\x05state\x12!\n" +
-	"\anode_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\x06nodeId\x12)\n" +
-	"\tnamespace\x18\x05 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace:A\x92A>\n" +
-	"<*\x13List Actors Request2%Request to list actors with filtering\"\x91\x01\n" +
-	"\x12ListActorsResponse\x122\n" +
-	"\x06actors\x18\x01 \x03(\v2\x1a.plexspaces.actor.v1.ActorR\x06actors\x12G\n" +
-	"\rpage_response\x18\x02 \x01(\v2\".plexspaces.common.v1.PageResponseR\fpageResponse\"\xa6\a\n" +
-	"\x12SendMessageRequest\x12)\n" +
-	"\tnamespace\x18\x01 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x12,\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12?\n" +
+	"\aresults\x18\x02 \x03(\v2%.plexspaces.actor.v1.SpawnActorResultR\aresults\"\xd7\x01\n" +
+	"\x0fGetActorRequest\x12&\n" +
 	"\n" +
-	"actor_type\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\tactorType\x12(\n" +
-	"\vhttp_method\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x18\x10R\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12)\n" +
+	"\tnamespace\x18\x03 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace:G\x92AD\n" +
+	"B*\x11Get Actor Request2\"Request to retrieve an actor by ID\xd2\x01\bactor_id\"l\n" +
+	"\x10GetActorResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x120\n" +
+	"\x05actor\x18\x02 \x01(\v2\x1a.plexspaces.actor.v1.ActorR\x05actor\"\xf2\x02\n" +
+	"\x11ListActorsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12D\n" +
+	"\fpage_request\x18\x02 \x01(\v2!.plexspaces.common.v1.PageRequestR\vpageRequest\x12'\n" +
+	"\n" +
+	"actor_type\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\tactorType\x125\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x1f.plexspaces.actor.v1.ActorStateR\x05state\x12!\n" +
+	"\anode_id\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\x06nodeId\x12)\n" +
+	"\tnamespace\x18\x06 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace:A\x92A>\n" +
+	"<*\x13List Actors Request2%Request to list actors with filtering\"\xb9\x01\n" +
+	"\x12ListActorsResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x122\n" +
+	"\x06actors\x18\x02 \x03(\v2\x1a.plexspaces.actor.v1.ActorR\x06actors\x12G\n" +
+	"\rpage_response\x18\x03 \x01(\v2\".plexspaces.common.v1.PageResponseR\fpageResponse\"\xce\a\n" +
+	"\x12SendMessageRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12)\n" +
+	"\tnamespace\x18\x02 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x12,\n" +
+	"\n" +
+	"actor_type\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\tactorType\x12(\n" +
+	"\vhttp_method\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x18\x10R\n" +
 	"httpMethod\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\fR\apayload\x12N\n" +
-	"\aheaders\x18\x05 \x03(\v24.plexspaces.actor.v1.SendMessageRequest.HeadersEntryR\aheaders\x12[\n" +
-	"\fquery_params\x18\x06 \x03(\v28.plexspaces.actor.v1.SendMessageRequest.QueryParamsEntryR\vqueryParams\x12\x1c\n" +
-	"\x04path\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\x04path\x12\"\n" +
-	"\asubpath\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\asubpath\x12%\n" +
-	"\tsender_id\x18\t \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\bsenderId\x12U\n" +
-	"\fmessage_type\x18\n" +
-	" \x01(\tB2\xbaH/r-R\x00R\x04castR\x04infoR\x06signalR\x05eventR\acommandR\x05queryR\vmessageType\x12/\n" +
-	"\x0ecorrelation_id\x18\v \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\rcorrelationId\x12#\n" +
-	"\breply_to\x18\f \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\areplyTo\x12'\n" +
+	"\apayload\x18\x05 \x01(\fR\apayload\x12N\n" +
+	"\aheaders\x18\x06 \x03(\v24.plexspaces.actor.v1.SendMessageRequest.HeadersEntryR\aheaders\x12[\n" +
+	"\fquery_params\x18\a \x03(\v28.plexspaces.actor.v1.SendMessageRequest.QueryParamsEntryR\vqueryParams\x12\x1c\n" +
+	"\x04path\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\x04path\x12\"\n" +
+	"\asubpath\x18\t \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\asubpath\x12%\n" +
+	"\tsender_id\x18\n" +
+	" \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\bsenderId\x12U\n" +
+	"\fmessage_type\x18\v \x01(\tB2\xbaH/r-R\x00R\x04castR\x04infoR\x06signalR\x05eventR\acommandR\x05queryR\vmessageType\x12/\n" +
+	"\x0ecorrelation_id\x18\f \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\rcorrelationId\x12#\n" +
+	"\breply_to\x18\r \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\areplyTo\x12'\n" +
 	"\n" +
-	"message_id\x18\r \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tmessageId\x12'\n" +
+	"message_id\x18\x0e \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tmessageId\x12'\n" +
 	"\n" +
-	"actor_name\x18\x14 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tactorName\x1a:\n" +
+	"actor_name\x18\x15 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tactorName\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a>\n" +
@@ -8550,30 +9036,38 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:b\x92A_\n" +
 	"]*\x14Send Message Request28Request to send a tell message to an actor or actor type\xd2\x01\n" +
-	"actor_type\"\xea\x01\n" +
-	"\x13SendMessageResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
+	"actor_type\"\x92\x02\n" +
+	"\x13SendMessageResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12)\n" +
+	"\n" +
+	"message_id\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\tmessageId\x12#\n" +
+	"\bactor_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\aactorId\x12-\n" +
+	"\rerror_message\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\ferrorMessage::\x92A7\n" +
+	"5*\x15Send Message Response2\x1cTell request acknowledgement\"\xea\x01\n" +
+	"\x14StreamMessageRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12<\n" +
+	"\amessage\x18\x02 \x01(\v2\x1d.plexspaces.common.v1.MessageB\x03\xe0A\x02R\amessage\x12\x1a\n" +
+	"\bsequence\x18\x03 \x01(\x04R\bsequence:P\x92AM\n" +
+	"K*\x16Stream Message Request2'Request to stream a message to an actor\xd2\x01\amessage\"\xc9\x01\n" +
+	"\x15StreamMessageResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12)\n" +
 	"\n" +
 	"message_id\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\tmessageId\x12#\n" +
-	"\bactor_id\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\aactorId\x12-\n" +
-	"\rerror_message\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\ferrorMessage::\x92A7\n" +
-	"5*\x15Send Message Response2\x1cTell request acknowledgement\"\xc2\x01\n" +
-	"\x14StreamMessageRequest\x12<\n" +
-	"\amessage\x18\x01 \x01(\v2\x1d.plexspaces.common.v1.MessageB\x03\xe0A\x02R\amessage\x12\x1a\n" +
-	"\bsequence\x18\x02 \x01(\x04R\bsequence:P\x92AM\n" +
-	"K*\x16Stream Message Request2'Request to stream a message to an actor\xd2\x01\amessage\"\xa1\x01\n" +
-	"\x15StreamMessageResponse\x12)\n" +
-	"\n" +
-	"message_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\tmessageId\x12\x1a\n" +
-	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
-	"\x06status\x18\x03 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18 R\x06status\x12\x1e\n" +
-	"\x05error\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\x05error\"\xc3\x01\n" +
-	"\x12DeleteActorRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\x12)\n" +
-	"\tnamespace\x18\x03 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace:B\x92A?\n" +
+	"\bsequence\x18\x03 \x01(\x04R\bsequence\x12!\n" +
+	"\x06status\x18\x04 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18 R\x06status\x12\x1e\n" +
+	"\x05error\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\x05error\"\xeb\x01\n" +
+	"\x12DeleteActorRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\x12)\n" +
+	"\tnamespace\x18\x04 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace:B\x92A?\n" +
 	"=*\x14Delete Actor Request2\x1aRequest to delete an actor\xd2\x01\bactor_id\"\xb5\x06\n" +
 	"\x13ActorLifecycleEvent\x12(\n" +
 	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12=\n" +
@@ -8608,20 +9102,26 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"stackTrace\"@\n" +
 	"\x0eActorMigrating\x12.\n" +
 	"\vtarget_node\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\n" +
-	"targetNode\"\xaf\x02\n" +
-	"\x13MonitorActorRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x122\n" +
-	"\rsupervisor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fsupervisorId\x12>\n" +
-	"\x13supervisor_callback\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x04R\x12supervisorCallback:z\x92Aw\n" +
-	"u*\x15Monitor Actor Request2+Request to monitor an actor for termination\xd2\x01\bactor_id\xd2\x01\rsupervisor_id\xd2\x01\x13supervisor_callback\"\x94\x01\n" +
-	"\x14MonitorActorResponse\x12.\n" +
-	"\vmonitor_ref\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\n" +
+	"targetNode\"\xd7\x02\n" +
+	"\x13MonitorActorRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x122\n" +
+	"\rsupervisor_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fsupervisorId\x12>\n" +
+	"\x13supervisor_callback\x18\x04 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x04R\x12supervisorCallback:z\x92Aw\n" +
+	"u*\x15Monitor Actor Request2+Request to monitor an actor for termination\xd2\x01\bactor_id\xd2\x01\rsupervisor_id\xd2\x01\x13supervisor_callback\"\xbc\x01\n" +
+	"\x14MonitorActorResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12.\n" +
+	"\vmonitor_ref\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\n" +
 	"monitorRef:L\x92AI\n" +
-	"G*\x16Monitor Actor Response2\x1fResponse with monitor reference\xd2\x01\vmonitor_ref\"\xa9\x02\n" +
-	"\x15DemonitorActorRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x122\n" +
-	"\rsupervisor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fsupervisorId\x12.\n" +
-	"\vmonitor_ref\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\n" +
+	"G*\x16Monitor Actor Response2\x1fResponse with monitor reference\xd2\x01\vmonitor_ref\"\xd1\x02\n" +
+	"\x15DemonitorActorRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x122\n" +
+	"\rsupervisor_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fsupervisorId\x12.\n" +
+	"\vmonitor_ref\x18\x04 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\n" +
 	"monitorRef:\x81\x01\x92A~\n" +
 	"|*\x17Demonitor Actor Request28Remove a monitor on the node hosting the monitored actor\xd2\x01\bactor_id\xd2\x01\rsupervisor_id\xd2\x01\vmonitor_ref\"\xdf\x02\n" +
 	"\x15ActorDownNotification\x12(\n" +
@@ -8631,12 +9131,16 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\vmonitor_ref\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\n" +
 	"monitorRef\x12$\n" +
 	"\x0eis_link_signal\x18\x05 \x01(\bR\fisLinkSignal:p\x92Am\n" +
-	"k*\x17Actor Down Notification2,Notification that monitored actor terminated\xd2\x01\bactor_id\xd2\x01\rsupervisor_id\xd2\x01\x06reason\"\x9d\x01\n" +
-	"\x15GetActorStatesRequest\x12 \n" +
-	"\tactor_ids\x18\x01 \x03(\tB\x03\xe0A\x02R\bactorIds:b\x92A_\n" +
-	"]*\x18Get Actor States Request25Batch check of actor states for stale monitor cleanup\xd2\x01\tactor_ids\"\x8e\x02\n" +
-	"\x16GetActorStatesResponse\x12O\n" +
-	"\x06states\x18\x01 \x03(\v27.plexspaces.actor.v1.GetActorStatesResponse.StatesEntryR\x06states\x1aZ\n" +
+	"k*\x17Actor Down Notification2,Notification that monitored actor terminated\xd2\x01\bactor_id\xd2\x01\rsupervisor_id\xd2\x01\x06reason\"\xc5\x01\n" +
+	"\x15GetActorStatesRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12 \n" +
+	"\tactor_ids\x18\x02 \x03(\tB\x03\xe0A\x02R\bactorIds:b\x92A_\n" +
+	"]*\x18Get Actor States Request25Batch check of actor states for stale monitor cleanup\xd2\x01\tactor_ids\"\xb6\x02\n" +
+	"\x16GetActorStatesResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12O\n" +
+	"\x06states\x18\x02 \x03(\v27.plexspaces.actor.v1.GetActorStatesResponse.StatesEntryR\x06states\x1aZ\n" +
 	"\vStatesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x125\n" +
 	"\x05value\x18\x02 \x01(\x0e2\x1f.plexspaces.actor.v1.ActorStateR\x05value:\x028\x01:G\x92AD\n" +
@@ -8651,51 +9155,65 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:b\x92A_\n" +
 	"]*\n" +
-	"Actor Link22Two-way link between actors for cascading failures\xd2\x01\bactor_id\xd2\x01\x0flinked_actor_id\"\xde\x01\n" +
-	"\x10LinkActorRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x125\n" +
-	"\x0flinked_actor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\rlinkedActorId:i\x92Af\n" +
-	"d*\x12Link Actor Request21Request to link two actors for cascading failures\xd2\x01\bactor_id\xd2\x01\x0flinked_actor_id\"l\n" +
-	"\x11LinkActorResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess:=\x92A:\n" +
-	"8*\x13Link Actor Response2!Response confirming link creation\"\xcd\x01\n" +
-	"\x12UnlinkActorRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x125\n" +
-	"\x0flinked_actor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\rlinkedActorId:V\x92AS\n" +
-	"Q*\x14Unlink Actor Request2\x1cRequest to unlink two actors\xd2\x01\bactor_id\xd2\x01\x0flinked_actor_id\"o\n" +
-	"\x13UnlinkActorResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess:>\x92A;\n" +
-	"9*\x15Unlink Actor Response2 Response confirming link removal\"\x9b\x01\n" +
-	"\x17CheckActorExistsRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId:V\x92AS\n" +
-	"Q*\x1aCheck Actor Exists Request2(Request to check if virtual actor exists\xd2\x01\bactor_id\"\xc5\x01\n" +
-	"\x18CheckActorExistsResponse\x12\x16\n" +
-	"\x06exists\x18\x01 \x01(\bR\x06exists\x12\x1b\n" +
-	"\tis_active\x18\x02 \x01(\bR\bisActive\x12\x1d\n" +
+	"Actor Link22Two-way link between actors for cascading failures\xd2\x01\bactor_id\xd2\x01\x0flinked_actor_id\"\x86\x02\n" +
+	"\x10LinkActorRequest\x12&\n" +
 	"\n" +
-	"is_virtual\x18\x03 \x01(\bR\tisVirtual:U\x92AR\n" +
-	"P*\x1bCheck Actor Exists Response21Response indicating if actor exists and is active\"\xa4\a\n" +
-	"\x0fAskReplyRequest\x12)\n" +
-	"\tnamespace\x18\x01 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x12,\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x125\n" +
+	"\x0flinked_actor_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\rlinkedActorId:i\x92Af\n" +
+	"d*\x12Link Actor Request21Request to link two actors for cascading failures\xd2\x01\bactor_id\xd2\x01\x0flinked_actor_id\"\x94\x01\n" +
+	"\x11LinkActorResponse\x12&\n" +
 	"\n" +
-	"actor_type\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tactorType\x12\x1f\n" +
-	"\vhttp_method\x18\x03 \x01(\tR\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess:=\x92A:\n" +
+	"8*\x13Link Actor Response2!Response confirming link creation\"\xf5\x01\n" +
+	"\x12UnlinkActorRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x125\n" +
+	"\x0flinked_actor_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\rlinkedActorId:V\x92AS\n" +
+	"Q*\x14Unlink Actor Request2\x1cRequest to unlink two actors\xd2\x01\bactor_id\xd2\x01\x0flinked_actor_id\"\x97\x01\n" +
+	"\x13UnlinkActorResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess:>\x92A;\n" +
+	"9*\x15Unlink Actor Response2 Response confirming link removal\"\xc3\x01\n" +
+	"\x17CheckActorExistsRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId:V\x92AS\n" +
+	"Q*\x1aCheck Actor Exists Request2(Request to check if virtual actor exists\xd2\x01\bactor_id\"\xed\x01\n" +
+	"\x18CheckActorExistsResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x16\n" +
+	"\x06exists\x18\x02 \x01(\bR\x06exists\x12\x1b\n" +
+	"\tis_active\x18\x03 \x01(\bR\bisActive\x12\x1d\n" +
+	"\n" +
+	"is_virtual\x18\x04 \x01(\bR\tisVirtual:U\x92AR\n" +
+	"P*\x1bCheck Actor Exists Response21Response indicating if actor exists and is active\"\xcc\a\n" +
+	"\x0fAskReplyRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12)\n" +
+	"\tnamespace\x18\x02 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x12,\n" +
+	"\n" +
+	"actor_type\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tactorType\x12\x1f\n" +
+	"\vhttp_method\x18\x04 \x01(\tR\n" +
 	"httpMethod\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\fR\apayload\x12K\n" +
-	"\aheaders\x18\x05 \x03(\v21.plexspaces.actor.v1.AskReplyRequest.HeadersEntryR\aheaders\x12X\n" +
-	"\fquery_params\x18\x06 \x03(\v25.plexspaces.actor.v1.AskReplyRequest.QueryParamsEntryR\vqueryParams\x12\x12\n" +
-	"\x04path\x18\a \x01(\tR\x04path\x12\x18\n" +
-	"\asubpath\x18\b \x01(\tR\asubpath\x12%\n" +
-	"\tsender_id\x18\t \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\bsenderId\x12@\n" +
-	"\fmessage_type\x18\n" +
-	" \x01(\tB\x1d\xbaH\x1ar\x18R\x00R\x04callR\x05queryR\acommandR\vmessageType\x12/\n" +
-	"\x0ecorrelation_id\x18\v \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\rcorrelationId\x12#\n" +
-	"\breply_to\x18\f \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\areplyTo\x12'\n" +
+	"\apayload\x18\x05 \x01(\fR\apayload\x12K\n" +
+	"\aheaders\x18\x06 \x03(\v21.plexspaces.actor.v1.AskReplyRequest.HeadersEntryR\aheaders\x12X\n" +
+	"\fquery_params\x18\a \x03(\v25.plexspaces.actor.v1.AskReplyRequest.QueryParamsEntryR\vqueryParams\x12\x12\n" +
+	"\x04path\x18\b \x01(\tR\x04path\x12\x18\n" +
+	"\asubpath\x18\t \x01(\tR\asubpath\x12%\n" +
+	"\tsender_id\x18\n" +
+	" \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\bsenderId\x12@\n" +
+	"\fmessage_type\x18\v \x01(\tB\x1d\xbaH\x1ar\x18R\x00R\x04callR\x05queryR\acommandR\vmessageType\x12/\n" +
+	"\x0ecorrelation_id\x18\f \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\rcorrelationId\x12#\n" +
+	"\breply_to\x18\r \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\areplyTo\x12'\n" +
 	"\n" +
-	"message_id\x18\r \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tmessageId\x12C\n" +
-	"\atimeout\x18\x0e \x01(\v2\x19.google.protobuf.DurationB\x0e\xe0A\x01\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\atimeout\x12'\n" +
+	"message_id\x18\x0e \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tmessageId\x12C\n" +
+	"\atimeout\x18\x0f \x01(\v2\x19.google.protobuf.DurationB\x0e\xe0A\x01\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\atimeout\x12'\n" +
 	"\n" +
-	"actor_name\x18\x14 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tactorName\x1a:\n" +
+	"actor_name\x18\x15 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tactorName\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a>\n" +
@@ -8703,13 +9221,15 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:V\x92AS\n" +
 	"Q*\x11Ask Reply Request2/Request to ask an actor via HTTP-like interface\xd2\x01\n" +
-	"actor_type\"\xcf\x02\n" +
-	"\x10AskReplyResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload\x12L\n" +
-	"\aheaders\x18\x03 \x03(\v22.plexspaces.actor.v1.AskReplyResponse.HeadersEntryR\aheaders\x12\x19\n" +
-	"\bactor_id\x18\x04 \x01(\tR\aactorId\x12#\n" +
-	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\x1a:\n" +
+	"actor_type\"\xf7\x02\n" +
+	"\x10AskReplyResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
+	"\apayload\x18\x03 \x01(\fR\apayload\x12L\n" +
+	"\aheaders\x18\x04 \x03(\v22.plexspaces.actor.v1.AskReplyResponse.HeadersEntryR\aheaders\x12\x19\n" +
+	"\bactor_id\x18\x05 \x01(\tR\aactorId\x12#\n" +
+	"\rerror_message\x18\x06 \x01(\tR\ferrorMessage\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:=\x92A:\n" +

@@ -134,8 +134,7 @@ async fn create_test_node(node_id: &str) -> Arc<Node> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let db_path =
-        std::env::temp_dir().join(format!("plexspaces-dashboard-{node_id}-{unique}.db"));
+    let db_path = std::env::temp_dir().join(format!("plexspaces-dashboard-{node_id}-{unique}.db"));
     let connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
     let release_spec = ReleaseSpec {
         name: format!("dashboard-{node_id}"),
@@ -912,17 +911,20 @@ async fn test_get_workflows_reads_shared_storage_and_filters() {
         .unwrap();
     let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
     storage
-        .save_definition(&ctx, &WorkflowDefinition {
-            id: "order-approval".to_string(),
-            name: "Order Approval".to_string(),
-            version: "1.0.0".to_string(),
-            steps: Vec::new(),
-            default_timeout: None,
-            default_retry: None,
-            labels: std::collections::HashMap::new(),
-            created_at: None,
-            updated_at: None,
-        })
+        .save_definition(
+            &ctx,
+            &WorkflowDefinition {
+                id: "order-approval".to_string(),
+                name: "Order Approval".to_string(),
+                version: "1.0.0".to_string(),
+                steps: Vec::new(),
+                default_timeout: None,
+                default_retry: None,
+                labels: std::collections::HashMap::new(),
+                created_at: None,
+                updated_at: None,
+            },
+        )
         .await
         .unwrap();
     let execution_id = storage

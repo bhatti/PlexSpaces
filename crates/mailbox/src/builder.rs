@@ -269,7 +269,7 @@ impl MailboxBuilder {
         }
 
         // Create mailbox
-        Mailbox::new(config, mailbox_id).await
+        Mailbox::new(config, mailbox_id, String::new(), String::new(), None).await
     }
 }
 
@@ -452,7 +452,7 @@ mod tests {
         let mut config = mailbox_config_default();
         config.channel_provider = 999; // Invalid backend value
 
-        let result = Mailbox::new(config, "test-mailbox".to_string()).await;
+        let result = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None).await;
 
         // Should fail because backend is invalid
         assert!(result.is_err());

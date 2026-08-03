@@ -9,13 +9,13 @@
 
 use super::test_helpers::{registry_ask, spawn_actor_helper};
 use async_trait::async_trait;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::behavior_factory::BehaviorRegistry;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
     InitializableServiceLocator, Message, RequestContextExt, ServiceLocator,
 };
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;

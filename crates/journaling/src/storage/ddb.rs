@@ -1618,7 +1618,8 @@ impl JournalStorage for DynamoDBJournalStorage {
         events.sort_by(|a, b| a.sequence.cmp(&b.sequence));
 
         // Build page response
-        let page_response = PageResponse { request_id: ulid::Ulid::new().to_string(),
+        let page_response = PageResponse {
+            request_id: ulid::Ulid::new().to_string(),
             total_size: 0, // Total size not available without full scan
             offset: page_request.offset,
             limit: page_request.limit,

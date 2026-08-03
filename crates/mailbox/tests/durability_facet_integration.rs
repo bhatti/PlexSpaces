@@ -129,7 +129,7 @@ mod tests {
             .unwrap();
 
         // Verify mailbox stats are accessible
-        let stats = mailbox.get_stats().await;
+        let stats = mailbox.get_stats();
         assert!(stats.is_durable);
         assert_eq!(stats.backend_type, "sqlite");
     }
@@ -152,7 +152,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Get stats
-        let stats = mailbox.get_stats().await;
+        let stats = mailbox.get_stats();
         assert!(stats.total_enqueued >= 2);
         assert_eq!(stats.backend_type, "sqlite");
         assert!(stats.is_durable);
@@ -172,7 +172,7 @@ mod tests {
         // 1. Check mailbox.is_durable()
         // 2. Log metrics
         // 3. Call facet.on_attach()
-        let mailbox_stats = mailbox.get_stats().await;
+        let mailbox_stats = mailbox.get_stats();
         assert!(
             mailbox_stats.is_durable,
             "Mailbox should be durable for this test"
@@ -275,7 +275,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-actor".to_string())
+            let mailbox = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
 
@@ -350,7 +350,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-actor".to_string())
+            let mailbox = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
 
@@ -383,7 +383,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
             // Verify mailbox can be used after recovery
-            let stats = mailbox.get_stats().await;
+            let stats = mailbox.get_stats();
             assert!(stats.is_durable);
 
             // Send new message

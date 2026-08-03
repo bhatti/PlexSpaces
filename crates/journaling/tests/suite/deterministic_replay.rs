@@ -10,11 +10,11 @@
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 mod sqlite_tests {
+    use plexspaces_facet::Facet;
     #[cfg(feature = "postgres-backend")]
     use plexspaces_journaling::sql::PostgresJournalStorage;
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_journaling::sql::SqliteJournalStorage;
-    use plexspaces_facet::Facet;
     use plexspaces_journaling::*;
     use plexspaces_proto::prost_types;
     use std::sync::Arc;

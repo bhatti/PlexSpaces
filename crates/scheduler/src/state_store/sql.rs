@@ -49,9 +49,27 @@ impl SqliteSchedulingStateStore {
         );
 
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(1)
             .connect(&connection_string)
             .await?;
+
+        // Production SQLite PRAGMAs (ref: micrologics.org/blog/sqlite-in-production-*)
+        for pragma in &[
+            "PRAGMA journal_mode=WAL",
+            "PRAGMA synchronous=NORMAL",
+            "PRAGMA busy_timeout=500",
+            "PRAGMA cache_size=-64000",
+            "PRAGMA mmap_size=1073741824",
+            "PRAGMA journal_size_limit=67108864",
+            "PRAGMA wal_autocheckpoint=0",
+        ] {
+            sqlx::query(pragma).execute(&pool).await.map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("PRAGMA failed: {e}"),
+                )) as Box<dyn Error + Send + Sync>
+            })?;
+        }
 
         // For SQLite, use manual CREATE TABLE to avoid migration conflicts when sharing database
         // with other crates (keyvalue, blob, etc.). PostgreSQL uses sqlx::migrate!().

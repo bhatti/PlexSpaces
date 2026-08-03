@@ -232,19 +232,19 @@ pub mod v1 {
     pub use super::facets::v1 as facets;
     pub use super::grpc::v1 as grpc;
     pub use super::journaling::v1 as journaling;
+    pub use super::keyvalue::v1 as keyvalue;
     pub use super::mailbox::v1 as mailbox;
     pub use super::node::v1 as node;
     pub use super::pool::v1 as pool;
     pub use super::processgroups::v1 as processgroups;
-    pub use super::security::v1 as security;
-    pub use super::timer::v1 as timer;
-    pub use super::wasm::v1 as wasm;
-    pub use super::workflow::v1 as workflow;
-    pub use super::keyvalue::v1 as keyvalue;
     pub use super::scheduling::v1 as scheduling;
+    pub use super::security::v1 as security;
     pub use super::storage::v1 as storage;
     pub use super::supervision::v1 as supervision;
+    pub use super::timer::v1 as timer;
     pub use super::tuplespace::v1 as tuplespace;
+    pub use super::wasm::v1 as wasm;
+    pub use super::workflow::v1 as workflow;
 }
 
 // Re-export v1 actor service for convenience

@@ -22,7 +22,7 @@
 //! Orchestrates multi-step workflow execution with retry logic.
 //! Following TDD principles - GREEN phase implementation.
 
-use plexspaces_actor::{RequestContext, RequestContextExt};
+use plexspaces_actor::RequestContext;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
@@ -200,8 +200,7 @@ impl WorkflowExecutor {
                     if step_type(step) == StepType::StepTypeChoice {
                         // Choice step: read decision from step execution output
                         let history = storage.get_step_execution_history(execution_id).await?;
-                        let choice_execution =
-                            history.iter().rfind(|s| s.step_id == step.id);
+                        let choice_execution = history.iter().rfind(|s| s.step_id == step.id);
 
                         if let Some(exec) = choice_execution {
                             if let Some(output) = exec.output_value() {
@@ -615,10 +614,7 @@ impl WorkflowExecutor {
             // Spawn concurrent branch execution
             let task = tokio::spawn(async move {
                 // Simulate delay if specified
-                if let Some(delay_ms) = branch_config
-                    .get("delay_ms")
-                    .and_then(Self::json_as_u64)
-                {
+                if let Some(delay_ms) = branch_config.get("delay_ms").and_then(Self::json_as_u64) {
                     sleep(Duration::from_millis(delay_ms)).await;
                 }
 
@@ -806,9 +802,7 @@ impl WorkflowExecutor {
                 let task = tokio::spawn(async move {
                     // Simulate delay if specified
                     let item_cfg = step_config_value(&item_step);
-                    if let Some(delay_ms) =
-                        item_cfg.get("delay_ms").and_then(Self::json_as_u64)
-                    {
+                    if let Some(delay_ms) = item_cfg.get("delay_ms").and_then(Self::json_as_u64) {
                         sleep(Duration::from_millis(delay_ms)).await;
                     }
 
@@ -1078,9 +1072,8 @@ impl WorkflowExecutor {
 
         // Calculate wait duration from config
         let wait_cfg = step_config_value(step);
-        let wait_duration = if let Some(duration_ms) = wait_cfg
-            .get("duration_ms")
-            .and_then(Self::json_as_u64)
+        let wait_duration = if let Some(duration_ms) =
+            wait_cfg.get("duration_ms").and_then(Self::json_as_u64)
         {
             // Wait for milliseconds
             Duration::from_millis(duration_ms)
@@ -1190,9 +1183,7 @@ impl WorkflowExecutor {
             })?;
 
         // Extract optional timeout
-        let timeout_ms = signal_cfg
-            .get("timeout_ms")
-            .and_then(Self::json_as_u64);
+        let timeout_ms = signal_cfg.get("timeout_ms").and_then(Self::json_as_u64);
 
         let poll_interval = Duration::from_millis(10); // Poll every 10ms
         let start_time = std::time::Instant::now();
@@ -1364,7 +1355,7 @@ mod tests {
     use super::*;
     use crate::storage::sql::make_workflow_definition;
     use crate::types::WorkflowExecutionExt;
-    use plexspaces_actor::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     use serde_json::json;
 
     #[tokio::test]
@@ -1389,10 +1380,15 @@ mod tests {
 
         storage.save_definition(&ctx, &def).await.unwrap();
 
-        let execution_id =
-            WorkflowExecutor::start_execution(&storage, &ctx, "test", "1.0", json!({"test": "input"}))
-                .await
-                .unwrap();
+        let execution_id = WorkflowExecutor::start_execution(
+            &storage,
+            &ctx,
+            "test",
+            "1.0",
+            json!({"test": "input"}),
+        )
+        .await
+        .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(
@@ -1407,7 +1403,8 @@ mod tests {
         let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let result =
-            WorkflowExecutor::start_execution(&storage, &ctx, "non-existent", "1.0", json!({})).await;
+            WorkflowExecutor::start_execution(&storage, &ctx, "non-existent", "1.0", json!({}))
+                .await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));

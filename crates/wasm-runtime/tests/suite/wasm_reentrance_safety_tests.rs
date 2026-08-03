@@ -453,7 +453,10 @@ mod tests {
                     "Re-entry trap on recovery call: {}",
                     resp_str
                 );
-                eprintln!("PASS: Instance recovered after handle() error (response: {})", resp_str);
+                eprintln!(
+                    "PASS: Instance recovered after handle() error (response: {})",
+                    resp_str
+                );
             }
             Ok(Err(e)) => {
                 let err_str = e.to_string();

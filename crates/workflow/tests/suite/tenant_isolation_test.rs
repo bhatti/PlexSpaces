@@ -6,8 +6,8 @@
 //! Verifies that workflows created by one tenant cannot be accessed by another.
 
 use plexspaces_actor::{RequestContext, RequestContextExt};
-use plexspaces_workflow::storage::WorkflowStorage;
 use plexspaces_workflow::storage::sql::make_workflow_definition;
+use plexspaces_workflow::storage::WorkflowStorage;
 use plexspaces_workflow::types::*;
 use serde_json::json;
 use std::collections::HashMap;
@@ -28,12 +28,19 @@ async fn test_workflow_definitions_isolated_by_tenant() {
     storage.save_definition(&tenant_a, &def).await.unwrap();
 
     // Tenant A can access their own definition
-    let result = storage.get_definition(&tenant_a, "shared-name", "1.0").await;
+    let result = storage
+        .get_definition(&tenant_a, "shared-name", "1.0")
+        .await;
     assert!(result.is_ok());
 
     // Tenant B cannot access tenant A's definition
-    let result = storage.get_definition(&tenant_b, "shared-name", "1.0").await;
-    assert!(result.is_err(), "Tenant B should not see tenant A's workflow");
+    let result = storage
+        .get_definition(&tenant_b, "shared-name", "1.0")
+        .await;
+    assert!(
+        result.is_err(),
+        "Tenant B should not see tenant A's workflow"
+    );
 }
 
 #[tokio::test]
@@ -81,7 +88,10 @@ async fn test_workflow_executions_isolated_by_tenant() {
 
     // Tenant B cannot access tenant A's execution
     let result = storage.get_execution(&tenant_b, &exec_id).await;
-    assert!(result.is_err(), "Tenant B should not see tenant A's execution");
+    assert!(
+        result.is_err(),
+        "Tenant B should not see tenant A's execution"
+    );
 }
 
 #[tokio::test]
@@ -99,7 +109,10 @@ async fn test_workflow_delete_respects_tenant() {
     // Should either fail or silently do nothing
     // Verify tenant A's definition still exists
     let still_exists = storage.get_definition(&tenant_a, "wf", "1.0").await;
-    assert!(still_exists.is_ok(), "Tenant A's definition should still exist after B's delete attempt");
+    assert!(
+        still_exists.is_ok(),
+        "Tenant A's definition should still exist after B's delete attempt"
+    );
 }
 
 #[tokio::test]
@@ -114,5 +127,8 @@ async fn test_namespace_isolation_within_tenant() {
 
     // Same tenant, different namespace cannot access
     let result = storage.get_definition(&ns2, "wf", "1.0").await;
-    assert!(result.is_err(), "Different namespace should not see the workflow");
+    assert!(
+        result.is_err(),
+        "Different namespace should not see the workflow"
+    );
 }

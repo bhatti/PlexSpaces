@@ -137,9 +137,9 @@ async fn test_genserver_handle_request() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -204,9 +204,9 @@ async fn test_genevent_handle_event() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -271,9 +271,9 @@ async fn test_genfsm_handle_transition() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -337,9 +337,9 @@ async fn test_fallback_to_handle_message() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -416,9 +416,9 @@ async fn test_channel_send_to_queue() {
         false,                 // durability_enabled
         None,                  // global_reinstantiation_semaphore
         None,                  // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),         // tenant_id
+        String::new(),         // default_namespace
+        String::new(),         // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -477,9 +477,9 @@ async fn test_channel_publish_to_topic() {
         false,                 // durability_enabled
         None,                  // global_reinstantiation_semaphore
         None,                  // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),         // tenant_id
+        String::new(),         // default_namespace
+        String::new(),         // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -540,9 +540,9 @@ async fn test_channel_service_optional() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");

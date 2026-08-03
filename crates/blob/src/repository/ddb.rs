@@ -139,10 +139,7 @@ impl DynamoDBBlobRepository {
             "Blob metadata repository initialized"
         );
 
-        Ok(Self {
-            client,
-            table_name,
-        })
+        Ok(Self { client, table_name })
     }
 
     /// Ensure table exists with GSIs.

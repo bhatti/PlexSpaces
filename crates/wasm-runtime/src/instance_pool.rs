@@ -170,8 +170,8 @@ impl InstancePool {
             None, // ElasticPoolService not available at pool level
             None, // OutboundHttpClient not available at pool level
             self.config.durability_enabled,
-            None, // global_reinstantiation_semaphore - pool not tied to runtime
-            None, // shared_timer_pool - pool instances don't track timers
+            None,          // global_reinstantiation_semaphore - pool not tied to runtime
+            None,          // shared_timer_pool - pool instances don't track timers
             String::new(), // tenant_id - pool instances are not tied to a specific tenant
             String::new(), // default_namespace - pool instances are not tied to a specific namespace
             String::new(), // node_grpc_address - pool instances are not tied to a specific node

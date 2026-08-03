@@ -49,9 +49,8 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
             .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -65,9 +64,8 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
             .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -77,9 +75,8 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner.register(ctx, registration).await.map_err(|e| {
-            Box::new(std::io::Error::other(
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })
     }
 
@@ -88,14 +85,10 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         ctx: &plexspaces_actor::RequestContext,
         opts: DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .discover(ctx, opts)
-            .await
-            .map_err(|e| {
-                Box::new(std::io::Error::other(
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
-            })
+        self.inner.discover(ctx, opts).await.map_err(|e| {
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn unregister(
@@ -200,12 +193,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register services using service_locator_impl directly (not trait object)
     // because register_service has `where Self: Sized` constraint
-    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator_impl
         .register_service(actor_registry.clone())
-        .await;
-    service_locator_impl
-        .register_service(reply_waiter_registry)
         .await;
 
     // Register VirtualActorManager

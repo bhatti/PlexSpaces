@@ -55,8 +55,8 @@ use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,
     types::{
-        AttributeDefinition, AttributeValue, BillingMode, KeySchemaElement,
-        KeyType, ScalarAttributeType, TimeToLiveSpecification,
+        AttributeDefinition, AttributeValue, BillingMode, KeySchemaElement, KeyType,
+        ScalarAttributeType, TimeToLiveSpecification,
     },
     Client as DynamoDbClient,
 };

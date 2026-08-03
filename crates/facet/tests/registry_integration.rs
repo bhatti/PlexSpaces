@@ -347,7 +347,7 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
             // for reply routing, and the actual actor mailbox is used for receiving messages.
             use plexspaces_mailbox::{mailbox_config_default, Mailbox};
             let mailbox_for_ref = Arc::new(
-                Mailbox::new(mailbox_config_default(), format!("ref-{}", actor_id))
+                Mailbox::new(mailbox_config_default(), format!("ref-{}", actor_id), String::new(), String::new(), None)
                     .await
                     .expect("Failed to create mailbox for ActorRef"),
             );

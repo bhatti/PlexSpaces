@@ -19,10 +19,13 @@ use thiserror::Error;
 /// Certificate generation errors.
 #[derive(Debug, Error)]
 pub enum CertGenError {
+    /// I/O error when reading or writing certificate files.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    /// Certificate generation failed.
     #[error("Certificate generation failed: {0}")]
     GenerationFailed(String),
+    /// The specified certificate directory is invalid.
     #[error("Invalid certificate directory: {0}")]
     InvalidDirectory(String),
 }
@@ -30,13 +33,18 @@ pub enum CertGenError {
 /// Paths for a generated cert set (CA + server/node).
 #[derive(Debug, Clone)]
 pub struct CertificatePaths {
+    /// Path to the CA certificate PEM file.
     pub ca_cert: PathBuf,
+    /// Path to the CA private key PEM file.
     pub ca_key: PathBuf,
+    /// Path to the server certificate PEM file.
     pub server_cert: PathBuf,
+    /// Path to the server private key PEM file.
     pub server_key: PathBuf,
 }
 
 impl CertificatePaths {
+    /// Create certificate paths rooted at the given directory.
     pub fn new(cert_dir: &Path) -> Self {
         Self {
             ca_cert: cert_dir.join("ca.crt"),
@@ -46,6 +54,7 @@ impl CertificatePaths {
         }
     }
 
+    /// Returns true if all four certificate/key files exist on disk.
     pub fn all_exist(&self) -> bool {
         self.ca_cert.exists()
             && self.ca_key.exists()
@@ -61,6 +70,7 @@ pub struct CertificateGenerator {
 }
 
 impl CertificateGenerator {
+    /// Create a new generator using the given certificate directory (created if absent).
     pub fn new(cert_dir: impl AsRef<Path>) -> Result<Self, CertGenError> {
         let cert_dir = cert_dir.as_ref().to_path_buf();
         if !cert_dir.exists() {
@@ -141,8 +151,7 @@ impl CertificateGenerator {
     // ─── Private helpers ─────────────────────────────────────────────────────
 
     fn make_ca_pem(cn: &str, days: i64) -> Result<(String, String), CertGenError> {
-        let key = KeyPair::generate()
-            .map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
+        let key = KeyPair::generate().map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
 
         let mut params = CertificateParams::new(vec![])
             .map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
@@ -151,8 +160,7 @@ impl CertificateGenerator {
         params.distinguished_name = dn;
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         params.not_before = time::OffsetDateTime::now_utc();
-        params.not_after =
-            time::OffsetDateTime::now_utc() + time::Duration::days(days);
+        params.not_after = time::OffsetDateTime::now_utc() + time::Duration::days(days);
 
         let cert = params
             .self_signed(&key)
@@ -166,8 +174,8 @@ impl CertificateGenerator {
         server_days: i64,
     ) -> Result<(String, String, String, String), CertGenError> {
         // Generate CA key + cert.
-        let ca_key = KeyPair::generate()
-            .map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
+        let ca_key =
+            KeyPair::generate().map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
         let mut ca_params = CertificateParams::new(vec![])
             .map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
         {
@@ -177,8 +185,7 @@ impl CertificateGenerator {
         }
         ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         ca_params.not_before = time::OffsetDateTime::now_utc();
-        ca_params.not_after =
-            time::OffsetDateTime::now_utc() + time::Duration::days(365);
+        ca_params.not_after = time::OffsetDateTime::now_utc() + time::Duration::days(365);
         let ca_cert = ca_params
             .self_signed(&ca_key)
             .map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
@@ -193,8 +200,8 @@ impl CertificateGenerator {
         }
 
         // Generate server key + cert signed by CA.
-        let server_key = KeyPair::generate()
-            .map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
+        let server_key =
+            KeyPair::generate().map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
         let mut server_params = CertificateParams::new(vec![])
             .map_err(|e| CertGenError::GenerationFailed(e.to_string()))?;
         {
@@ -287,7 +294,10 @@ mod tests {
         let content1 = fs::read_to_string(temp_dir.path().join("ca.crt")).unwrap();
         gen.generate_ca(None, None).unwrap();
         let content2 = fs::read_to_string(temp_dir.path().join("ca.crt")).unwrap();
-        assert_eq!(content1, content2, "idempotent: should not overwrite existing certs");
+        assert_eq!(
+            content1, content2,
+            "idempotent: should not overwrite existing certs"
+        );
     }
 
     #[test]

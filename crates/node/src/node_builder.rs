@@ -472,9 +472,11 @@ impl NodeBuilder {
         // (`Node::start` also sets this from config). `NodeBuilder::build` skips `start`, so set
         // it here from `listen_addr` for tests and embedded nodes.
         if let Some(registry) = node.service_locator().actor_registry().await {
-            registry.set_local_listen_addr(
-                plexspaces_common::dialable_node_address(node.config().listen_addr.trim()),
-            ).await;
+            registry
+                .set_local_listen_addr(plexspaces_common::dialable_node_address(
+                    node.config().listen_addr.trim(),
+                ))
+                .await;
         }
 
         // Register gRPC transport clients so that remote actor messaging works without
@@ -482,7 +484,9 @@ impl NodeBuilder {
         // these; here we register the plain gRPC clients which are sufficient for tests
         // and embedded nodes that do not need WebSocket thin-client support.
         {
-            use plexspaces_actor::{GrpcActorTransportClient, GrpcNodeTransportClient, InitializableServiceLocator};
+            use plexspaces_actor::{
+                GrpcActorTransportClient, GrpcNodeTransportClient, InitializableServiceLocator,
+            };
 
             let sl = node.service_locator();
             let sl_trait: std::sync::Arc<dyn plexspaces_actor::ServiceLocator> = sl.clone();
@@ -490,10 +494,12 @@ impl NodeBuilder {
             let grpc_node = std::sync::Arc::new(GrpcNodeTransportClient::new(sl_trait));
             sl.register_actor_transport_client(
                 grpc_actor as std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
-            ).await;
+            )
+            .await;
             sl.register_node_transport_client(
                 grpc_node as std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
-            ).await;
+            )
+            .await;
         }
 
         node

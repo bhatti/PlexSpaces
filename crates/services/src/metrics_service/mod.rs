@@ -881,7 +881,9 @@ mod tests {
         let service = test_service();
         metrics::counter!("plexspaces_messages_routed_total", "namespace" => "test-ns")
             .increment(1);
-        let request = Request::new(ExportPrometheusRequest { request_id: ulid::Ulid::new().to_string() });
+        let request = Request::new(ExportPrometheusRequest {
+            request_id: ulid::Ulid::new().to_string(),
+        });
         let response = service.export_prometheus(request).await.unwrap();
         let body = &response.get_ref().content;
         assert!(
@@ -906,7 +908,9 @@ mod tests {
         });
         service.record_metric(request).await.unwrap();
         let exp = service
-            .export_prometheus(Request::new(ExportPrometheusRequest { request_id: ulid::Ulid::new().to_string() }))
+            .export_prometheus(Request::new(ExportPrometheusRequest {
+                request_id: ulid::Ulid::new().to_string(),
+            }))
             .await
             .unwrap();
         assert!(exp
@@ -931,7 +935,9 @@ mod tests {
         });
         service.record_message_routing(request).await.unwrap();
         let exp = service
-            .export_prometheus(Request::new(ExportPrometheusRequest { request_id: ulid::Ulid::new().to_string() }))
+            .export_prometheus(Request::new(ExportPrometheusRequest {
+                request_id: ulid::Ulid::new().to_string(),
+            }))
             .await
             .unwrap();
         assert!(exp

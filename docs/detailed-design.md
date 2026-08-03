@@ -3141,19 +3141,32 @@ let pong = target.ask(ping, Duration::from_millis(100)).await?;
 
 **`__PING__` / `__PONG__`**: the actor run loop handles `__PING__` automatically before dispatching to actor code.  A `__PONG__` reply with the same `correlation_id` is sent back, allowing the caller's `ask()` future to complete without any actor-level handler.
 
+**Fast-path vs slow-path data queue**:
+
+| Ordering | Backend | Allocation |
+|----------|---------|------------|
+| FIFO (default) | Direct bounded `mpsc` channel | ~1–2 KB heap |
+| LIFO, Priority in-memory | InMemoryChannel + internal queue + processor task | ~2–4 KB heap |
+| Durable (SQLite/Redis/…) | Pluggable `Channel` trait backend | backend-dependent |
+
+FIFO in-memory is the common case.  It uses a single bounded `mpsc` channel — no intermediate `VecDeque`, no background task, no broadcast ring buffer.  The slow path is only activated for priority ordering or durable backends.
+
 **Observability** (`MailboxObservabilityStats`):
 
 | Field | Meaning |
 |-------|---------|
 | `data_queue_size` | Pending data messages |
 | `ctrl_queue_size` | Pending control messages |
+| `total_enqueued` | Lifetime data messages enqueued (monotonic) |
+| `total_dequeued` | Lifetime messages dequeued (monotonic) |
+| `total_dropped` | Messages dropped by DropOldest/DropNewest backpressure — non-zero signals actor falling behind |
 | `total_size()` | `data_queue_size + ctrl_queue_size` |
 
 **Metrics**: `plexspaces_mailbox_ctrl_enqueued_total`, `plexspaces_mailbox_ctrl_dequeued_total` (labeled by `mailbox_id` and `message_type`).
 
 ### Channel as Mailbox Backend
 
-The data queue is backed by a pluggable `Channel` trait:
+The data queue is backed by a pluggable `Channel` trait (used for non-FIFO ordering and durable backends):
 
 ```rust
 use plexspaces_mailbox::MailboxBuilder;

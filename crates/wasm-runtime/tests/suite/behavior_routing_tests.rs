@@ -167,9 +167,9 @@ async fn test_genserver_routes_call_to_handle_request() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -220,9 +220,9 @@ async fn test_genevent_routes_cast_to_handle_event() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -272,9 +272,9 @@ async fn test_genevent_routes_info_to_handle_event() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -323,9 +323,9 @@ async fn test_genfsm_routes_to_handle_transition() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -375,9 +375,9 @@ async fn test_fallback_to_handle_message() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -426,9 +426,9 @@ async fn test_genserver_fallback_on_missing_handle_request() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
-        String::new(), // tenant_id
-        String::new(), // default_namespace
-        String::new(), // node_grpc_address
+        String::new(),  // tenant_id
+        String::new(),  // default_namespace
+        String::new(),  // node_grpc_address
     )
     .await
     .expect("Failed to create instance");

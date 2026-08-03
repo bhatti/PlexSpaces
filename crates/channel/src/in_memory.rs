@@ -24,7 +24,7 @@ use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::timeout;
@@ -94,7 +94,9 @@ pub struct InMemoryChannel {
     config: ChannelConfig,
     sender: ChannelSender,
     receiver: Arc<RwLock<ChannelReceiver>>,
-    broadcast_tx: broadcast::Sender<Message>,
+    /// Lazy broadcast sender — only initialized on the first `subscribe()` call.
+    /// Actors that never use pub/sub pay zero allocation here (~100KB saved per mailbox).
+    broadcast_tx: OnceLock<broadcast::Sender<Message>>,
     stats: Arc<RwLock<ChannelStatsData>>,
     closed: Arc<RwLock<bool>>,
 }
@@ -157,14 +159,11 @@ impl InMemoryChannel {
             (ChannelSender::Bounded(tx), ChannelReceiver::Bounded(rx))
         };
 
-        // Create broadcast channel for pub/sub
-        let (broadcast_tx, _) = broadcast::channel(1024);
-
         Ok(Self {
             config,
             sender,
             receiver: Arc::new(RwLock::new(receiver)),
-            broadcast_tx,
+            broadcast_tx: OnceLock::new(),
             stats: Arc::new(RwLock::new(ChannelStatsData::default())),
             closed: Arc::new(RwLock::new(false)),
         })
@@ -313,7 +312,8 @@ impl Channel for InMemoryChannel {
         &self,
         _consumer_group: Option<String>,
     ) -> ChannelResult<BoxStream<'static, Message>> {
-        let mut rx = self.broadcast_tx.subscribe();
+        let tx = self.broadcast_tx.get_or_init(|| broadcast::channel(1024).0);
+        let mut rx = tx.subscribe();
 
         let stream = async_stream::stream! {
             while let Ok(msg) = rx.recv().await {
@@ -330,9 +330,15 @@ impl Channel for InMemoryChannel {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
 
-        // Broadcast to all subscribers
-        let subscriber_count = self.broadcast_tx.receiver_count();
-        let _ = self.broadcast_tx.send(message); // Ignore send errors (no subscribers)
+        // If no subscriber has ever called subscribe(), there is nothing to broadcast to.
+        let subscriber_count = match self.broadcast_tx.get() {
+            None => 0,
+            Some(tx) => {
+                let count = tx.receiver_count();
+                let _ = tx.send(message); // Ignore send errors (no active subscribers)
+                count
+            }
+        };
 
         // Update stats
         let mut stats = self.stats.write().await;
@@ -582,5 +588,30 @@ mod tests {
         assert_eq!(stats.messages_sent, 3);
         assert_eq!(stats.messages_received, 2);
         assert_eq!(stats.messages_pending, 1);
+    }
+
+    #[tokio::test]
+    async fn test_publish_before_subscribe_is_noop() {
+        // D4 invariant: broadcast_tx is lazily initialized — calling publish() before
+        // any subscriber calls subscribe() must be a no-op: it must not initialize the
+        // OnceLock, must return subscriber_count = 0, and must not panic.
+        let config = create_test_config(10);
+        let channel = InMemoryChannel::new(config).await.unwrap();
+
+        // No subscribe() call — broadcast_tx OnceLock must still be unset.
+        assert!(
+            channel.broadcast_tx.get().is_none(),
+            "broadcast_tx must not be initialized before any subscribe() call"
+        );
+
+        let msg = create_test_message("msg1", "data");
+        let subscriber_count = channel.publish(msg).await.unwrap();
+        assert_eq!(subscriber_count, 0, "publish with no subscribers must return 0");
+
+        // publish() must not have initialized the OnceLock as a side effect.
+        assert!(
+            channel.broadcast_tx.get().is_none(),
+            "broadcast_tx must remain uninitialized after publish() with no subscribers"
+        );
     }
 }

@@ -355,7 +355,7 @@ impl DynamoDBSchedulingStateStore {
                             )
                             .into());
                         }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        tokio::time::sleep(Duration::from_millis(200)).await;
                         continue;
                     }
                     _ => {

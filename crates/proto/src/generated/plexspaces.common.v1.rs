@@ -829,4 +829,86 @@ impl OutboundHttpClientErrorCode {
         }
     }
 }
+/// Configuration for the node-wide idempotency store.
+///
+/// The store is created once at node startup by ServiceLocator and injected into
+/// every Mailbox. Temporary-sender mailboxes (used for ask() internals) receive
+/// no store (None), so they never allocate idempotency state.
+///
+/// ## Defaults (all fields optional in YAML/TOML)
+/// - enabled: true
+/// - backend: IN_MEMORY
+/// - capacity_per_bucket: 10,000 (entries per tenant+namespace pair)
+/// - ttl_seconds: 300 (5 minutes)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IdempotencyConfig {
+    /// Whether idempotency deduplication is active.
+    /// Set to false to disable entirely (no store created, no dedup).
+    /// Default: true.
+    #[prost(bool, tag="1")]
+    pub enabled: bool,
+    /// Storage backend. Default: IN_MEMORY.
+    #[prost(enumeration="IdempotencyBackend", tag="2")]
+    pub backend: i32,
+    /// Max entries per (tenant_id, namespace) LRU bucket.
+    /// Oldest entries are evicted when the bucket is full.
+    /// Default 0 → 10,000. Range: 100..1,000,000.
+    #[prost(uint32, tag="3")]
+    pub capacity_per_bucket: u32,
+    /// How long a processed idempotency key is remembered.
+    /// Client retries arriving within this window are deduplicated.
+    /// Default 0 → 300 s (5 min). Range: 1 s .. 86,400 s (24 h).
+    #[prost(uint32, tag="4")]
+    pub ttl_seconds: u32,
+    /// Connection string for persistent backends (SQLite path or Postgres DSN).
+    /// Leave empty to reuse the node's shared DB pool (recommended).
+    /// Only used when backend is SQLITE or POSTGRES.
+    #[prost(string, tag="5")]
+    pub connection_string: ::prost::alloc::string::String,
+}
+/// Storage backend for idempotency entries.
+///
+/// ## Values
+/// - `IN_MEMORY`: Default. LRU map per (tenant, namespace) bucket. Zero setup.
+///    Entries are lost on restart — safe for short-lived retry windows.
+/// - `SQLITE`: SQLite-backed. Survives restarts. Uses the node's shared DB
+///    connection pool (same file as journaling/channel).
+/// - `POSTGRES`: PostgreSQL-backed for clustered, high-durability deployments.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum IdempotencyBackend {
+    /// In-memory LRU (default). Entries lost on restart.
+    IdempotencyBackendUnspecified = 0,
+    /// In-memory LRU — zero setup, entries lost on restart.
+    IdempotencyBackendInMemory = 1,
+    /// SQLite — durable, single-node. Shares the node DB connection pool.
+    IdempotencyBackendSqlite = 2,
+    /// PostgreSQL — durable, multi-node.
+    IdempotencyBackendPostgres = 3,
+}
+impl IdempotencyBackend {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            IdempotencyBackend::IdempotencyBackendUnspecified => "IDEMPOTENCY_BACKEND_UNSPECIFIED",
+            IdempotencyBackend::IdempotencyBackendInMemory => "IDEMPOTENCY_BACKEND_IN_MEMORY",
+            IdempotencyBackend::IdempotencyBackendSqlite => "IDEMPOTENCY_BACKEND_SQLITE",
+            IdempotencyBackend::IdempotencyBackendPostgres => "IDEMPOTENCY_BACKEND_POSTGRES",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "IDEMPOTENCY_BACKEND_UNSPECIFIED" => Some(Self::IdempotencyBackendUnspecified),
+            "IDEMPOTENCY_BACKEND_IN_MEMORY" => Some(Self::IdempotencyBackendInMemory),
+            "IDEMPOTENCY_BACKEND_SQLITE" => Some(Self::IdempotencyBackendSqlite),
+            "IDEMPOTENCY_BACKEND_POSTGRES" => Some(Self::IdempotencyBackendPostgres),
+            _ => None,
+        }
+    }
+}
 // @@protoc_insertion_point(module)

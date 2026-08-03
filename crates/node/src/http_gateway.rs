@@ -73,7 +73,7 @@ pub const MAX_WASM_FILE_SIZE: usize = 100 * 1024 * 1024;
 /// - `Option<DashboardServiceImpl>`: Dashboard service (if enabled)
 pub type HttpGatewayState = (
     Arc<ActorServiceImpl>,
-    bool,                              // auth_disabled
+    bool,                                                // auth_disabled
     Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>, // jwt_key_pair
     Arc<dyn plexspaces_actor::ServiceLocator>,
     Option<Arc<DashboardServiceImpl>>,
@@ -328,7 +328,8 @@ pub async fn http_auth_middleware(
             if let Some(ref repo) = token_repo {
                 if let Some(ref jti) = claims.jti {
                     if let Ok(true) = repo.is_revoked(jti).await {
-                        let body = serde_json::json!({ "code": 401, "message": "Token has been revoked" });
+                        let body =
+                            serde_json::json!({ "code": 401, "message": "Token has been revoked" });
                         return Response::builder()
                             .status(StatusCode::UNAUTHORIZED)
                             .header("content-type", "application/json")
@@ -364,6 +365,18 @@ pub async fn http_auth_middleware(
 ///
 /// ## Purpose
 /// Handles actor ask/tell requests via HTTP, translating to ActorService calls.
+///
+/// ## URL format
+/// ```
+/// POST /api/v1/actors/{namespace}/{instance_name}:{actor_type}/ask
+/// ```
+/// The `{instance_name}:{actor_type}` segment uses **name-first, type-second** order.
+/// For example: `vu0:gen_server` means instance name "vu0", actor type "gen_server".
+///
+/// This is the canonical PlexSpaces addressing convention:
+/// - Regular actors: `vu0:gen_server` — routes directly to the pre-warmed instance.
+/// - Virtual actors: `virtual-vu1:gen_server` — triggers on-demand activation if the
+///   instance is not already live (requires the type to be registered as a virtual actor).
 ///
 /// ## Arguments
 /// * `effective_tenant_id` - Tenant ID from JWT or headers
@@ -689,8 +702,7 @@ mod tests {
         headers.insert("x-tenant-id", "test-tenant".parse().unwrap());
 
         let kp = plexspaces_grpc_middleware::JwtKeyPair::from_secret("secret");
-        let result =
-            effective_tenant_id_from_jwt_or_headers(&None, false, Some(&kp), &headers);
+        let result = effective_tenant_id_from_jwt_or_headers(&None, false, Some(&kp), &headers);
         assert_eq!(result, "");
     }
 }

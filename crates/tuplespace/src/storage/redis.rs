@@ -1100,7 +1100,7 @@ mod tests {
         assert_eq!(results.len(), 1);
 
         // Wait for expiry
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
         // Should be gone (Redis TTL cleanup)
         let empty = storage.read(pattern, None).await.unwrap();

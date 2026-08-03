@@ -7,9 +7,9 @@ WASM_FILE="$REPO_ROOT/target/examples/typescript/abstractions/abstractions_actor
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 HTTP_PORT="${1:-8091}"
 APP_ID="abstractions-typescript"
-ABSTRACTIONS_ACTOR="abstractions:cart-1"
-EPHEMERAL_ACTOR="ephemeral:session-1"
-WORKFLOW_ACTOR="workflow:order-1"
+ABSTRACTIONS_ACTOR="cart-1:abstractions"
+EPHEMERAL_ACTOR="session-1:ephemeral"
+WORKFLOW_ACTOR="order-1:workflow"
 CHANNEL_ACTOR="channel:alerts"
 CONTROLLER_ACTOR="controller"
 

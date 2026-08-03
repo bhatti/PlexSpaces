@@ -338,8 +338,16 @@ async fn async_main() -> Result<()> {
             exp_hours,
             private_key_file,
         } => {
-            security::create_jwt_token(tenant_id, sub, roles, groups, is_admin, exp_hours, private_key_file)
-                .await
+            security::create_jwt_token(
+                tenant_id,
+                sub,
+                roles,
+                groups,
+                is_admin,
+                exp_hours,
+                private_key_file,
+            )
+            .await
         }
     }
 }

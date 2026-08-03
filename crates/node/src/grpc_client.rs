@@ -110,21 +110,22 @@ impl RemoteActorClient {
         tls_config: Option<tonic::transport::ClientTlsConfig>,
     ) -> Result<Self, String> {
         // Choose scheme based on whether TLS is configured.
-        let endpoint = if node_address.starts_with("http://")
-            || node_address.starts_with("https://")
-        {
-            node_address.to_string()
-        } else if tls_config.is_some() {
-            format!("https://{}", node_address)
-        } else {
-            format!("http://{}", node_address)
-        };
+        let endpoint =
+            if node_address.starts_with("http://") || node_address.starts_with("https://") {
+                node_address.to_string()
+            } else if tls_config.is_some() {
+                format!("https://{}", node_address)
+            } else {
+                format!("http://{}", node_address)
+            };
 
         let mut builder = Channel::from_shared(endpoint.clone())
             .map_err(|e| format!("Invalid endpoint: {}", e))?;
 
         if let Some(cfg) = tls_config {
-            builder = builder.tls_config(cfg).map_err(|e| format!("TLS config: {}", e))?;
+            builder = builder
+                .tls_config(cfg)
+                .map_err(|e| format!("TLS config: {}", e))?;
         }
 
         let channel = builder
@@ -260,7 +261,7 @@ impl RemoteActorClient {
             ..Default::default()
         };
         let request = Request::new(SpawnActorRequest {
-        request_id: ulid::Ulid::new().to_string(),
+            request_id: ulid::Ulid::new().to_string(),
             spec: Some(spec),
             namespace: String::new(),
             instances_count: 1,
@@ -372,8 +373,6 @@ impl RemoteActorClient {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_endpoint_formatting() {
         // Without scheme

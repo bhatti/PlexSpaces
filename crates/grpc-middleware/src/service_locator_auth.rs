@@ -35,7 +35,9 @@ pub async fn http_jwt_auth_snapshot(
         )
         .map(Arc::new)
         .ok(),
-        None => crate::jwt_keys::JwtKeyPair::from_env(None).map(Arc::new).ok(),
+        None => crate::jwt_keys::JwtKeyPair::from_env(None)
+            .map(Arc::new)
+            .ok(),
     };
 
     (auth_disabled, jwt_key_pair)

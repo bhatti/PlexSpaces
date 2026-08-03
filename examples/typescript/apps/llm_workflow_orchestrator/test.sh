@@ -7,10 +7,10 @@ WASM_FILE="$REPO_ROOT/target/examples/typescript/llm_workflow_orchestrator/llm_w
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 HTTP_PORT="${1:-8091}"
 APP_ID="llm-workflow-orchestrator"
-ROUTER_ACTOR="router:router-1"
-CHAIN_ACTOR="chain:chain-1"
-JUDGE_ACTOR="judge:judge-1"
-ORCHESTRATOR_ACTOR="orchestrator:orch-1"
+ROUTER_ACTOR="router-1:router"
+CHAIN_ACTOR="chain-1:chain"
+JUDGE_ACTOR="judge-1:judge"
+ORCHESTRATOR_ACTOR="orch-1:orchestrator"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

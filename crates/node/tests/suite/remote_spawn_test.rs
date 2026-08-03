@@ -83,8 +83,8 @@ async fn test_spawn_actor_basic() {
     node.initialize_services().await.unwrap();
 
     // Register a behavior so ActorFactory can create "test_actor" type actors
-    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     use plexspaces_actor::behavior::MockBehavior;
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("test_actor", || {
@@ -189,8 +189,8 @@ async fn test_spawn_remote_actor_wrong_node() {
     node.initialize_services().await.unwrap();
 
     // Register behavior so ActorFactory can create "test_actor" type actors
-    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     use plexspaces_actor::behavior::MockBehavior;
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("test_actor", || {
@@ -232,8 +232,8 @@ async fn test_spawn_multiple_remote_actors() {
     node.initialize_services().await.unwrap();
 
     // Register behavior so ActorFactory can create each actor type
-    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     use plexspaces_actor::behavior::MockBehavior;
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     let behavior_registry = BehaviorRegistry::new();
     for i in 0..3 {
         let type_name = format!("test_actor_{}", i);
@@ -281,8 +281,8 @@ async fn test_spawn_multiple_remote_actors() {
 
 #[tokio::test]
 async fn test_spawn_remote_actor_via_grpc() {
-    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     use plexspaces_actor::behavior::MockBehavior;
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
     use plexspaces_node::NodeBuilder;
     use plexspaces_services::actor_service::ActorServiceImpl;
     use tonic::transport::Server;
@@ -360,10 +360,7 @@ struct CountingActor {
 }
 
 impl CountingActor {
-    fn new(
-        notify: Arc<tokio::sync::Notify>,
-        count: Arc<std::sync::atomic::AtomicUsize>,
-    ) -> Self {
+    fn new(notify: Arc<tokio::sync::Notify>, count: Arc<std::sync::atomic::AtomicUsize>) -> Self {
         Self { notify, count }
     }
 }
@@ -375,8 +372,7 @@ impl Actor for CountingActor {
         _ctx: &ActorContext,
         _msg: Message,
     ) -> Result<(), BehaviorError> {
-        self.count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.notify.notify_one();
         Ok(())
     }
@@ -435,7 +431,7 @@ async fn test_node_route_local_message() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let mailbox = Arc::new(
-        Mailbox::new(mailbox_config, actor_id.to_string())
+        Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap(),
     );
@@ -516,13 +512,8 @@ async fn test_node_route_remote_message() {
     let node2_address = start_test_server(node2.clone()).await;
 
     // Register node2's gRPC address in node1's object registry
-    let object_registry = node1
-        .service_locator()
-        .get_object_registry()
-        .await
-        .unwrap();
-    let reg_ctx =
-        plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
+    let object_registry = node1.service_locator().get_object_registry().await.unwrap();
+    let reg_ctx = plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
     let grpc_address = node2_address
         .strip_prefix("http://")
         .unwrap_or(&node2_address)
@@ -555,7 +546,10 @@ async fn test_node_route_remote_message() {
         "default".to_string(),
     );
     let result = remote_actor_ref
-        .tell(&tell_ctx, create_routing_test_message(b"{\"data\":\"routing-test\"}".to_vec()))
+        .tell(
+            &tell_ctx,
+            create_routing_test_message(b"{\"data\":\"routing-test\"}".to_vec()),
+        )
         .await;
     assert!(
         result.is_ok(),
@@ -624,13 +618,8 @@ async fn test_connection_pooling() {
     let node2_address = start_test_server(node2.clone()).await;
 
     // Register node2's gRPC address in node1's object registry
-    let object_registry = node1
-        .service_locator()
-        .get_object_registry()
-        .await
-        .unwrap();
-    let reg_ctx =
-        plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
+    let object_registry = node1.service_locator().get_object_registry().await.unwrap();
+    let reg_ctx = plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
     let grpc_address = node2_address
         .strip_prefix("http://")
         .unwrap_or(&node2_address)
@@ -688,12 +677,9 @@ async fn test_connection_pooling() {
                 received
             );
         }
-        tokio::time::timeout(
-            tokio::time::Duration::from_millis(100),
-            notify.notified(),
-        )
-        .await
-        .ok();
+        tokio::time::timeout(tokio::time::Duration::from_millis(100), notify.notified())
+            .await
+            .ok();
     }
     assert_eq!(
         count.load(std::sync::atomic::Ordering::SeqCst),

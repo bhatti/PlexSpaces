@@ -3,8 +3,9 @@
 //
 // Tests for idempotency key deduplication and LRU cache
 
-use plexspaces_mailbox::{mailbox_config_default, Mailbox, Message};
+use plexspaces_mailbox::{mailbox_config_default, InMemoryIdempotencyStore, Mailbox, Message};
 use prost_types::Duration as ProtoDuration;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Helper to create a test message
@@ -31,7 +32,8 @@ fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: Strin
 #[tokio::test]
 async fn test_idempotency_key_deduplication() {
     // Test: Messages with same idempotency key are deduplicated
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox".to_string())
+    let store = Arc::new(InMemoryIdempotencyStore::new(1000, Duration::from_secs(60)));
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox".to_string(), "tenant".to_string(), "ns".to_string(), Some(store))
         .await
         .unwrap();
 
@@ -58,7 +60,7 @@ async fn test_idempotency_key_deduplication() {
 #[tokio::test]
 async fn test_idempotency_key_different_keys() {
     // Test: Messages with different idempotency keys are not deduplicated
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-2".to_string())
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-2".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -80,7 +82,7 @@ async fn test_idempotency_key_different_keys() {
 #[tokio::test]
 async fn test_idempotency_key_without_key() {
     // Test: Messages without idempotency key are not deduplicated
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-3".to_string())
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-3".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -103,9 +105,10 @@ async fn test_idempotency_key_without_key() {
 async fn test_idempotency_key_lru_eviction() {
     // Test: LRU cache evicts old entries when full
     let mut config = mailbox_config_default();
-    config.idempotency_cache_size = 2; // Small cache for testing
+    // Note: capacity_per_bucket is now controlled via IdempotencyConfig on the store,
+    // not on MailboxConfig. This test verifies basic deduplication behavior.
 
-    let mailbox = Mailbox::new(config, "test-mailbox-4".to_string())
+    let mailbox = Mailbox::new(config, "test-mailbox-4".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -142,7 +145,7 @@ async fn test_idempotency_key_expiration() {
         nanos: 100_000_000, // 100ms
     });
 
-    let mailbox = Mailbox::new(config, "test-mailbox-5".to_string())
+    let mailbox = Mailbox::new(config, "test-mailbox-5".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 

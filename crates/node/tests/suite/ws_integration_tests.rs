@@ -180,7 +180,10 @@ async fn test_ws_upgrade_auth_disabled() {
 
     let url = format!("ws://127.0.0.1:{}/ws", port);
     let result = connect_async(&url).await;
-    assert!(result.is_ok(), "WS upgrade should succeed with auth disabled");
+    assert!(
+        result.is_ok(),
+        "WS upgrade should succeed with auth disabled"
+    );
 }
 
 /// After upgrading and sending the register frame, the server sends back a
@@ -190,8 +193,7 @@ async fn test_ws_registration_handshake() {
     let port = reserve_free_port();
     let _node = start_node_on_port("ws-reg-handshake", port).await;
 
-    let (_write, _read, assigned_id) =
-        connect_and_register(port, "thin-client-1").await;
+    let (_write, _read, assigned_id) = connect_and_register(port, "thin-client-1").await;
     assert_eq!(assigned_id, "thin-client-1");
 }
 
@@ -202,9 +204,16 @@ async fn test_ws_server_assigns_node_id_when_empty() {
     let _node = start_node_on_port("ws-auto-id", port).await;
 
     let (_write, _read, assigned_id) = connect_and_register(port, "").await;
-    assert!(!assigned_id.is_empty(), "Server must assign a non-empty node_id");
+    assert!(
+        !assigned_id.is_empty(),
+        "Server must assign a non-empty node_id"
+    );
     // A server-assigned ID should be a valid ULID (26 chars, uppercase)
-    assert_eq!(assigned_id.len(), 26, "Server-assigned ID must be a 26-char ULID");
+    assert_eq!(
+        assigned_id.len(),
+        26,
+        "Server-assigned ID must be a 26-char ULID"
+    );
 }
 
 /// After registration, the session appears in `WsRegistry` via `get_ws_registry()`.
@@ -213,8 +222,7 @@ async fn test_ws_registry_accessible_via_service_locator() {
     let port = reserve_free_port();
     let node = start_node_on_port("ws-sl-registry", port).await;
 
-    let (_write, _read, _) =
-        connect_and_register(port, "thin-client-sl").await;
+    let (_write, _read, _) = connect_and_register(port, "thin-client-sl").await;
 
     // Register-before-ack: WsRegistry is already updated when connect_and_register returns.
     let ws_reg = node
@@ -233,8 +241,7 @@ async fn test_ws_registry_list_thin_nodes() {
     let port = reserve_free_port();
     let node = start_node_on_port("ws-thin-list", port).await;
 
-    let (_write, _read, _) =
-        connect_and_register(port, "thin-node-list-1").await;
+    let (_write, _read, _) = connect_and_register(port, "thin-node-list-1").await;
 
     let ws_reg = node
         .service_locator()
@@ -256,8 +263,7 @@ async fn test_ws_session_removed_on_disconnect() {
     let port = reserve_free_port();
     let node = start_node_on_port("ws-disconnect", port).await;
 
-    let (mut write, _read, _) =
-        connect_and_register(port, "thin-disc-1").await;
+    let (mut write, _read, _) = connect_and_register(port, "thin-disc-1").await;
 
     // Register-before-ack: session is already in registry when connect_and_register returns.
     let ws_reg = node
@@ -287,8 +293,7 @@ async fn test_ws_heartbeat_ack() {
     let port = reserve_free_port();
     let _node = start_node_on_port("ws-hb", port).await;
 
-    let (mut write, mut read, _) =
-        connect_and_register(port, "thin-hb-1").await;
+    let (mut write, mut read, _) = connect_and_register(port, "thin-hb-1").await;
 
     let hb_frame = WsFrame {
         request_id: "hb-req-1".to_string(),
@@ -297,7 +302,10 @@ async fn test_ws_heartbeat_ack() {
             ..Default::default()
         })),
     };
-    write.send(encode_ws_frame(&hb_frame)).await.expect("send heartbeat");
+    write
+        .send(encode_ws_frame(&hb_frame))
+        .await
+        .expect("send heartbeat");
 
     let resp_msg = read
         .next()
@@ -312,7 +320,10 @@ async fn test_ws_heartbeat_ack() {
         }
         other => panic!("Expected HeartbeatAck, got {:?}", other),
     }
-    assert_eq!(resp.request_id, "hb-req-1", "request_id must be echoed back");
+    assert_eq!(
+        resp.request_id, "hb-req-1",
+        "request_id must be echoed back"
+    );
 }
 
 /// `is_connected()` returns true for a connected session, false for unknown nodes.
@@ -321,8 +332,7 @@ async fn test_ws_registry_is_connected() {
     let port = reserve_free_port();
     let node = start_node_on_port("ws-is-connected", port).await;
 
-    let (_write, _read, _) =
-        connect_and_register(port, "thin-conn-check").await;
+    let (_write, _read, _) = connect_and_register(port, "thin-conn-check").await;
 
     let ws_reg = node
         .service_locator()
@@ -381,7 +391,10 @@ async fn test_ws_duplicate_node_id_rejected() {
             ..Default::default()
         })),
     };
-    write2.send(encode_ws_frame(&reg_frame)).await.expect("send duplicate NodeRegister");
+    write2
+        .send(encode_ws_frame(&reg_frame))
+        .await
+        .expect("send duplicate NodeRegister");
 
     let resp_msg = read2
         .next()
@@ -392,7 +405,10 @@ async fn test_ws_duplicate_node_id_rejected() {
 
     match resp.payload {
         Some(ws_frame::Payload::Error(err)) => {
-            assert_eq!(err.code, 9, "Duplicate registration must return error code 9");
+            assert_eq!(
+                err.code, 9,
+                "Duplicate registration must return error code 9"
+            );
             assert!(
                 err.message.contains("already registered"),
                 "Error message must mention 'already registered'; got: {}",
@@ -461,7 +477,10 @@ async fn test_ws_node_ping_returns_resource_hints() {
             ..Default::default()
         })),
     };
-    write.send(encode_ws_frame(&ping_frame)).await.expect("send NodePing");
+    write
+        .send(encode_ws_frame(&ping_frame))
+        .await
+        .expect("send NodePing");
 
     let resp_msg = read
         .next()
@@ -473,7 +492,10 @@ async fn test_ws_node_ping_returns_resource_hints() {
     match resp.payload {
         Some(ws_frame::Payload::NodePingResponse(pr)) => {
             assert_eq!(pr.sequence_number, 42, "sequence_number must be echoed");
-            assert!(!pr.node_id.is_empty(), "node_id must be set in PingResponse");
+            assert!(
+                !pr.node_id.is_empty(),
+                "node_id must be set in PingResponse"
+            );
             let res = pr.resources.expect("resources must be populated");
             assert!(
                 res.available_cores > 0,
@@ -505,7 +527,10 @@ async fn test_ws_heartbeat_keeps_node_alive_in_registry() {
             ..Default::default()
         })),
     };
-    write.send(encode_ws_frame(&hb_frame)).await.expect("send heartbeat");
+    write
+        .send(encode_ws_frame(&hb_frame))
+        .await
+        .expect("send heartbeat");
 
     // Drain the HeartbeatAck.
     let ack_msg = read.next().await.expect("expected ack").expect("ack recv");
@@ -553,13 +578,16 @@ async fn test_ws_disconnect_unregisters_from_node_registry() {
         .lookup_node(&ctx, &node_id)
         .await
         .expect("lookup_node must not error");
-    assert!(initial.is_some(), "node must be registered before disconnect");
+    assert!(
+        initial.is_some(),
+        "node must be registered before disconnect"
+    );
 
     // Close the WS connection.
     let _ = write.close().await;
 
-    // Poll until NodeRegistry stops returning the thin node (up to 3s).
-    let deadline = Instant::now() + Duration::from_secs(3);
+    // Poll until NodeRegistry stops returning the thin node (up to 2s).
+    let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let reg = nr
             .lookup_node(&ctx, &node_id)
@@ -569,7 +597,10 @@ async fn test_ws_disconnect_unregisters_from_node_registry() {
             break;
         }
         if Instant::now() >= deadline {
-            panic!("Thin node '{}' was not unregistered from NodeRegistry within 3s after WS close", node_id);
+            panic!(
+                "Thin node '{}' was not unregistered from NodeRegistry within 3s after WS close",
+                node_id
+            );
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -599,7 +630,10 @@ async fn test_ws_ask_reply_round_trip() {
         request_id: "ask-rt-001".to_string(),
         payload: Some(ws_frame::Payload::Ask(ask_req)),
     };
-    write.send(encode_ws_frame(&ask_frame)).await.expect("send ask frame");
+    write
+        .send(encode_ws_frame(&ask_frame))
+        .await
+        .expect("send ask frame");
 
     let resp_msg = read
         .next()

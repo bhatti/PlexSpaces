@@ -75,7 +75,11 @@ mod tests {
             azure_account_name: None,
             azure_account_key: None,
         };
-        Some(Arc::new(BlobKVStore::new(config).await.expect("Failed to create BlobKVStore")))
+        Some(Arc::new(
+            BlobKVStore::new(config)
+                .await
+                .expect("Failed to create BlobKVStore"),
+        ))
     }
 
     fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
@@ -84,7 +88,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_upload_and_download() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
         let data = b"Hello, World!".to_vec();
 
@@ -95,7 +101,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_put_overwrites_existing() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
 
         kv.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
@@ -107,7 +115,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
 
         kv.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
@@ -119,7 +129,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_with_prefix() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
 
         kv.put(&ctx, "config:timeout", b"30s".to_vec())
@@ -138,7 +150,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_get() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
 
         kv.put(&ctx, "k1", b"v1".to_vec()).await.unwrap();
@@ -152,7 +166,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ttl_operations() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
 
         kv.put_with_ttl(
@@ -174,33 +190,51 @@ mod tests {
 
     #[tokio::test]
     async fn test_tenant_isolation() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx1 = create_test_context("tenant-1", "ns-1");
         let ctx2 = create_test_context("tenant-2", "ns-1");
 
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
     async fn test_namespace_isolation() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx1 = create_test_context("tenant-1", "ns-1");
         let ctx2 = create_test_context("tenant-1", "ns-2");
 
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
     async fn test_get_stats() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
 
         kv.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
@@ -214,7 +248,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_large_value() {
-        let Some(kv) = create_test_service().await else { return; };
+        let Some(kv) = create_test_service().await else {
+            return;
+        };
         let ctx = create_test_context("tenant-1", "ns-1");
 
         let large_data = vec![0u8; 1024 * 1024];

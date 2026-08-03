@@ -140,8 +140,8 @@ impl ConfigLoader {
             })?;
 
         // Convert to proto ReleaseSpec
-        let spec = convert_yaml_to_proto(yaml_release)
-            .map_err(ConfigLoaderError::EnvSubstitutionError)?;
+        let spec =
+            convert_yaml_to_proto(yaml_release).map_err(ConfigLoaderError::EnvSubstitutionError)?;
 
         Ok(spec)
     }
@@ -226,7 +226,6 @@ impl ConfigLoader {
 
         Ok(())
     }
-
 }
 
 impl Default for ConfigLoader {

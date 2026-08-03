@@ -48,8 +48,11 @@ use tower_http::timeout::TimeoutLayer;
 /// mTLS configuration for the gRPC/HTTP server.
 #[derive(Clone)]
 pub struct MtlsServerConfig {
+    /// Server certificate in PEM format.
     pub cert_pem: Vec<u8>,
+    /// Server private key in PEM format.
     pub key_pem: Vec<u8>,
+    /// CA certificate in PEM format (for client verification).
     pub ca_pem: Vec<u8>,
 }
 
@@ -78,10 +81,9 @@ impl MtlsServerConfig {
         use rustls_pemfile::{certs, private_key};
         use std::io::Cursor;
 
-        let server_certs: Vec<CertificateDer<'static>> =
-            certs(&mut Cursor::new(&self.cert_pem))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Invalid server cert PEM: {}", e))?;
+        let server_certs: Vec<CertificateDer<'static>> = certs(&mut Cursor::new(&self.cert_pem))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Invalid server cert PEM: {}", e))?;
 
         let key: PrivateKeyDer<'static> = private_key(&mut Cursor::new(&self.key_pem))
             .map_err(|e| format!("Invalid server key PEM: {}", e))?
@@ -90,7 +92,9 @@ impl MtlsServerConfig {
         // Build root cert store for client cert verification (mutual TLS)
         let mut root_store = rustls::RootCertStore::empty();
         for ca_cert in certs(&mut Cursor::new(&self.ca_pem)).flatten() {
-            root_store.add(ca_cert).map_err(|e| format!("Invalid CA cert: {}", e))?;
+            root_store
+                .add(ca_cert)
+                .map_err(|e| format!("Invalid CA cert: {}", e))?;
         }
         let client_verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(root_store))
             .build()
@@ -107,8 +111,11 @@ impl MtlsServerConfig {
 
 /// Public return type for the TLS server (listener + router + optional TLS acceptor).
 pub struct BuiltServer {
+    /// Bound TCP listener ready to accept connections.
     pub listener: TcpListener,
+    /// Axum router combining gRPC and HTTP routes.
     pub app: Router,
+    /// Optional TLS configuration for HTTPS/gRPC-TLS.
     pub tls_config: Option<Arc<rustls::ServerConfig>>,
 }
 
@@ -193,11 +200,11 @@ impl GrpcHttpServerBuilder {
             .allow_headers(Any);
 
         // Timeout on HTTP REST routes (not gRPC streaming). 5 minutes allows WASM file uploads.
-        let http_with_timeout = self.http_routes.layer(TimeoutLayer::new(Duration::from_secs(300)));
+        let http_with_timeout = self
+            .http_routes
+            .layer(TimeoutLayer::new(Duration::from_secs(300)));
 
-        let app = grpc_router
-            .merge(http_with_timeout)
-            .layer(cors);
+        let app = grpc_router.merge(http_with_timeout).layer(cors);
 
         let listener = TcpListener::bind(self.addr)
             .await

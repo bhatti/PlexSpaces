@@ -30,11 +30,17 @@
 // Export the mailbox module
 
 mod builder;
+pub mod in_memory_idempotency_store;
 mod messages;
 mod r#mod;
+#[cfg(feature = "sqlite-backend")]
+pub mod sqlite_idempotency_store;
 
 // Re-export all public items
 pub use builder::MailboxBuilder;
+pub use in_memory_idempotency_store::InMemoryIdempotencyStore;
+#[cfg(feature = "sqlite-backend")]
+pub use sqlite_idempotency_store::SqliteIdempotencyStore;
 pub use messages::*;
 pub use r#mod::*;
 // Re-export Message for convenience (mailbox tests use plexspaces_mailbox::Message)

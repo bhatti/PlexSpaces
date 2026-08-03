@@ -161,38 +161,39 @@ class BlobConfig(betterproto.Message):
 class UploadBlobRequest(betterproto.Message):
     """Upload blob request (HTTP multipart/form-data or raw body)"""
 
-    tenant_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Tenant ID"""
 
-    namespace: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
     """Namespace"""
 
-    name: str = betterproto.string_field(3)
+    name: str = betterproto.string_field(4)
     """Blob name"""
 
-    content_type: str = betterproto.string_field(4)
+    content_type: str = betterproto.string_field(5)
     """Content type (optional, will be detected if not provided)"""
 
-    blob_group: str = betterproto.string_field(5)
+    blob_group: str = betterproto.string_field(6)
     """Blob group (optional)"""
 
-    kind: str = betterproto.string_field(6)
+    kind: str = betterproto.string_field(7)
     """Blob kind (optional)"""
 
     metadata: Dict[str, str] = betterproto.map_field(
-        7, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        8, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Custom metadata"""
 
     tags: Dict[str, str] = betterproto.map_field(
-        8, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        9, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Custom tags"""
 
-    expires_after: timedelta = betterproto.message_field(9)
+    expires_after: timedelta = betterproto.message_field(10)
     """Expiration duration (optional)"""
 
-    data: bytes = betterproto.bytes_field(10)
+    data: bytes = betterproto.bytes_field(11)
     """Blob data (for gRPC streaming or HTTP body)"""
 
 
@@ -200,20 +201,22 @@ class UploadBlobRequest(betterproto.Message):
 class UploadBlobResponse(betterproto.Message):
     """Upload blob response"""
 
-    metadata: "BlobMetadata" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    metadata: "BlobMetadata" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DownloadBlobRequest(betterproto.Message):
     """Download blob request"""
 
-    blob_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Blob ID"""
 
-    tenant_id: str = betterproto.string_field(2)
+    blob_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Tenant ID (for authorization)"""
 
-    namespace: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
     """Namespace (for authorization)"""
 
 
@@ -221,10 +224,11 @@ class DownloadBlobRequest(betterproto.Message):
 class DownloadBlobResponse(betterproto.Message):
     """Download blob response (streaming)"""
 
-    metadata: "BlobMetadata" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Blob metadata (sent first)"""
 
-    data: bytes = betterproto.bytes_field(2)
+    metadata: "BlobMetadata" = betterproto.message_field(2)
+    data: bytes = betterproto.bytes_field(3)
     """Blob data chunks (streamed)"""
 
 
@@ -232,37 +236,40 @@ class DownloadBlobResponse(betterproto.Message):
 class GetBlobMetadataRequest(betterproto.Message):
     """Get blob metadata request"""
 
-    blob_id: str = betterproto.string_field(1)
-    tenant_id: str = betterproto.string_field(2)
-    namespace: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    blob_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class GetBlobMetadataResponse(betterproto.Message):
     """Get blob metadata response"""
 
-    metadata: "BlobMetadata" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    metadata: "BlobMetadata" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListBlobsRequest(betterproto.Message):
     """List blobs request"""
 
-    tenant_id: str = betterproto.string_field(1)
-    namespace: str = betterproto.string_field(2)
-    name_prefix: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    tenant_id: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(3)
+    name_prefix: str = betterproto.string_field(4)
     """Filter by name (prefix match)"""
 
-    blob_group: str = betterproto.string_field(4)
+    blob_group: str = betterproto.string_field(5)
     """Filter by blob_group"""
 
-    kind: str = betterproto.string_field(5)
+    kind: str = betterproto.string_field(6)
     """Filter by kind"""
 
-    sha256: str = betterproto.string_field(6)
+    sha256: str = betterproto.string_field(7)
     """Filter by SHA256"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(7)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(8)
     """Pagination"""
 
 
@@ -270,47 +277,51 @@ class ListBlobsRequest(betterproto.Message):
 class ListBlobsResponse(betterproto.Message):
     """List blobs response"""
 
-    blobs: List["BlobMetadata"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    blobs: List["BlobMetadata"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteBlobRequest(betterproto.Message):
     """Delete blob request"""
 
-    blob_id: str = betterproto.string_field(1)
-    tenant_id: str = betterproto.string_field(2)
-    namespace: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    blob_id: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
+    namespace: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteBlobResponse(betterproto.Message):
     """Delete blob response"""
 
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class GeneratePresignedUrlRequest(betterproto.Message):
     """Generate presigned URL request"""
 
-    blob_id: str = betterproto.string_field(1)
-    operation: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    blob_id: str = betterproto.string_field(2)
+    operation: str = betterproto.string_field(3)
     """Operation: "GET" or "PUT"""
 
-    expires_after: timedelta = betterproto.message_field(3)
+    expires_after: timedelta = betterproto.message_field(4)
     """Expiration duration (default: 1 hour)"""
 
-    tenant_id: str = betterproto.string_field(4)
-    namespace: str = betterproto.string_field(5)
+    tenant_id: str = betterproto.string_field(5)
+    namespace: str = betterproto.string_field(6)
 
 
 @dataclass(eq=False, repr=False)
 class GeneratePresignedUrlResponse(betterproto.Message):
     """Generate presigned URL response"""
 
-    url: str = betterproto.string_field(1)
-    expires_at: datetime = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    url: str = betterproto.string_field(2)
+    expires_at: datetime = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)

@@ -529,9 +529,7 @@ impl NodeRegistry {
                 },
             )
             .await
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                format!("{}", e).into()
-            })?;
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("{}", e).into() })?;
         let target_address_key = canonical_node_address_key(target);
         let mut fallback = None;
         for registration in registrations {
@@ -685,12 +683,9 @@ impl NodeRegistry {
                 }
             }
 
-            object_registry
-                .register(ctx, obj_reg)
-                .await
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                    format!("{}", e).into()
-                })?;
+            object_registry.register(ctx, obj_reg).await.map_err(
+                |e| -> Box<dyn std::error::Error + Send + Sync> { format!("{}", e).into() },
+            )?;
         }
         Ok(())
     }
@@ -746,9 +741,9 @@ impl NodeRegistry {
         cache: &Arc<RwLock<HashMap<String, CachedNodeRegistration>>>,
         swim: &Arc<SwimProtocol>,
         object_registry: &Arc<dyn ObjectRegistry>,
-        service_locator: &Arc<RwLock<Option<Arc<dyn ServiceLocator>>>>,
+        _service_locator: &Arc<RwLock<Option<Arc<dyn ServiceLocator>>>>,
         node_id: &str,
-        cluster_name: Option<&str>,
+        _cluster_name: Option<&str>,
     ) {
         if Self::is_unknown_node_id(node_id) {
             swim.remove_member_silently(node_id).await;
@@ -922,9 +917,7 @@ impl NodeRegistry {
             capabilities.insert("cluster".to_string(), cluster_label.clone());
         }
 
-        let heartbeat = response
-            .last_heartbeat
-            .unwrap_or_else(Self::now_timestamp);
+        let heartbeat = response.last_heartbeat.unwrap_or_else(Self::now_timestamp);
 
         let registration = NodeRegistration {
             node_role: 0,
@@ -1218,7 +1211,10 @@ impl NodeRegistry {
             // Re-apply the thin-node marker so the SWIM intermediary filter survives
             // a reap + re-sync cycle (the marker is not persisted in capabilities).
             if node_reg.node_role == plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32 {
-                member.metadata.insert(SWIM_NODE_TYPE_KEY.to_string(), SWIM_NODE_TYPE_THIN.to_string());
+                member.metadata.insert(
+                    SWIM_NODE_TYPE_KEY.to_string(),
+                    SWIM_NODE_TYPE_THIN.to_string(),
+                );
             }
             self.swim.upsert_member(member).await;
         }
@@ -1453,7 +1449,12 @@ impl NodeRegistry {
         };
 
         transport
-            .ping_req(&intermediary.node_id, &intermediary.address, request, timeout)
+            .ping_req(
+                &intermediary.node_id,
+                &intermediary.address,
+                request,
+                timeout,
+            )
             .await?;
 
         Ok(())
@@ -1575,12 +1576,8 @@ impl NodeRegistryTrait for NodeRegistry {
                 })
                 .await
             } else {
-                Self::lookup_node_in_object_registry(
-                    &self.object_registry,
-                    &system_ctx,
-                    target,
-                )
-                .await
+                Self::lookup_node_in_object_registry(&self.object_registry, &system_ctx, target)
+                    .await
             };
 
         match result {
@@ -1598,7 +1595,10 @@ impl NodeRegistryTrait for NodeRegistry {
             }
             Ok(None) => Ok(None),
             Err(e) => {
-                warn!("ObjectRegistry lookup failed, returning cache-only result: {}", e);
+                warn!(
+                    "ObjectRegistry lookup failed, returning cache-only result: {}",
+                    e
+                );
                 Ok(None)
             }
         }
@@ -1613,10 +1613,12 @@ impl NodeRegistryTrait for NodeRegistry {
 
         // Thin nodes (WS-only) have no gRPC address; skip address-based deduplication
         // since `canonical_node_address_key("")` would collide all addressless thin nodes.
-        let is_thin = registration.node_role == plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32;
-        if !is_thin && !self
-            .reconcile_local_registration_aliases(&registration)
-            .await?
+        let is_thin =
+            registration.node_role == plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32;
+        if !is_thin
+            && !self
+                .reconcile_local_registration_aliases(&registration)
+                .await?
         {
             return Ok(());
         }
@@ -1632,7 +1634,10 @@ impl NodeRegistryTrait for NodeRegistry {
         // Mirror node_role into metadata so SWIM intermediary selection can exclude thin nodes.
         // Thin nodes have no inbound gRPC so they cannot relay indirect pings.
         if registration.node_role == plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32 {
-            member.metadata.insert(SWIM_NODE_TYPE_KEY.to_string(), SWIM_NODE_TYPE_THIN.to_string());
+            member.metadata.insert(
+                SWIM_NODE_TYPE_KEY.to_string(),
+                SWIM_NODE_TYPE_THIN.to_string(),
+            );
         }
         self.swim.upsert_member(member).await;
 
@@ -1829,7 +1834,10 @@ impl NodeRegistryTrait for NodeRegistry {
             // there at startup. Merge those registrations so nodes that are not yet reachable
             // via SWIM gossip (e.g. during bootstrap or network partition recovery) still appear
             // in the dashboard. Cache entries take precedence; ObjectRegistry fills the gaps.
-            if let Ok(registry_nodes) = self.recent_node_registrations_from_registry(cluster_filter).await {
+            if let Ok(registry_nodes) = self
+                .recent_node_registrations_from_registry(cluster_filter)
+                .await
+            {
                 for registration in registry_nodes {
                     nodes_by_id
                         .entry(registration.node_id.clone())
@@ -1925,7 +1933,10 @@ impl NodeRegistryTrait for NodeRegistry {
 
         if let Err(e) = refresh_result {
             if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("Heartbeat ObjectRegistry update failed (non-critical): {}", e);
+                debug!(
+                    "Heartbeat ObjectRegistry update failed (non-critical): {}",
+                    e
+                );
             }
         }
 
@@ -1993,7 +2004,6 @@ impl NodeRegistryTrait for NodeRegistry {
         (cache_size, hits, self.config.cache_ttl)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -3163,8 +3173,8 @@ mod tests {
             None,
         );
 
-        let ctx = RequestContext::new_without_auth(String::new(), "default".to_string())
-            .with_admin(true);
+        let ctx =
+            RequestContext::new_without_auth(String::new(), "default".to_string()).with_admin(true);
 
         // Register the local node (simulates node startup)
         let local_reg = NodeRegistration {
@@ -3180,7 +3190,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let now_ts = Timestamp { seconds: now_secs, nanos: 0 };
+        let now_ts = Timestamp {
+            seconds: now_secs,
+            nanos: 0,
+        };
         object_registry
             .register(
                 &ctx,
@@ -3236,14 +3249,16 @@ mod tests {
 
         // Use empty namespace — matches what system_registry_context(None) produces
         // when no service_locator/cluster is configured (production nodes use cluster name).
-        let ctx =
-            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+        let ctx = RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
 
         let now_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let now_ts = Timestamp { seconds: now_secs, nanos: 0 };
+        let now_ts = Timestamp {
+            seconds: now_secs,
+            nanos: 0,
+        };
         object_registry
             .register(
                 &ctx,
@@ -3287,7 +3302,10 @@ mod tests {
 
         // SWIM member for the thin node must have node_type=thin in metadata
         let member = registry.swim().get_member("thin-node-1").await;
-        assert!(member.is_some(), "thin node must be in SWIM after register_node");
+        assert!(
+            member.is_some(),
+            "thin node must be in SWIM after register_node"
+        );
         let m = member.unwrap();
         assert_eq!(
             m.metadata.get(SWIM_NODE_TYPE_KEY).map(|s| s.as_str()),
@@ -3318,7 +3336,10 @@ mod tests {
         registry.register_node(&ctx, full_reg).await.unwrap();
         registry.register_node(&ctx, thin_reg).await.unwrap();
 
-        let targets = registry.swim().select_indirect_targets("some-other-node").await;
+        let targets = registry
+            .swim()
+            .select_indirect_targets("some-other-node")
+            .await;
 
         assert!(
             !targets.iter().any(|m| m.node_id == "thin-node-2"),

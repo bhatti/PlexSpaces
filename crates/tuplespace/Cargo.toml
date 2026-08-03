@@ -25,7 +25,7 @@ serde_json = { workspace = true }
 serde_yaml = { version = "0.9" }
 toml = { version = "0.8" }
 chrono = { workspace = true }
-ulid = { version = "1.1", features = ["serde"] }
+ulid = { workspace = true }
 rand = "0.8"
 
 # Backend dependencies (optional)

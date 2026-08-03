@@ -191,91 +191,107 @@ class FacetRegistryEntry(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class RegisterFacetRequest(betterproto.Message):
-    definition: "FacetDefinition" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    definition: "FacetDefinition" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RegisterFacetResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    error_message: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    error_message: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class UnregisterFacetRequest(betterproto.Message):
-    facet_type: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    facet_type: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AttachFacetRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    facet_type: str = betterproto.string_field(2)
-    priority: int = betterproto.int32_field(3)
-    config: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(4)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    facet_type: str = betterproto.string_field(3)
+    priority: int = betterproto.int32_field(4)
+    config: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class AttachFacetResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    attachment_id: str = betterproto.string_field(2)
-    error_message: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    attachment_id: str = betterproto.string_field(3)
+    error_message: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class DetachFacetRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    facet_type: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    facet_type: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class ListActorFacetsRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListActorFacetsResponse(betterproto.Message):
-    facets: List["FacetAttachment"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    facets: List["FacetAttachment"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListAvailableFacetsRequest(betterproto.Message):
-    filter: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Optional filter"""
+
+    filter: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListAvailableFacetsResponse(betterproto.Message):
-    facets: List["FacetRegistryEntry"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    facets: List["FacetRegistryEntry"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetFacetDefinitionRequest(betterproto.Message):
-    facet_type: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    facet_type: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetFacetDefinitionResponse(betterproto.Message):
-    definition: "FacetDefinition" = betterproto.message_field(1)
-    found: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    definition: "FacetDefinition" = betterproto.message_field(2)
+    found: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class UpdateFacetConfigRequest(betterproto.Message):
-    attachment_id: str = betterproto.string_field(1)
-    config: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(2)
-
-
-@dataclass(eq=False, repr=False)
-class EnsureFacetRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    facet_type: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    attachment_id: str = betterproto.string_field(2)
     config: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
+class EnsureFacetRequest(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    facet_type: str = betterproto.string_field(3)
+    config: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(4)
+
+
+@dataclass(eq=False, repr=False)
 class EnsureFacetResponse(betterproto.Message):
-    was_attached: bool = betterproto.bool_field(1)
-    attachment_id: str = betterproto.string_field(2)
-    error_message: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    was_attached: bool = betterproto.bool_field(2)
+    attachment_id: str = betterproto.string_field(3)
+    error_message: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)

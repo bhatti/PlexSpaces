@@ -525,16 +525,32 @@ mod tests {
             data.insert(key.to_string(), new_val.to_string().into_bytes());
             Ok(new_val)
         }
-        async fn get_ttl(&self, _ctx: &RequestContext, _key: &str) -> Result<Option<std::time::Duration>, KeyValueStoreError> {
+        async fn get_ttl(
+            &self,
+            _ctx: &RequestContext,
+            _key: &str,
+        ) -> Result<Option<std::time::Duration>, KeyValueStoreError> {
             Ok(None)
         }
-        async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> Result<Vec<Option<Vec<u8>>>, KeyValueStoreError> {
+        async fn multi_get(
+            &self,
+            ctx: &RequestContext,
+            keys: &[&str],
+        ) -> Result<Vec<Option<Vec<u8>>>, KeyValueStoreError> {
             let mut results = Vec::with_capacity(keys.len());
-            for k in keys { results.push(self.get(ctx, k).await?); }
+            for k in keys {
+                results.push(self.get(ctx, k).await?);
+            }
             Ok(results)
         }
-        async fn multi_put(&self, ctx: &RequestContext, pairs: &[(&str, Vec<u8>)]) -> Result<(), KeyValueStoreError> {
-            for (k, v) in pairs { self.put(ctx, k, v.clone()).await?; }
+        async fn multi_put(
+            &self,
+            ctx: &RequestContext,
+            pairs: &[(&str, Vec<u8>)],
+        ) -> Result<(), KeyValueStoreError> {
+            for (k, v) in pairs {
+                self.put(ctx, k, v.clone()).await?;
+            }
             Ok(())
         }
     }

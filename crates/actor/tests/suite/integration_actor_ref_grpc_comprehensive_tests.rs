@@ -12,17 +12,8 @@ use plexspaces_actor::{
 use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+use plexspaces_test_utils::messages::create_test_message;
 use std::sync::Arc;
-use ulid::Ulid;
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> Message {
-    Message {
-        id: Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
-}
 
 fn test_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
     ActorId::new(
@@ -94,15 +85,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         ctx: &plexspaces_actor::RequestContext,
         opts: plexspaces_actor::DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .discover(ctx, opts)
-            .await
-            .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
-            })
+        self.inner.discover(ctx, opts).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn unregister(

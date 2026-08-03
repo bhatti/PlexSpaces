@@ -300,134 +300,155 @@ class StepExecution(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class CreateDefinitionRequest(betterproto.Message):
-    definition: "WorkflowDefinition" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    definition: "WorkflowDefinition" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class CreateDefinitionResponse(betterproto.Message):
-    definition: "WorkflowDefinition" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    definition: "WorkflowDefinition" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetDefinitionRequest(betterproto.Message):
-    id: str = betterproto.string_field(1)
-    version: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    id: str = betterproto.string_field(2)
+    version: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetDefinitionResponse(betterproto.Message):
-    definition: "WorkflowDefinition" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    definition: "WorkflowDefinition" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListDefinitionsRequest(betterproto.Message):
-    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(2)
     label_filter: Dict[str, str] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
-    name_prefix: str = betterproto.string_field(3)
+    name_prefix: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ListDefinitionsResponse(betterproto.Message):
-    definitions: List["WorkflowDefinition"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    definitions: List["WorkflowDefinition"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class UpdateDefinitionRequest(betterproto.Message):
-    definition: "WorkflowDefinition" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    definition: "WorkflowDefinition" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class UpdateDefinitionResponse(betterproto.Message):
-    definition: "WorkflowDefinition" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    definition: "WorkflowDefinition" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteDefinitionRequest(betterproto.Message):
-    id: str = betterproto.string_field(1)
-    version: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    id: str = betterproto.string_field(2)
+    version: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class StartExecutionRequest(betterproto.Message):
-    definition_id: str = betterproto.string_field(1)
-    definition_version: str = betterproto.string_field(2)
-    input: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(3)
-    execution_id: str = betterproto.string_field(4)
+    request_id: str = betterproto.string_field(1)
+    definition_id: str = betterproto.string_field(2)
+    definition_version: str = betterproto.string_field(3)
+    input: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(4)
+    execution_id: str = betterproto.string_field(5)
     labels: Dict[str, str] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
 @dataclass(eq=False, repr=False)
 class StartExecutionResponse(betterproto.Message):
-    execution_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    execution_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetExecutionRequest(betterproto.Message):
-    execution_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    execution_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetExecutionResponse(betterproto.Message):
-    execution: "WorkflowExecution" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    execution: "WorkflowExecution" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListExecutionsRequest(betterproto.Message):
-    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
-    definition_id: str = betterproto.string_field(2)
-    status: "ExecutionStatus" = betterproto.enum_field(3)
+    request_id: str = betterproto.string_field(1)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(2)
+    definition_id: str = betterproto.string_field(3)
+    status: "ExecutionStatus" = betterproto.enum_field(4)
     label_filter: Dict[str, str] = betterproto.map_field(
-        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
-    started_after: datetime = betterproto.message_field(5)
-    started_before: datetime = betterproto.message_field(6)
+    started_after: datetime = betterproto.message_field(6)
+    started_before: datetime = betterproto.message_field(7)
 
 
 @dataclass(eq=False, repr=False)
 class ListExecutionsResponse(betterproto.Message):
-    executions: List["WorkflowExecution"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    executions: List["WorkflowExecution"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class CancelExecutionRequest(betterproto.Message):
-    execution_id: str = betterproto.string_field(1)
-    reason: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    execution_id: str = betterproto.string_field(2)
+    reason: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class SignalExecutionRequest(betterproto.Message):
-    execution_id: str = betterproto.string_field(1)
-    signal_name: str = betterproto.string_field(2)
-    data: "betterproto_lib_google_protobuf.Value" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    execution_id: str = betterproto.string_field(2)
+    signal_name: str = betterproto.string_field(3)
+    data: "betterproto_lib_google_protobuf.Value" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class QueryExecutionRequest(betterproto.Message):
-    execution_id: str = betterproto.string_field(1)
-    query_name: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    execution_id: str = betterproto.string_field(2)
+    query_name: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class QueryExecutionResponse(betterproto.Message):
-    result: "betterproto_lib_google_protobuf.Value" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    result: "betterproto_lib_google_protobuf.Value" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetStepExecutionsRequest(betterproto.Message):
-    execution_id: str = betterproto.string_field(1)
-    page: "__common_v1__.PageRequest" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    execution_id: str = betterproto.string_field(2)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetStepExecutionsResponse(betterproto.Message):
-    step_executions: List["StepExecution"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    step_executions: List["StepExecution"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 class WorkflowServiceStub(betterproto.ServiceStub):

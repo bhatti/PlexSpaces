@@ -140,6 +140,13 @@ pub const ENV_REDIS_NAMESPACE: &str = "PLEXSPACES_REDIS_NAMESPACE";
 /// Connection pool size
 pub const ENV_POOL_SIZE: &str = "PLEXSPACES_POOL_SIZE";
 
+/// Node heartbeat interval in milliseconds (default: 5000)
+/// Override for load tests or tuning: PLEXSPACES_HEARTBEAT_INTERVAL_MS=15000
+pub const ENV_HEARTBEAT_INTERVAL_MS: &str = "PLEXSPACES_HEARTBEAT_INTERVAL_MS";
+
+/// Default heartbeat interval in milliseconds
+pub const DEFAULT_HEARTBEAT_INTERVAL_MS: u64 = 5000;
+
 // ============================================================================
 // KeyValue-specific Environment Variables
 // ============================================================================
@@ -400,6 +407,8 @@ pub struct EnvConfig {
     pub mtls_server_key: Option<String>,
     /// Static dirs from PLEXSPACES_STATIC_DIRS (parsed into mount/fs pairs)
     pub static_dirs: Vec<(String, String)>,
+    /// Node heartbeat interval in milliseconds (from PLEXSPACES_HEARTBEAT_INTERVAL_MS)
+    pub heartbeat_interval_ms: u64,
 }
 
 impl EnvConfig {
@@ -424,6 +433,7 @@ impl EnvConfig {
             mtls_server_cert: get_env(ENV_MTLS_SERVER_CERT),
             mtls_server_key: get_env(ENV_MTLS_SERVER_KEY),
             static_dirs: parse_static_dirs_env(get_env(ENV_STATIC_DIRS).as_deref()),
+            heartbeat_interval_ms: get_env_u64(ENV_HEARTBEAT_INTERVAL_MS, DEFAULT_HEARTBEAT_INTERVAL_MS),
         }
     }
 
@@ -500,7 +510,6 @@ pub fn get_default_base_dir() -> String {
 pub fn default_shared_db_url(base_dir: &str) -> String {
     format!("sqlite://{}/db/plexspaces.db?mode=rwc", base_dir)
 }
-
 
 /// Mask sensitive parts of a database URL for logging
 fn mask_db_url(url: &str) -> String {
@@ -750,6 +759,15 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
         if node.cluster_name.is_empty() {
             node.cluster_name = DEFAULT_CLUSTER_NAME.to_string();
         }
+        // Apply heartbeat_interval_ms override (env > proto file > default)
+        if config.heartbeat_interval_ms != DEFAULT_HEARTBEAT_INTERVAL_MS {
+            // Explicit env var set — always wins
+            node.heartbeat_interval_ms = config.heartbeat_interval_ms;
+        } else if node.heartbeat_interval_ms == 0 {
+            // Proto field unset (zero) — apply default
+            node.heartbeat_interval_ms = DEFAULT_HEARTBEAT_INTERVAL_MS;
+        }
+        // else: proto file had a non-zero, non-default value — keep it
     }
 
     // ===========================================
@@ -1096,6 +1114,7 @@ mod tests {
             redis_url: None,
             release_config_path: None,
             static_dirs: vec![],
+            heartbeat_interval_ms: DEFAULT_HEARTBEAT_INTERVAL_MS,
         };
 
         // Verify EnvConfig fields
@@ -1281,5 +1300,79 @@ mod tests {
 
         // Cleanup
         env::remove_var("PLEXSPACES_REDIS_URL");
+    }
+
+    #[test]
+    #[serial]
+    fn test_initialize_heartbeat_interval_from_env() {
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};
+
+        env::set_var(ENV_HEARTBEAT_INTERVAL_MS, "15000");
+
+        let mut spec = ReleaseSpec {
+            node: Some(NodeConfig {
+                id: "n1".into(),
+                heartbeat_interval_ms: 0, // unset — should be overridden by env
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        initialize(&mut spec);
+
+        assert_eq!(
+            spec.node.as_ref().unwrap().heartbeat_interval_ms,
+            15000,
+            "PLEXSPACES_HEARTBEAT_INTERVAL_MS should override heartbeat_interval_ms"
+        );
+
+        env::remove_var(ENV_HEARTBEAT_INTERVAL_MS);
+    }
+
+    #[test]
+    #[serial]
+    fn test_initialize_heartbeat_interval_default_when_unset() {
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};
+
+        env::remove_var(ENV_HEARTBEAT_INTERVAL_MS);
+
+        let mut spec = ReleaseSpec {
+            node: Some(NodeConfig {
+                id: "n1".into(),
+                heartbeat_interval_ms: 0, // unset
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        initialize(&mut spec);
+
+        assert_eq!(
+            spec.node.as_ref().unwrap().heartbeat_interval_ms,
+            DEFAULT_HEARTBEAT_INTERVAL_MS,
+            "heartbeat_interval_ms should default to DEFAULT_HEARTBEAT_INTERVAL_MS when unset"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_initialize_heartbeat_interval_preserves_proto_file_value() {
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};
+
+        env::remove_var(ENV_HEARTBEAT_INTERVAL_MS);
+
+        let mut spec = ReleaseSpec {
+            node: Some(NodeConfig {
+                id: "n1".into(),
+                heartbeat_interval_ms: 10000, // set in proto / config file
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        initialize(&mut spec);
+
+        assert_eq!(
+            spec.node.as_ref().unwrap().heartbeat_interval_ms,
+            10000,
+            "heartbeat_interval_ms from proto file should be preserved when env var is unset"
+        );
     }
 }

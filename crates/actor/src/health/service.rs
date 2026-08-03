@@ -598,10 +598,23 @@ impl PlexSpacesHealthReporter {
         // Update standard gRPC health service
         {
             let mut r = self.reporter.lock().await;
-            r.set_service_status("", tonic_health::ServingStatus::Serving).await;
-            r.set_service_status("plexspaces.actor.v1.ActorService", tonic_health::ServingStatus::Serving).await;
-            r.set_service_status("plexspaces.tuplespace.v1.TupleSpaceService", tonic_health::ServingStatus::Serving).await;
-            r.set_service_status("plexspaces.supervisor.v1.SupervisorService", tonic_health::ServingStatus::Serving).await;
+            r.set_service_status("", tonic_health::ServingStatus::Serving)
+                .await;
+            r.set_service_status(
+                "plexspaces.actor.v1.ActorService",
+                tonic_health::ServingStatus::Serving,
+            )
+            .await;
+            r.set_service_status(
+                "plexspaces.tuplespace.v1.TupleSpaceService",
+                tonic_health::ServingStatus::Serving,
+            )
+            .await;
+            r.set_service_status(
+                "plexspaces.supervisor.v1.SupervisorService",
+                tonic_health::ServingStatus::Serving,
+            )
+            .await;
         }
 
         tracing::warn!(
@@ -680,10 +693,23 @@ impl PlexSpacesHealthReporter {
         // Update standard gRPC health service
         {
             let mut r = self.reporter.lock().await;
-            r.set_service_status("", tonic_health::ServingStatus::NotServing).await;
-            r.set_service_status("plexspaces.actor.v1.ActorService", tonic_health::ServingStatus::NotServing).await;
-            r.set_service_status("plexspaces.tuplespace.v1.TupleSpaceService", tonic_health::ServingStatus::NotServing).await;
-            r.set_service_status("plexspaces.supervisor.v1.SupervisorService", tonic_health::ServingStatus::NotServing).await;
+            r.set_service_status("", tonic_health::ServingStatus::NotServing)
+                .await;
+            r.set_service_status(
+                "plexspaces.actor.v1.ActorService",
+                tonic_health::ServingStatus::NotServing,
+            )
+            .await;
+            r.set_service_status(
+                "plexspaces.tuplespace.v1.TupleSpaceService",
+                tonic_health::ServingStatus::NotServing,
+            )
+            .await;
+            r.set_service_status(
+                "plexspaces.supervisor.v1.SupervisorService",
+                tonic_health::ServingStatus::NotServing,
+            )
+            .await;
         }
 
         tracing::warn!("🛑 Graceful shutdown: NOT_SERVING, draining requests...");

@@ -145,8 +145,7 @@ async fn test_start_child() {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
                 let mailbox = Mailbox::new(
-                    MailboxConfig::default(),
-                    format!("mailbox-{}", actor_id.clone()),
+                    MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
                 .unwrap();
@@ -190,8 +189,7 @@ async fn test_delete_child() {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
                 let mailbox = Mailbox::new(
-                    MailboxConfig::default(),
-                    format!("mailbox-{}", actor_id.clone()),
+                    MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
                 .unwrap();
@@ -240,8 +238,7 @@ async fn test_which_children() {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
                     let mailbox = Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     )
                     .await
                     .unwrap();
@@ -298,8 +295,7 @@ async fn test_count_children() {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
                     let mailbox = Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id.clone()),
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     )
                     .await
                     .unwrap();
@@ -344,8 +340,7 @@ async fn test_get_childspec() {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
                 let mailbox = Mailbox::new(
-                    MailboxConfig::default(),
-                    format!("mailbox-{}", actor_id.clone()),
+                    MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
                 .unwrap();
@@ -399,8 +394,7 @@ async fn test_restart_child() {
                         .expect("Failed to create runtime for mailbox");
                     let mailbox = rt
                         .block_on(Mailbox::new(
-                            MailboxConfig::default(),
-                            format!("mailbox-{}", actor_id_for_thread.clone()),
+                            MailboxConfig::default(), format!("mailbox-{}", actor_id_for_thread.clone()), String::new(), String::new(), None,
                         ))
                         .expect("Failed to create mailbox in factory");
                     rt.block_on(actor_with_default_service_locator(

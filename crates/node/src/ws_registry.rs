@@ -34,7 +34,6 @@
 //! via `Arc<WsRegistry>`. There are no thread-locals or statics.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 
 use plexspaces_proto::node::v1::NodeRole;
@@ -56,11 +55,17 @@ use tokio::sync::RwLock;
 /// - `connected_at`: monotonic timestamp of the upgrade
 /// - `last_heartbeat`: updated on each heartbeat frame (used for stale-session GC)
 pub struct WsSession {
+    /// The remote node's identifier.
     pub node_id: String,
+    /// Channel for sending frames to the remote node's WebSocket connection.
     pub sender: mpsc::Sender<WsFrame>,
+    /// Role of the remote node in the cluster.
     pub role: NodeRole,
+    /// Tenant ID extracted from the JWT on upgrade.
     pub tenant_id: String,
+    /// Monotonic timestamp of the WebSocket upgrade.
     pub connected_at: Instant,
+    /// Updated on each heartbeat frame; used for stale-session GC.
     pub last_heartbeat: Instant,
 }
 
@@ -147,7 +152,10 @@ impl WsRegistry {
     ///
     /// Avoids the double-lock pattern of calling `update_heartbeat` then `get_sender`
     /// separately (which would release and re-acquire the lock between the two ops).
-    pub async fn update_heartbeat_and_get_sender(&self, node_id: &str) -> Option<mpsc::Sender<WsFrame>> {
+    pub async fn update_heartbeat_and_get_sender(
+        &self,
+        node_id: &str,
+    ) -> Option<mpsc::Sender<WsFrame>> {
         let mut sessions = self.sessions.write().await;
         if let Some(session) = sessions.get_mut(node_id) {
             session.last_heartbeat = Instant::now();

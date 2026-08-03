@@ -851,7 +851,10 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
             }),
         };
 
-        Ok(Response::new(CreateGroupResponse { request_id: req.request_id.clone(), group: Some(group) }))
+        Ok(Response::new(CreateGroupResponse {
+            request_id: req.request_id.clone(),
+            group: Some(group),
+        }))
     }
 
     async fn delete_group(

@@ -29,10 +29,7 @@
 //! - **Load Tracking**: Monitors actor queue depth for least-loaded routing
 
 use plexspaces_channel::Channel;
-use plexspaces_proto::{
-    actor::v1::ShardGroup,
-    common::v1::Message,
-};
+use plexspaces_proto::{actor::v1::ShardGroup, common::v1::Message};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

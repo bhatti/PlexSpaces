@@ -96,7 +96,10 @@ struct Config {
 impl Config {
     fn from_value(v: &Value) -> Self {
         Self {
-            include_payloads: v.get("include_payloads").and_then(|x| x.as_bool()).unwrap_or(true),
+            include_payloads: v
+                .get("include_payloads")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(true),
             max_steps: v.get("max_steps").and_then(|x| x.as_u64()).unwrap_or(1000) as usize,
             max_retained_traces: v
                 .get("max_retained_traces")
@@ -275,16 +278,28 @@ impl Facet for ExecutionTraceFacet {
             .cloned()
             .unwrap_or_else(|| method.to_string());
 
-        let input = if self.cfg.include_payloads { args.to_vec() } else { vec![] };
+        let input = if self.cfg.include_payloads {
+            args.to_vec()
+        } else {
+            vec![]
+        };
 
         inner.pending.insert(
             correlation_id,
-            PendingStep { method: method.to_string(), label, input, started_at_ms: now_ms() },
+            PendingStep {
+                method: method.to_string(),
+                label,
+                input,
+                started_at_ms: now_ms(),
+            },
         );
 
         // Cache a request context for the exporter.
         if inner.request_ctx.is_none() {
-            let actor_id = inner.actor_id.clone().unwrap_or_else(|| "unknown".to_string());
+            let actor_id = inner
+                .actor_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
             inner.request_ctx = Some(RequestContext::new_without_auth(
                 actor_id,
                 "execution_trace".to_string(),
@@ -314,7 +329,11 @@ impl Facet for ExecutionTraceFacet {
         };
 
         if inner.steps.len() < self.cfg.max_steps {
-            let output = if self.cfg.include_payloads { result.to_vec() } else { vec![] };
+            let output = if self.cfg.include_payloads {
+                result.to_vec()
+            } else {
+                vec![]
+            };
 
             let metadata: HashMap<String, String> = headers
                 .iter()
@@ -355,8 +374,8 @@ impl Facet for ExecutionTraceFacet {
                 Some((p.started_at_ms, p.label))
             });
 
-        let (started_at_ms, label) = pending_key
-            .unwrap_or_else(|| (completed_at_ms, method.to_string()));
+        let (started_at_ms, label) =
+            pending_key.unwrap_or_else(|| (completed_at_ms, method.to_string()));
 
         if inner.steps.len() < self.cfg.max_steps {
             inner.steps.push(TraceStep {
@@ -447,7 +466,8 @@ impl Facet for ExecutionTraceFacet {
         metrics::counter!("execution_trace_exported_total",
             "actor_id" => actor_id.clone(),
             "outcome" => trace.outcome.clone()
-        ).increment(1);
+        )
+        .increment(1);
 
         Ok(())
     }
@@ -471,14 +491,20 @@ mod tests {
     impl SpyExporter {
         fn new() -> (Arc<Mutex<Vec<ExecutionTrace>>>, Arc<Self>) {
             let exports = Arc::new(Mutex::new(Vec::new()));
-            let spy = Arc::new(Self { exports: exports.clone() });
+            let spy = Arc::new(Self {
+                exports: exports.clone(),
+            });
             (exports, spy)
         }
     }
 
     #[async_trait]
     impl TraceExporter for SpyExporter {
-        async fn export(&self, _ctx: &RequestContext, trace: &ExecutionTrace) -> Result<(), FacetError> {
+        async fn export(
+            &self,
+            _ctx: &RequestContext,
+            trace: &ExecutionTrace,
+        ) -> Result<(), FacetError> {
             self.exports.lock().unwrap().push(trace.clone());
             Ok(())
         }
@@ -549,15 +575,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_before_after_records_step() {
-        let mut facet = ExecutionTraceFacet::new(
-            json!({ "include_payloads": true }),
-            85,
-        );
+        let mut facet = ExecutionTraceFacet::new(json!({ "include_payloads": true }), 85);
         facet.on_attach("a1", json!({})).await.unwrap();
 
         let headers = make_headers("corr-1");
-        facet.before_method("handle_request", b"input-data", &headers).await.unwrap();
-        facet.after_method("handle_request", b"input-data", b"output-data", &headers).await.unwrap();
+        facet
+            .before_method("handle_request", b"input-data", &headers)
+            .await
+            .unwrap();
+        facet
+            .after_method("handle_request", b"input-data", b"output-data", &headers)
+            .await
+            .unwrap();
 
         let steps = facet.current_steps();
         assert_eq!(steps.len(), 1);
@@ -572,8 +601,14 @@ mod tests {
         facet.on_attach("a1", json!({})).await.unwrap();
 
         let headers = make_headers_with_label("corr-1", "observe");
-        facet.before_method("handle_request", b"", &headers).await.unwrap();
-        facet.after_method("handle_request", b"", b"", &headers).await.unwrap();
+        facet
+            .before_method("handle_request", b"", &headers)
+            .await
+            .unwrap();
+        facet
+            .after_method("handle_request", b"", b"", &headers)
+            .await
+            .unwrap();
 
         assert_eq!(facet.current_steps()[0].label, "observe");
     }
@@ -584,8 +619,14 @@ mod tests {
         facet.on_attach("a1", json!({})).await.unwrap();
 
         let headers = make_headers("corr-1");
-        facet.before_method("my_method", b"", &headers).await.unwrap();
-        facet.after_method("my_method", b"", b"", &headers).await.unwrap();
+        facet
+            .before_method("my_method", b"", &headers)
+            .await
+            .unwrap();
+        facet
+            .after_method("my_method", b"", b"", &headers)
+            .await
+            .unwrap();
 
         assert_eq!(facet.current_steps()[0].label, "my_method");
     }
@@ -596,8 +637,14 @@ mod tests {
         facet.on_attach("a1", json!({})).await.unwrap();
 
         let headers = make_headers("corr-1");
-        facet.before_method("risky_method", b"input", &headers).await.unwrap();
-        facet.on_error("risky_method", "something exploded").await.unwrap();
+        facet
+            .before_method("risky_method", b"input", &headers)
+            .await
+            .unwrap();
+        facet
+            .on_error("risky_method", "something exploded")
+            .await
+            .unwrap();
 
         let steps = facet.current_steps();
         assert_eq!(steps.len(), 1);
@@ -626,8 +673,14 @@ mod tests {
         let mut facet = ExecutionTraceFacet::new(json!({ "include_payloads": true }), 85);
         facet.on_attach("a1", json!({})).await.unwrap();
         let headers = make_headers("c1");
-        facet.before_method("m", b"request-payload", &headers).await.unwrap();
-        facet.after_method("m", b"request-payload", b"response-payload", &headers).await.unwrap();
+        facet
+            .before_method("m", b"request-payload", &headers)
+            .await
+            .unwrap();
+        facet
+            .after_method("m", b"request-payload", b"response-payload", &headers)
+            .await
+            .unwrap();
 
         let steps = facet.current_steps();
         assert_eq!(steps[0].input, b"request-payload");
@@ -639,8 +692,14 @@ mod tests {
         let mut facet = ExecutionTraceFacet::new(json!({ "include_payloads": false }), 85);
         facet.on_attach("a1", json!({})).await.unwrap();
         let headers = make_headers("c1");
-        facet.before_method("m", b"secret-payload", &headers).await.unwrap();
-        facet.after_method("m", b"secret-payload", b"secret-response", &headers).await.unwrap();
+        facet
+            .before_method("m", b"secret-payload", &headers)
+            .await
+            .unwrap();
+        facet
+            .after_method("m", b"secret-payload", b"secret-response", &headers)
+            .await
+            .unwrap();
 
         let steps = facet.current_steps();
         assert!(steps[0].input.is_empty());
@@ -674,7 +733,10 @@ mod tests {
         facet.before_method("m", b"", &h).await.unwrap();
         facet.after_method("m", b"", b"ok", &h).await.unwrap();
 
-        facet.on_terminate_start("a1", &ExitReason::Normal).await.unwrap();
+        facet
+            .on_terminate_start("a1", &ExitReason::Normal)
+            .await
+            .unwrap();
 
         let exports = exports.lock().unwrap();
         assert_eq!(exports.len(), 1);
@@ -687,7 +749,10 @@ mod tests {
     async fn test_terminate_error_exports_error_outcome() {
         let (exports, mut facet) = make_facet_spy();
         facet.on_attach("a1", json!({})).await.unwrap();
-        facet.on_terminate_start("a1", &ExitReason::Error("database down".into())).await.unwrap();
+        facet
+            .on_terminate_start("a1", &ExitReason::Error("database down".into()))
+            .await
+            .unwrap();
 
         let exports = exports.lock().unwrap();
         assert_eq!(exports[0].outcome, "error");
@@ -698,7 +763,10 @@ mod tests {
     async fn test_terminate_killed_exports_killed_outcome() {
         let (exports, mut facet) = make_facet_spy();
         facet.on_attach("a1", json!({})).await.unwrap();
-        facet.on_terminate_start("a1", &ExitReason::Killed).await.unwrap();
+        facet
+            .on_terminate_start("a1", &ExitReason::Killed)
+            .await
+            .unwrap();
 
         let exports = exports.lock().unwrap();
         assert_eq!(exports[0].outcome, "killed");
@@ -708,7 +776,10 @@ mod tests {
     async fn test_terminate_shutdown_exports_completed() {
         let (exports, mut facet) = make_facet_spy();
         facet.on_attach("a1", json!({})).await.unwrap();
-        facet.on_terminate_start("a1", &ExitReason::Shutdown).await.unwrap();
+        facet
+            .on_terminate_start("a1", &ExitReason::Shutdown)
+            .await
+            .unwrap();
 
         let exports = exports.lock().unwrap();
         assert_eq!(exports[0].outcome, "completed");
@@ -750,11 +821,18 @@ mod tests {
                 inner.trace_started_at_ms = now_ms();
                 inner.steps.clear();
             }
-            facet.on_terminate_start("a1", &ExitReason::Normal).await.unwrap();
+            facet
+                .on_terminate_start("a1", &ExitReason::Normal)
+                .await
+                .unwrap();
         }
 
         let completed = facet.completed_traces();
-        assert_eq!(completed.len(), max, "should retain at most max_retained_traces");
+        assert_eq!(
+            completed.len(),
+            max,
+            "should retain at most max_retained_traces"
+        );
         assert_eq!(completed[0].trace_id, "trace-2");
     }
 
@@ -779,13 +857,22 @@ mod tests {
 
     #[test]
     fn test_exit_reason_mapping() {
-        assert_eq!(ExecutionTraceFacet::map_exit_reason(&ExitReason::Normal).0, "completed");
-        assert_eq!(ExecutionTraceFacet::map_exit_reason(&ExitReason::Shutdown).0, "completed");
+        assert_eq!(
+            ExecutionTraceFacet::map_exit_reason(&ExitReason::Normal).0,
+            "completed"
+        );
+        assert_eq!(
+            ExecutionTraceFacet::map_exit_reason(&ExitReason::Shutdown).0,
+            "completed"
+        );
         assert_eq!(
             ExecutionTraceFacet::map_exit_reason(&ExitReason::Error("e".into())).0,
             "error"
         );
-        assert_eq!(ExecutionTraceFacet::map_exit_reason(&ExitReason::Killed).0, "killed");
+        assert_eq!(
+            ExecutionTraceFacet::map_exit_reason(&ExitReason::Killed).0,
+            "killed"
+        );
         assert_eq!(
             ExecutionTraceFacet::map_exit_reason(&ExitReason::Linked {
                 actor_id: "x".into(),

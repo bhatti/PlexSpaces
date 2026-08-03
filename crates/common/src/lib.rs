@@ -26,6 +26,7 @@
 
 pub mod activation_strategy;
 pub mod aws_config;
+pub mod circuit_breaker;
 pub mod config_manager;
 pub mod keyvalue_store;
 pub mod node_address;

@@ -220,7 +220,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_embedded_object_store_health_checker() {
-        let checker = EmbeddedObjectStoreHealthChecker::new("http://localhost:9000".to_string(), true);
+        let checker =
+            EmbeddedObjectStoreHealthChecker::new("http://localhost:9000".to_string(), true);
 
         assert_eq!(checker.name(), "embedded-object-store");
         assert!(checker.is_critical());

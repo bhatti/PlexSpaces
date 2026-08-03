@@ -36,6 +36,7 @@ struct OidcDiscovery {
 
 /// Token response from OIDC provider.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TokenResponse {
     access_token: String,
     #[serde(default)]
@@ -285,7 +286,10 @@ async fn do_callback(
 
     let is_admin = user.admin
         || (!oidc.config.admin_groups.is_empty()
-            && user.groups.iter().any(|g| oidc.config.admin_groups.contains(g)));
+            && user
+                .groups
+                .iter()
+                .any(|g| oidc.config.admin_groups.contains(g)));
 
     let jwt_claims = plexspaces_grpc_middleware::JwtClaims {
         sub: user.user_id.clone(),
@@ -374,21 +378,26 @@ impl IntoResponse for OidcCallbackError {
                 // login so the user gets a fresh flow instead of seeing a bare error page.
                 Redirect::temporary("/api/v1/auth/oidc/login").into_response()
             }
-            Self::ClaimVerification(_) => {
-                (axum::http::StatusCode::UNAUTHORIZED, "Token verification failed").into_response()
-            }
-            Self::MissingEmail => {
-                (axum::http::StatusCode::BAD_REQUEST, "Email claim missing from token")
-                    .into_response()
-            }
-            Self::UserCreation(_) => {
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "User creation failed")
-                    .into_response()
-            }
-            Self::JwtCreation(_) => {
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "JWT creation failed")
-                    .into_response()
-            }
+            Self::ClaimVerification(_) => (
+                axum::http::StatusCode::UNAUTHORIZED,
+                "Token verification failed",
+            )
+                .into_response(),
+            Self::MissingEmail => (
+                axum::http::StatusCode::BAD_REQUEST,
+                "Email claim missing from token",
+            )
+                .into_response(),
+            Self::UserCreation(_) => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "User creation failed",
+            )
+                .into_response(),
+            Self::JwtCreation(_) => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "JWT creation failed",
+            )
+                .into_response(),
         }
     }
 }

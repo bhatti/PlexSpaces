@@ -12,12 +12,12 @@
 // - Error cases: missing metadata, invalid actor IDs, etc.
 
 use async_trait::async_trait;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::behavior_factory::{BehaviorFactoryError, BehaviorRegistry};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
     InitializableServiceLocator, Message, RequestContext, RequestContextExt, ServiceLocator,
 };
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ActivationStrategy;
 use plexspaces_journaling::{ReminderFacet, TimerFacet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeBuilder, ReleaseSpec};
@@ -634,6 +634,7 @@ async fn invoke_virtual_actor(
     actor_service: &ActorServiceImpl,
     tenant_id: &str,
     namespace: &str,
+    actor_name: &str,
     actor_type: &str,
     http_method: &str,
     payload: Vec<u8>,
@@ -645,7 +646,7 @@ async fn invoke_virtual_actor(
             request_id: ulid::Ulid::new().to_string(),
             namespace: namespace.to_string(),
             actor_type: actor_type.to_string(),
-            actor_name: String::new(),
+            actor_name: actor_name.to_string(),
             http_method: http_method.to_string(),
             payload,
             headers: HashMap::new(),
@@ -681,7 +682,7 @@ async fn invoke_virtual_actor(
             request_id: ulid::Ulid::new().to_string(),
             namespace: namespace.to_string(),
             actor_type: actor_type.to_string(),
-            actor_name: String::new(),
+            actor_name: actor_name.to_string(),
             http_method: http_method.to_string(),
             payload,
             headers: HashMap::new(),
@@ -883,7 +884,8 @@ async fn test_virtual_actor_type_registration_and_lazy_activation() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-1", actor_type),
+        "user-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -995,7 +997,8 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-1", actor_type),
+        "user-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1024,7 +1027,8 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-1", actor_type),
+        "user-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1106,7 +1110,8 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-1", actor_type),
+        "user-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1145,7 +1150,8 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-2", actor_type),
+        "user-2",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1182,7 +1188,8 @@ async fn test_virtual_actor_activation_error_missing_metadata() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-1", actor_type),
+        "user-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::Increment).unwrap(),
         HashMap::new(),
@@ -1194,7 +1201,13 @@ async fn test_virtual_actor_activation_error_missing_metadata() {
     assert!(response.is_err());
     let err = response.unwrap_err();
     let error_msg = err.message();
-    assert!(error_msg.contains("not found") || error_msg.contains("No actors found"));
+    assert!(
+        error_msg.contains("not found")
+            || error_msg.contains("No actors found")
+            || error_msg.contains("Invalid actor ID")
+            || error_msg.contains("Actor not found"),
+        "unexpected error: {error_msg}"
+    );
 }
 
 /// Test: Virtual actor with proper actor ID format
@@ -1284,23 +1297,13 @@ async fn test_virtual_actor_activation_with_http_format() {
         .await
         .unwrap();
 
-    // Simulate HTTP request format: "orbit-tracker:user-1"
-    let http_actor_type = "orbit-tracker:user-1";
+    // Simulate HTTP request format: instance_name="user-1", actor_type="orbit-tracker"
+    let instance_id = "user-1";
     let base_actor_type = "orbit-tracker";
-
-    // Extract instance ID from HTTP actor-type format used by AskReply and SendMessage.
-    let instance_id = if http_actor_type.contains(':') {
-        http_actor_type
-            .split_once(':')
-            .map(|(_actor_type_part, instance_id)| instance_id.to_string())
-            .unwrap_or_else(|| ulid::Ulid::new().to_string())
-    } else {
-        ulid::Ulid::new().to_string()
-    };
 
     // Build proper actor ID format
     let actor_id = canonical_actor_id(
-        &instance_id,
+        instance_id,
         base_actor_type,
         namespace,
         "test-node-http-fmt",
@@ -1312,13 +1315,13 @@ async fn test_virtual_actor_activation_with_http_format() {
         "Actor ID should not start with // - missing instance ID"
     );
     assert!(
-        actor_id.contains(&instance_id),
+        actor_id.contains(instance_id),
         "Actor ID should contain instance ID"
     );
     assert_eq!(
         actor_id.to_string(),
         canonical_actor_id(
-            &instance_id,
+            instance_id,
             base_actor_type,
             namespace,
             "test-node-http-fmt",
@@ -1335,7 +1338,8 @@ async fn test_virtual_actor_activation_with_http_format() {
         &actor_service,
         tenant_id,
         namespace,
-        http_actor_type,
+        instance_id,
+        base_actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1415,7 +1419,8 @@ async fn test_virtual_actor_reactivation_type_registered_only() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:{}", actor_type, instance_id),
+        instance_id,
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1480,7 +1485,8 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-template", actor_type),
+        "user-template",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1545,7 +1551,8 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-template", actor_type),
+        "user-template",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1621,7 +1628,8 @@ async fn test_virtual_actor_state_preservation() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-1", actor_type),
+        "user-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1649,7 +1657,8 @@ async fn test_virtual_actor_state_preservation() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-1", actor_type),
+        "user-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1727,7 +1736,8 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-facets", actor_type),
+        "user-facets",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1769,7 +1779,8 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:user-facets", actor_type),
+        "user-facets",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1864,7 +1875,8 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:cart-1", actor_type),
+        "cart-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1886,7 +1898,8 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:cart-1", actor_type),
+        "cart-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::Increment).unwrap(),
         HashMap::new(),
@@ -1899,7 +1912,8 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:cart-1", actor_type),
+        "cart-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::Increment).unwrap(),
         HashMap::new(),
@@ -1921,7 +1935,8 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:cart-1", actor_type),
+        "cart-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -1952,7 +1967,8 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:cart-1", actor_type),
+        "cart-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2008,7 +2024,9 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
             ]),
             actor_config: None,
             tenant_id: Some(tenant_id.to_string()),
-            init_config_template: Some(br#"{"role":"channel","group":"abstractions-group"}"#.to_vec()),
+            init_config_template: Some(
+                br#"{"role":"channel","group":"abstractions-group"}"#.to_vec(),
+            ),
         },
     )
     .await
@@ -2024,7 +2042,8 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:alerts", actor_type),
+        "alerts",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2060,7 +2079,8 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:alerts", actor_type),
+        "alerts",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2141,13 +2161,13 @@ async fn test_abstractions_example_runtime_send_primes_channel_definition_metada
 
     let send_result = actor_service
         .send_message(
-            "channel:alerts",
+            "alerts:channel",
             Message {
                 id: ulid::Ulid::new().to_string(),
                 message_type: "cast".to_string(),
                 sender_id: canonical_actor_id("sender", "sender", namespace, "test-node")
                     .to_string(),
-                receiver_id: "channel:alerts".to_string(),
+                receiver_id: "alerts:channel".to_string(),
                 payload: serde_json::to_vec(&CounterMessage::Increment).unwrap(),
                 ..Default::default()
             },
@@ -2168,7 +2188,8 @@ async fn test_abstractions_example_runtime_send_primes_channel_definition_metada
         &actor_service,
         tenant_id,
         namespace,
-        "channel:alerts",
+        "alerts",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2237,14 +2258,14 @@ async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_t
     ));
     let actor_registry = service_locator.actor_registry().await.unwrap();
     let actor_id = canonical_actor_id("session-1", actor_type, namespace, "test-node");
-    let actor_name = "ephemeral:session-1";
     let stop_ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     let initial = invoke_virtual_actor(
         &actor_service,
         tenant_id,
         namespace,
-        actor_name,
+        "session-1",
+        "ephemeral",
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2263,7 +2284,8 @@ async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_t
         &actor_service,
         tenant_id,
         namespace,
-        actor_name,
+        "session-1",
+        "ephemeral",
         "POST",
         serde_json::to_vec(&CounterMessage::Increment).unwrap(),
         HashMap::new(),
@@ -2277,7 +2299,8 @@ async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_t
         &actor_service,
         tenant_id,
         namespace,
-        actor_name,
+        "session-1",
+        "ephemeral",
         "POST",
         serde_json::to_vec(&CounterMessage::Increment).unwrap(),
         HashMap::new(),
@@ -2300,7 +2323,8 @@ async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_t
         &actor_service,
         tenant_id,
         namespace,
-        actor_name,
+        "session-1",
+        "ephemeral",
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2346,12 +2370,12 @@ async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
         service_locator.clone(),
         "test-node".to_string(),
     ));
-    let actor_name = format!("{}:execution-1", actor_type);
     let response = invoke_virtual_actor(
         &actor_service,
         tenant_id,
         namespace,
-        &actor_name,
+        "execution-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2380,7 +2404,8 @@ async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
         &actor_service,
         tenant_id,
         namespace,
-        &actor_name,
+        "execution-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2447,7 +2472,6 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
         "test-node".to_string(),
     ));
     let actor_registry = service_locator.actor_registry().await.unwrap();
-    let actor_name = format!("{}:execution-1", actor_type);
     let actor_id = canonical_actor_id("execution-1", actor_type, namespace, "test-node");
     let stop_ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
@@ -2455,7 +2479,8 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
         &actor_service,
         tenant_id,
         namespace,
-        &actor_name,
+        "execution-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2469,7 +2494,8 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
         &actor_service,
         tenant_id,
         namespace,
-        &actor_name,
+        "execution-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::Increment).unwrap(),
         HashMap::new(),
@@ -2483,7 +2509,8 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
         &actor_service,
         tenant_id,
         namespace,
-        &actor_name,
+        "execution-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::Increment).unwrap(),
         HashMap::new(),
@@ -2505,7 +2532,8 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
         &actor_service,
         tenant_id,
         namespace,
-        &actor_name,
+        "execution-1",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2572,7 +2600,8 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:vacation-test", actor_type),
+        "vacation-test",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2627,7 +2656,8 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:vacation-test", actor_type),
+        "vacation-test",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2726,7 +2756,8 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:respawn-test", actor_type),
+        "respawn-test",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2771,7 +2802,8 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
         &actor_service,
         tenant_id,
         namespace,
-        &format!("{}:respawn-test", actor_type),
+        "respawn-test",
+        actor_type,
         "POST",
         serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
         HashMap::new(),
@@ -2854,7 +2886,7 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
             actor_type: actor_type.to_string(),
             instance_name: String::new(), // instance_name — empty when name == type (standalone virtual actors)
             namespace: namespace.to_string(),
-            facets: None,                // No trait-object facets (WASM path)
+            facets: None,                      // No trait-object facets (WASM path)
             proto_facets: Some(&proto_facets), // Proto facets from app-config.toml
             actor_config: None,
             tenant_id: Some(tenant_id.to_string()),

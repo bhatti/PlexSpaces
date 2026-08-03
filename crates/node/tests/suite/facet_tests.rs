@@ -20,6 +20,7 @@ use plexspaces_actor::{
 };
 use plexspaces_journaling::TimerFacet;
 use plexspaces_node::{Node, NodeBuilder};
+use plexspaces_test_utils::messages::create_test_message;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -55,15 +56,6 @@ fn create_timer_facet(
     service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 ) -> Box<TimerFacet> {
     Box::new(TimerFacet::new(serde_json::json!({}), 50, service_locator))
-}
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> Message {
-    Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
 }
 
 // =============================================================================

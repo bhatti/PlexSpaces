@@ -351,22 +351,6 @@ mod tests {
     }
 }
 
-/// JWT claims for API authentication (tenant_id, roles, groups, is_admin)
-#[derive(Debug, Serialize, Deserialize)]
-struct JwtCreateClaims {
-    sub: String,
-    exp: i64,
-    iat: i64,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    iss: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    aud: Vec<String>,
-    tenant_id: String,
-    roles: Vec<String>,
-    groups: Vec<String>,
-    is_admin: bool,
-}
-
 /// Create a JWT token for API authentication
 ///
 /// ## Purpose
@@ -397,12 +381,8 @@ pub async fn create_jwt_token(
         )
     })?;
 
-    let key_pair = plexspaces_grpc_middleware::JwtKeyPair::from_config(
-        "",
-        &key_file,
-        "",
-        false,
-    ).context("Failed to load JWT key pair from private key file")?;
+    let key_pair = plexspaces_grpc_middleware::JwtKeyPair::from_config("", &key_file, "", false)
+        .context("Failed to load JWT key pair from private key file")?;
 
     let now = chrono::Utc::now();
     let exp = now + chrono::Duration::hours(exp_hours as i64);

@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Idempotency Configuration
+//
+// ## Purpose
+// Shared configuration for idempotency / exactly-once deduplication across
+// any component that processes messages with client-assigned idempotency keys.
+// Initially used by the Mailbox layer; usable by gRPC handlers, workflow steps,
+// or any component that needs at-most-once or exactly-once semantics.
+//
+// ## Architecture Context
+// Lives in `common/` so it is reusable beyond the mailbox layer.
+// The idempotency store is injected into each Mailbox from a node-wide
+// shared instance created by ServiceLocator at startup.
+//
+// ## Design Decisions
+//
+// - **Two backends**: `in_memory` (default, zero setup) and `persistent`
+//   (SQLite/Postgres-backed for durability across restarts).
+//
+// - **Per-tenant-namespace LRU**: Each (tenant_id, namespace) bucket has its
+//   own capacity so one noisy tenant cannot evict another's entries.
+//
+// - **check_and_record is atomic**: The store must guarantee that lookup +
+//   record happen atomically to prevent races under concurrent retries.
+//
+// - **TTL controlled here, not in mailbox**: A 5-minute default covers typical
+//   retry windows; operators can tune via this config.
+//
+// ## Example (release.yaml snippet)
+//
+// ```yaml
+// services:
+//   idempotency:
+//     enabled: true
+//     backend: IDEMPOTENCY_BACKEND_SQLITE
+//     capacity_per_bucket: 10000
+//     ttl_seconds: 300
+// ```
+
+syntax = "proto3";
+
+package plexspaces.common.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/duration.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/common;plexspaces_common_v1";
+option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.common.v1";
+
+// Storage backend for idempotency entries.
+//
+// ## Values
+// - `IN_MEMORY`: Default. LRU map per (tenant, namespace) bucket. Zero setup.
+//   Entries are lost on restart — safe for short-lived retry windows.
+// - `SQLITE`: SQLite-backed. Survives restarts. Uses the node's shared DB
+//   connection pool (same file as journaling/channel).
+// - `POSTGRES`: PostgreSQL-backed for clustered, high-durability deployments.
+enum IdempotencyBackend {
+  // In-memory LRU (default). Entries lost on restart.
+  IDEMPOTENCY_BACKEND_UNSPECIFIED = 0;
+
+  // In-memory LRU — zero setup, entries lost on restart.
+  IDEMPOTENCY_BACKEND_IN_MEMORY = 1;
+
+  // SQLite — durable, single-node. Shares the node DB connection pool.
+  IDEMPOTENCY_BACKEND_SQLITE = 2;
+
+  // PostgreSQL — durable, multi-node.
+  IDEMPOTENCY_BACKEND_POSTGRES = 3;
+}
+
+// Configuration for the node-wide idempotency store.
+//
+// The store is created once at node startup by ServiceLocator and injected into
+// every Mailbox. Temporary-sender mailboxes (used for ask() internals) receive
+// no store (None), so they never allocate idempotency state.
+//
+// ## Defaults (all fields optional in YAML/TOML)
+// - enabled: true
+// - backend: IN_MEMORY
+// - capacity_per_bucket: 10,000 (entries per tenant+namespace pair)
+// - ttl_seconds: 300 (5 minutes)
+message IdempotencyConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "IdempotencyConfig"
+      description: "Node-wide idempotency deduplication store configuration."
+    }
+  };
+
+  // Whether idempotency deduplication is active.
+  // Set to false to disable entirely (no store created, no dedup).
+  // Default: true.
+  bool enabled = 1 [(google.api.field_behavior) = OPTIONAL];
+
+  // Storage backend. Default: IN_MEMORY.
+  IdempotencyBackend backend = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Max entries per (tenant_id, namespace) LRU bucket.
+  // Oldest entries are evicted when the bucket is full.
+  // Default 0 → 10,000. Range: 100..1,000,000.
+  uint32 capacity_per_bucket = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint32 = {
+      lte: 1000000
+    }
+  ];
+
+  // How long a processed idempotency key is remembered.
+  // Client retries arriving within this window are deduplicated.
+  // Default 0 → 300 s (5 min). Range: 1 s .. 86,400 s (24 h).
+  uint32 ttl_seconds = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint32 = {
+      lte: 86400
+    }
+  ];
+
+  // Connection string for persistent backends (SQLite path or Postgres DSN).
+  // Leave empty to reuse the node's shared DB pool (recommended).
+  // Only used when backend is SQLITE or POSTGRES.
+  string connection_string = 5 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string.max_len = 512
+  ];
+}

@@ -44,7 +44,7 @@ pub mod actor_context;
 pub use actor_context::LinkProvider;
 pub use actor_context::{
     ActorContext, ActorService, ChannelService, DiscoverOptions, FacetService, ObjectRegistration,
-    ObjectRegistryHealthStatus, ObjectRegistry, ProcessGroupService, RegisterResult,
+    ObjectRegistry, ObjectRegistryHealthStatus, ProcessGroupService, RegisterResult,
     TupleSpaceProvider,
 };
 
@@ -61,7 +61,9 @@ pub use actor_visibility::{
 };
 
 pub mod actor_registry;
-pub use actor_registry::{ActorRegistrationParams, ActorRegistry, ActorRegistryError, TemporarySenderEntry};
+pub use actor_registry::{
+    ActorRegistrationParams, ActorRegistry, ActorRegistryError,
+};
 
 pub mod service_trait;
 pub use service_trait::{Service, ServiceName};
@@ -155,7 +157,9 @@ pub use prometheus_text::{
 };
 
 pub mod reply_waiter;
-pub use reply_waiter::{ReplyWaiter, ReplyWaiterError, ReplyWaiterRegistry};
+
+pub mod pending_asks;
+pub use pending_asks::PendingAsks;
 
 pub mod journal_storage;
 pub use journal_storage::{JournalError, JournalResult, JournalStorage};
@@ -277,3 +281,7 @@ pub mod parallel;
 
 // Re-export SupervisorStats from proto (for public API)
 pub use plexspaces_proto::supervision::v1::SupervisorStats;
+
+// Process groups (merged from plexspaces-process-groups)
+pub mod process_groups;
+pub use process_groups::{ProcessGroupError, ProcessGroupRegistry};

@@ -25,17 +25,14 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
+    use plexspaces_actor::process_groups::ProcessGroupRegistry;
     use plexspaces_actor::{ActorId, RequestContext, RequestContextExt};
     use plexspaces_keyvalue::SqliteKVStore;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
-    use plexspaces_process_groups::ProcessGroupRegistry;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
-        keyvalue::Host as KeyValueHost,
-        locks::Host as LocksHost,
-        process_groups::Host as ProcessGroupsHost,
-        registry::Host as RegistryHost,
-        types::Context,
+        keyvalue::Host as KeyValueHost, locks::Host as LocksHost,
+        process_groups::Host as ProcessGroupsHost, registry::Host as RegistryHost, types::Context,
     };
     use plexspaces_wasm_runtime::component_host::{
         KeyValueImpl, LocksImpl, ProcessGroupsImpl, RegistryImpl,
@@ -237,7 +234,10 @@ mod tests {
         ))
     }
 
-    async fn create_test_host_functions_with_tenant(tenant_id: &str, namespace: &str) -> Arc<HostFunctions> {
+    async fn create_test_host_functions_with_tenant(
+        tenant_id: &str,
+        namespace: &str,
+    ) -> Arc<HostFunctions> {
         let kv_store_for_pg: Arc<dyn plexspaces_keyvalue::KeyValueStore> =
             Arc::new(SqliteKVStore::new(":memory:").await.unwrap());
         let kv_store_for_host: Arc<dyn plexspaces_actor::KeyValueStore> =
@@ -275,7 +275,6 @@ mod tests {
             .with_tenant(tenant_id.to_string(), namespace.to_string()),
         )
     }
-
 
     #[tokio::test]
     async fn test_keyvalue_impl_get_put() {
@@ -700,11 +699,23 @@ mod tests {
         let holder_term2 = "LeaderElection:leader-election-term2@test-node".to_string();
 
         let mut locks1 = LocksImpl {
-            actor_id: ActorId::new("leader-election-term1", "LeaderElection", "default", "test-node").unwrap(),
+            actor_id: ActorId::new(
+                "leader-election-term1",
+                "LeaderElection",
+                "default",
+                "test-node",
+            )
+            .unwrap(),
             host_functions: host_functions.clone(),
         };
         let mut locks2 = LocksImpl {
-            actor_id: ActorId::new("leader-election-term2", "LeaderElection", "default", "test-node").unwrap(),
+            actor_id: ActorId::new(
+                "leader-election-term2",
+                "LeaderElection",
+                "default",
+                "test-node",
+            )
+            .unwrap(),
             host_functions: host_functions.clone(),
         };
 
@@ -807,13 +818,15 @@ mod tests {
             object_category: object_category.to_string(),
             capabilities,
             labels,
-            health_status: plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy as i32,
+            health_status: plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
+                as i32,
             ..Default::default()
         };
         plexspaces_proto::object_registry::v1::RegisterRequest {
             registration: Some(registration),
             ..Default::default()
-        }.encode_to_vec()
+        }
+        .encode_to_vec()
     }
 
     fn encode_lookup_request(object_id: &str, object_type: i32) -> Vec<u8> {
@@ -822,7 +835,8 @@ mod tests {
             object_id: object_id.to_string(),
             object_type,
             ..Default::default()
-        }.encode_to_vec()
+        }
+        .encode_to_vec()
     }
 
     fn encode_unregister_request(object_id: &str, object_type: i32) -> Vec<u8> {
@@ -831,7 +845,8 @@ mod tests {
             object_id: object_id.to_string(),
             object_type,
             ..Default::default()
-        }.encode_to_vec()
+        }
+        .encode_to_vec()
     }
 
     fn encode_discover_request(object_type: i32, tenant_id: &str, namespace: &str) -> Vec<u8> {
@@ -842,7 +857,8 @@ mod tests {
             namespace: namespace.to_string(),
             page_size: 100,
             ..Default::default()
-        }.encode_to_vec()
+        }
+        .encode_to_vec()
     }
 
     fn encode_heartbeat_request(object_id: &str, object_type: i32) -> Vec<u8> {
@@ -851,10 +867,13 @@ mod tests {
             object_id: object_id.to_string(),
             object_type,
             ..Default::default()
-        }.encode_to_vec()
+        }
+        .encode_to_vec()
     }
 
-    fn decode_lookup_response(bytes: Vec<u8>) -> Option<plexspaces_proto::object_registry::v1::ObjectRegistration> {
+    fn decode_lookup_response(
+        bytes: Vec<u8>,
+    ) -> Option<plexspaces_proto::object_registry::v1::ObjectRegistration> {
         use prost::Message;
         if bytes.is_empty() {
             return None;
@@ -864,7 +883,9 @@ mod tests {
             .and_then(|r| r.registration)
     }
 
-    fn decode_discover_response(bytes: Vec<u8>) -> Vec<plexspaces_proto::object_registry::v1::ObjectRegistration> {
+    fn decode_discover_response(
+        bytes: Vec<u8>,
+    ) -> Vec<plexspaces_proto::object_registry::v1::ObjectRegistration> {
         use prost::Message;
         if bytes.is_empty() {
             return vec![];
@@ -889,8 +910,12 @@ mod tests {
         // ACT: Register object
         let result = registry
             .register(encode_register_request(
-                "test-object", actor_type, "http://test:8000", "GenServer",
-                vec!["persistent".to_string()], vec!["env=test".to_string()],
+                "test-object",
+                actor_type,
+                "http://test:8000",
+                "GenServer",
+                vec!["persistent".to_string()],
+                vec!["env=test".to_string()],
             ))
             .await;
         assert!(result.is_ok(), "register should succeed");
@@ -921,7 +946,14 @@ mod tests {
 
         // ACT: Register then unregister
         registry
-            .register(encode_register_request("test-object", actor_type, "http://test:8000", "", vec![], vec![]))
+            .register(encode_register_request(
+                "test-object",
+                actor_type,
+                "http://test:8000",
+                "",
+                vec![],
+                vec![],
+            ))
             .await
             .unwrap();
 
@@ -966,7 +998,11 @@ mod tests {
                     namespace: "default".to_string(),
                     ..Default::default()
                 };
-                plexspaces_proto::object_registry::v1::RegisterRequest { registration: Some(reg), ..Default::default() }.encode_to_vec()
+                plexspaces_proto::object_registry::v1::RegisterRequest {
+                    registration: Some(reg),
+                    ..Default::default()
+                }
+                .encode_to_vec()
             })
             .await
             .unwrap();
@@ -982,7 +1018,11 @@ mod tests {
                     namespace: "default".to_string(),
                     ..Default::default()
                 };
-                plexspaces_proto::object_registry::v1::RegisterRequest { registration: Some(reg), ..Default::default() }.encode_to_vec()
+                plexspaces_proto::object_registry::v1::RegisterRequest {
+                    registration: Some(reg),
+                    ..Default::default()
+                }
+                .encode_to_vec()
             })
             .await
             .unwrap();
@@ -1014,7 +1054,14 @@ mod tests {
 
         // ACT: Register object
         registry
-            .register(encode_register_request("test-object", actor_type, "http://test:8000", "", vec![], vec![]))
+            .register(encode_register_request(
+                "test-object",
+                actor_type,
+                "http://test:8000",
+                "",
+                vec![],
+                vec![],
+            ))
             .await
             .unwrap();
 
@@ -1042,7 +1089,8 @@ mod tests {
             alias: alias.to_string(),
             tenant_id: tenant_id.to_string(),
             namespace: namespace.to_string(),
-            health_status: plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy as i32,
+            health_status: plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
+                as i32,
             ..Default::default()
         };
         plexspaces_proto::object_registry::v1::RegisterRequest {
@@ -1080,7 +1128,11 @@ mod tests {
 
         // ACT: Lookup by alias — should resolve to the registered actor
         let result = registry.lookup_by_alias(alias.to_string()).await;
-        assert!(result.is_ok(), "lookup_by_alias should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "lookup_by_alias should succeed: {:?}",
+            result.err()
+        );
         let reg = decode_lookup_response(result.unwrap());
         assert!(reg.is_some(), "object should be found by alias");
         let reg = reg.unwrap();
@@ -1089,7 +1141,10 @@ mod tests {
 
         // ACT: Lookup by unknown alias — should return empty (not found)
         let result = registry.lookup_by_alias("no-such-alias".to_string()).await;
-        assert!(result.is_ok(), "lookup_by_alias for unknown alias should succeed");
+        assert!(
+            result.is_ok(),
+            "lookup_by_alias for unknown alias should succeed"
+        );
         assert!(
             decode_lookup_response(result.unwrap()).is_none(),
             "unknown alias should return not found"
@@ -1173,8 +1228,7 @@ mod tests {
         // Registration uses empty namespace in the proto payload; the host should fall
         // back to default_namespace from HostFunctions.
         let actor_id = ActorId::new("fallback-actor", "wasm", "production", "test-node").unwrap();
-        let host_functions =
-            create_test_host_functions_with_tenant("acme", "production").await;
+        let host_functions = create_test_host_functions_with_tenant("acme", "production").await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -1231,7 +1285,9 @@ mod tests {
         let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
         let host_functions = create_test_host_functions_with_services().await;
 
-        let result = host_functions.put_keyvalue_with_ttl(&ctx, "ttl-key", b"hello".to_vec(), 60).await;
+        let result = host_functions
+            .put_keyvalue_with_ttl(&ctx, "ttl-key", b"hello".to_vec(), 60)
+            .await;
         assert!(result.is_ok(), "put_with_ttl should succeed: {:?}", result);
 
         let val = host_functions.get_keyvalue(&ctx, "ttl-key").await;
@@ -1246,10 +1302,8 @@ mod tests {
         let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
         let host_functions = create_test_host_functions_with_services().await;
 
-        let pairs: Vec<(&str, Vec<u8>)> = vec![
-            ("mg-a", b"alpha".to_vec()),
-            ("mg-b", b"beta".to_vec()),
-        ];
+        let pairs: Vec<(&str, Vec<u8>)> =
+            vec![("mg-a", b"alpha".to_vec()), ("mg-b", b"beta".to_vec())];
         let result = host_functions.multi_put_keyvalue(&ctx, &pairs).await;
         assert!(result.is_ok(), "multi_put should succeed: {:?}", result);
 
@@ -1280,7 +1334,10 @@ mod tests {
         assert!(result.is_ok(), "alarm_set should succeed: {:?}", result);
 
         let ts = host_functions.alarm_get(actor_id).await.unwrap();
-        assert_eq!(ts, timestamp_ms, "alarm_get should return the set timestamp");
+        assert_eq!(
+            ts, timestamp_ms,
+            "alarm_get should return the set timestamp"
+        );
 
         let result = host_functions.alarm_delete(actor_id).await;
         assert!(result.is_ok(), "alarm_delete should succeed: {:?}", result);
@@ -1300,7 +1357,10 @@ mod tests {
         assert_eq!(host_functions.alarm_get(actor_id).await.unwrap(), ts1);
 
         host_functions.alarm_set(actor_id, ts2).await.unwrap();
-        assert_eq!(host_functions.alarm_get(actor_id).await.unwrap(), ts2,
-            "second alarm_set should overwrite first");
+        assert_eq!(
+            host_functions.alarm_get(actor_id).await.unwrap(),
+            ts2,
+            "second alarm_set should overwrite first"
+        );
     }
 }

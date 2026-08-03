@@ -29,6 +29,10 @@
 mod r#mod;
 pub use r#mod::*;
 
+// Cluster management (ClusterManager, ClusterConfig)
+pub mod cluster;
+pub use cluster::{ClusterConfig, ClusterManager};
+
 // gRPC client for remote actor communication
 pub mod grpc_client;
 
@@ -100,8 +104,8 @@ pub use config::loader as config_loader;
 pub mod wasm_apps_loader;
 
 pub mod metrics_helper;
-pub(crate) mod tls_server;
 pub mod service_locator_helpers;
+pub(crate) mod tls_server;
 pub use metrics_helper::CoordinationComputeTracker;
 pub use service_locator_helpers::create_default_service_locator;
 

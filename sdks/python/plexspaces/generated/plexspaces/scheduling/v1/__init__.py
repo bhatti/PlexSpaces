@@ -71,33 +71,33 @@ class SchedulingRequest(betterproto.Message):
     """Request ID (unique)"""
 
     requirements: "__actor_v1__.ActorResourceRequirements" = betterproto.message_field(
-        2
+        3
     )
     """Request details (imported from actor_runtime.proto)"""
 
-    status: "SchedulingStatus" = betterproto.enum_field(5)
+    status: "SchedulingStatus" = betterproto.enum_field(6)
     """Status"""
 
-    selected_node_id: str = betterproto.string_field(6)
+    selected_node_id: str = betterproto.string_field(7)
     """Result (if scheduled)"""
 
-    actor_id: str = betterproto.string_field(7)
-    error_message: str = betterproto.string_field(8)
+    actor_id: str = betterproto.string_field(8)
+    error_message: str = betterproto.string_field(9)
     """Error (if failed)"""
 
-    created_at: datetime = betterproto.message_field(9)
+    created_at: datetime = betterproto.message_field(10)
     """Timestamps"""
 
-    scheduled_at: datetime = betterproto.message_field(10)
-    completed_at: datetime = betterproto.message_field(11)
-    tenant_id: str = betterproto.string_field(12)
+    scheduled_at: datetime = betterproto.message_field(11)
+    completed_at: datetime = betterproto.message_field(12)
+    tenant_id: str = betterproto.string_field(13)
     """
     Tenant ID for storage isolation (set from gRPC metadata/auth when request is created)
      NOTE: This is NOT an API input field - tenant comes from auth (JWT/mTLS).
      Stored here for tracking, isolation, and state store operations.
     """
 
-    namespace: str = betterproto.string_field(13)
+    namespace: str = betterproto.string_field(14)
     """
     Namespace for storage isolation (set from gRPC metadata when request is created)
      NOTE: This is NOT an API input field - namespace comes from request metadata.
@@ -109,16 +109,12 @@ class SchedulingRequest(betterproto.Message):
 class ScheduleActorRequest(betterproto.Message):
     """Request to schedule an actor"""
 
-    requirements: "__actor_v1__.ActorResourceRequirements" = betterproto.message_field(
-        1
-    )
+    request_id: str = betterproto.string_field(1)
     """Actor resource requirements (imported from actor_runtime.proto)"""
 
-    request_id: str = betterproto.string_field(4)
-    """
-    Optional: Client-provided request ID (for idempotency)
-     If not provided, server generates one
-    """
+    requirements: "__actor_v1__.ActorResourceRequirements" = betterproto.message_field(
+        2
+    )
 
 
 @dataclass(eq=False, repr=False)
@@ -128,19 +124,19 @@ class ScheduleActorResponse(betterproto.Message):
     request_id: str = betterproto.string_field(1)
     """Request ID for tracking"""
 
-    status: "SchedulingStatus" = betterproto.enum_field(2)
+    status: "SchedulingStatus" = betterproto.enum_field(3)
     """Immediate status (PENDING, SCHEDULED, or FAILED)"""
 
-    node_id: str = betterproto.string_field(3)
+    node_id: str = betterproto.string_field(4)
     """If SCHEDULED: selected node ID"""
 
-    node_address: str = betterproto.string_field(4)
+    node_address: str = betterproto.string_field(5)
     """If SCHEDULED: node gRPC address"""
 
-    error_message: str = betterproto.string_field(5)
+    error_message: str = betterproto.string_field(6)
     """If FAILED: error message"""
 
-    timestamp: datetime = betterproto.message_field(6)
+    timestamp: datetime = betterproto.message_field(7)
     """Timestamp"""
 
 
@@ -156,36 +152,43 @@ class GetSchedulingStatusRequest(betterproto.Message):
 class GetSchedulingStatusResponse(betterproto.Message):
     """Response for get scheduling status"""
 
-    request: "SchedulingRequest" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Scheduling request"""
+
+    request: "SchedulingRequest" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetNodeCapacityRequest(betterproto.Message):
     """Request to get node capacity"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node ID"""
+
+    node_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetNodeCapacityResponse(betterproto.Message):
     """Response for get node capacity"""
 
-    capacity: "__node_v1__.NodeCapacity" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node capacity (imported from node.proto)"""
+
+    capacity: "__node_v1__.NodeCapacity" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListNodeCapacitiesRequest(betterproto.Message):
     """Request to list all node capacities"""
 
-    label_filters: Dict[str, str] = betterproto.map_field(
-        1, betterproto.TYPE_STRING, betterproto.TYPE_STRING
-    )
+    request_id: str = betterproto.string_field(1)
     """Optional: Filter by labels"""
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(2)
+    label_filters: Dict[str, str] = betterproto.map_field(
+        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    page: "__common_v1__.PageRequest" = betterproto.message_field(3)
     """Optional: Pagination"""
 
 
@@ -193,10 +196,11 @@ class ListNodeCapacitiesRequest(betterproto.Message):
 class ListNodeCapacitiesResponse(betterproto.Message):
     """Response for list node capacities"""
 
-    capacities: List["NodeCapacityEntry"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node capacities"""
 
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    capacities: List["NodeCapacityEntry"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
     """Pagination"""
 
 

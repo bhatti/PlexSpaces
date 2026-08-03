@@ -35,13 +35,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_actor::child_spec::ProtoRestartPolicy;
 use plexspaces_actor::supervisor::{
     RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
 };
 use plexspaces_actor::{ActorError, ActorId, ActorRef as CoreActorRef, ServiceLocator};
 use plexspaces_actor::{ActorInstance, ChildSpec};
-use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 use plexspaces_proto::supervision::v1::SupervisorEventType as ProtoSupervisorEventType;
@@ -87,7 +87,7 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
                     .build()
                     .expect("Failed to create runtime for child factory");
                 let mailbox = rt
-                    .block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone()))
+                    .block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone(), String::new(), String::new(), None))
                     .expect("Failed to create mailbox in factory");
                 rt.block_on(
                     super::test_actor_helpers::actor_with_default_service_locator(

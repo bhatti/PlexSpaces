@@ -188,6 +188,10 @@ def _get_mock_host():
     return _host_impl
 
 
+# Alias used by tests and actors that need the raw mock host instance.
+_get_host = _get_mock_host
+
+
 def _get_host_logging():
     """Get the host_logging WIT module, or mock."""
     if _wit_host_logging is not None:

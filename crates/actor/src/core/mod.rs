@@ -41,7 +41,7 @@ pub use crate::actor_monitor::{
     exit_reason_to_string, is_ctrl_message, start_monitor_gc_task, ActorMonitor,
     LocalOnlyActorService, MonitorLink, CTRL_MSG_PREFIX,
 };
-pub use crate::actor_registry::{ActorRegistry, ActorRegistryError, TemporarySenderEntry};
+pub use crate::actor_registry::{ActorRegistry, ActorRegistryError};
 pub use crate::actor_state_checker::ActorStateHandle;
 pub use crate::actor_trait::MessageSender;
 pub use crate::actor_visibility::{
@@ -78,7 +78,6 @@ pub use crate::prometheus_text::{
     sum_counter_all_label_sets, sum_counter_for_labels, sum_sample_values_all_series,
     sum_sample_values_for_labels, LocalPrometheusRecorderChartSummary,
 };
-pub use crate::reply_waiter::{ReplyWaiter, ReplyWaiterError, ReplyWaiterRegistry};
 pub use crate::secret_masker::{mask_map_secrets, mask_release_spec, SecretMasker, DEFAULT_MASK};
 pub use crate::service_locator::{
     apply_request_context_to_grpc_metadata, request_context_from_grpc_request,

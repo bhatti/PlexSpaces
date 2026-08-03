@@ -12,10 +12,8 @@
 
 use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_blob::{
-    embedded_object_store::EmbeddedObjectStore,
-    repository::sql::SqlBlobRepository,
-    repository::ListFilters,
-    BlobService, UploadBlobParams,
+    embedded_object_store::EmbeddedObjectStore, repository::sql::SqlBlobRepository,
+    repository::ListFilters, BlobService, UploadBlobParams,
 };
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
@@ -36,33 +34,32 @@ async fn get_test_service() -> Option<Arc<BlobService>> {
     }
 
     // Use external endpoint if provided, else try to start embedded store
-    let (endpoint, _access_key, _secret_key) =
-        if let Ok(ep) = std::env::var("BLOB_ENDPOINT") {
-            (
-                ep,
-                std::env::var("BLOB_ACCESS_KEY_ID").unwrap_or_default(),
-                std::env::var("BLOB_SECRET_ACCESS_KEY").unwrap_or_default(),
-            )
-        } else {
-            match EmbeddedObjectStore::start(19200).await {
-                Ok(store) => {
-                    let ep = store.s3_endpoint.clone();
-                    let ak = store.access_key.clone();
-                    let sk = store.secret_key.clone();
-                    let _ = _EMBEDDED_MGR.set(store);
-                    (ep, ak, sk)
-                }
-                Err(e) => {
-                    eprintln!(
+    let (endpoint, _access_key, _secret_key) = if let Ok(ep) = std::env::var("BLOB_ENDPOINT") {
+        (
+            ep,
+            std::env::var("BLOB_ACCESS_KEY_ID").unwrap_or_default(),
+            std::env::var("BLOB_SECRET_ACCESS_KEY").unwrap_or_default(),
+        )
+    } else {
+        match EmbeddedObjectStore::start(19200).await {
+            Ok(store) => {
+                let ep = store.s3_endpoint.clone();
+                let ak = store.access_key.clone();
+                let sk = store.secret_key.clone();
+                let _ = _EMBEDDED_MGR.set(store);
+                (ep, ak, sk)
+            }
+            Err(e) => {
+                eprintln!(
                         "⚠️  WARNING: Skipping blob integration tests — embedded object store unavailable: {}\n\
                         Install: cargo install rustfs\n\
                         Or set BLOB_ENDPOINT to an external S3-compatible endpoint.",
                         e
                     );
-                    return None;
-                }
+                return None;
             }
-        };
+        }
+    };
 
     sqlx::any::install_default_drivers();
 
@@ -124,7 +121,9 @@ fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
 
 #[tokio::test]
 async fn test_upload_and_download_blob() {
-    let Some(service) = get_test_service().await else { return; };
+    let Some(service) = get_test_service().await else {
+        return;
+    };
     let ctx = create_test_context("tenant-1", "ns-1");
     let data = b"Hello, World!".to_vec();
 
@@ -146,13 +145,18 @@ async fn test_upload_and_download_blob() {
     assert_eq!(metadata.name, "test.txt");
     assert_eq!(metadata.content_length, data.len() as i64);
 
-    let downloaded = service.download_blob(&ctx, &metadata.blob_id).await.unwrap();
+    let downloaded = service
+        .download_blob(&ctx, &metadata.blob_id)
+        .await
+        .unwrap();
     assert_eq!(downloaded, data);
 }
 
 #[tokio::test]
 async fn test_deduplication() {
-    let Some(service) = get_test_service().await else { return; };
+    let Some(service) = get_test_service().await else {
+        return;
+    };
     let ctx = create_test_context("tenant-1", "ns-dedup");
     let data = b"Duplicate content".to_vec();
 
@@ -186,7 +190,9 @@ async fn test_deduplication() {
 
 #[tokio::test]
 async fn test_list_and_delete() {
-    let Some(service) = get_test_service().await else { return; };
+    let Some(service) = get_test_service().await else {
+        return;
+    };
     let ctx = create_test_context("tenant-list", "ns-1");
 
     for i in 1..=3 {
@@ -215,7 +221,9 @@ async fn test_list_and_delete() {
 
 #[tokio::test]
 async fn test_multi_tenancy_isolation() {
-    let Some(service) = get_test_service().await else { return; };
+    let Some(service) = get_test_service().await else {
+        return;
+    };
     let ctx1 = create_test_context("tenant-iso-1", "ns-1");
     let ctx2 = create_test_context("tenant-iso-2", "ns-1");
 
@@ -255,7 +263,9 @@ async fn test_multi_tenancy_isolation() {
 #[cfg(feature = "presigned-urls")]
 #[tokio::test]
 async fn test_presigned_url_get() {
-    let Some(service) = get_test_service().await else { return; };
+    let Some(service) = get_test_service().await else {
+        return;
+    };
     let ctx = create_test_context("tenant-1", "ns-presigned");
 
     let data = b"Test content for presigned URL".to_vec();
@@ -291,7 +301,9 @@ async fn test_presigned_url_get() {
 #[cfg(feature = "presigned-urls")]
 #[tokio::test]
 async fn test_presigned_url_invalid_operation() {
-    let Some(service) = get_test_service().await else { return; };
+    let Some(service) = get_test_service().await else {
+        return;
+    };
     let ctx = create_test_context("tenant-1", "ns-presigned-invalid");
 
     let metadata = service

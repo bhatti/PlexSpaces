@@ -41,7 +41,7 @@ NC='\033[0m'
 APP_ID="python-mcp-tool-server"
 APP_NAME="python-mcp-tool-server"
 # actor_type must match the Python class name in app-config.toml exactly.
-REGISTRY_ACTOR="ToolRegistryActor:default"
+REGISTRY_ACTOR="default:ToolRegistryActor"
 TEMP_CONFIG=""
 
 read -ra NODE_LIST <<< "$NODES"

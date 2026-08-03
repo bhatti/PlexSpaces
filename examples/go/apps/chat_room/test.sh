@@ -9,13 +9,13 @@ CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 HTTP_PORT="${1:-8091}"
 
 APP_ID="go-chat-room-large-scale"
-GUILD_ACTOR="GuildActor:guild-acme"
-ALICE_SESSION="SessionActor:alice-mobile"
-BOB_SESSION="SessionActor:bob-desktop"
-CHANNEL_ACTOR="ChannelActor:guild-acme__general"
-PRESENCE_ACTOR="PresenceActor:alice"
-FSM_ACTOR="ConnectionFSM:alice-mobile"
-WORKFLOW_ACTOR="ModerationWorkflow:report-1"
+GUILD_ACTOR="guild-acme:GuildActor"
+ALICE_SESSION="alice-mobile:SessionActor"
+BOB_SESSION="bob-desktop:SessionActor"
+CHANNEL_ACTOR="guild-acme__general:ChannelActor"
+PRESENCE_ACTOR="alice:PresenceActor"
+FSM_ACTOR="alice-mobile:ConnectionFSM"
+WORKFLOW_ACTOR="report-1:ModerationWorkflow"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

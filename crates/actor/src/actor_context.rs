@@ -26,7 +26,7 @@
 //!
 //! ## send_reply routing
 //! `ActorContext::send_reply` routes through `ActorRegistry::tell`, which handles:
-//! - Local delivery (mailbox) and temporary-sender reply routing (ReplyWaiterRegistry)
+//! - Local delivery (mailbox) and temporary-sender reply routing (PendingAsks oneshot channels)
 //! - Remote delivery (delegates to ActorService gRPC)
 //! - Virtual actor activation on first message
 
@@ -308,7 +308,6 @@ impl ActorContext {
         self.trap_exit
     }
 
-
     /// Get self ActorRef
     pub fn self_ref(&self) -> Option<&ActorRef> {
         self.self_ref.as_ref()
@@ -330,12 +329,11 @@ impl ActorContext {
             .id()
     }
 
-
     /// Send a reply message to the sender of the original message.
     ///
     /// Routes through `ActorRegistry::tell()` so virtual actor activation and uniform
-    /// routing apply. The registry dispatches locally (mailbox + ReplyWaiter routing)
-    /// or remotely (via ActorService gRPC) as needed.
+    /// routing apply. The registry dispatches locally (mailbox + PendingAsks oneshot channel
+    /// for temporary-sender replies) or remotely (via ActorService gRPC) as needed.
     ///
     /// ## Arguments
     /// * `correlation_id` - Correlation ID from the original message (optional)

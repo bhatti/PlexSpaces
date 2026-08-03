@@ -27,9 +27,8 @@
 //! It uses ActorRegistry, VirtualActorManager, and other services to spawn actors.
 
 use crate::core::{
-    ActorContext, ActorFactory, ActorId, ActorRegistry, ExitReason,
-    MessageSender, RequestContext, RequestContextExt, Service,
-    ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
+    ActorContext, ActorFactory, ActorId, ActorRegistry, ExitReason, MessageSender, RequestContext,
+    RequestContextExt, Service, ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
 };
 use crate::{ActorInstance, ActorRef};
 use async_trait::async_trait;
@@ -55,7 +54,7 @@ async fn debug_log_attached_facets(actor: &ActorInstance, actor_id: &ActorId) {
     }
     let facet_str = attached.join(", ");
     if attached.iter().any(|t| t == "durability") {
-        let st = actor.mailbox().get_stats().await;
+        let st = actor.mailbox().get_stats();
         tracing::debug!(
             actor_id = %actor_id,
             facets = %facet_str,
@@ -157,12 +156,13 @@ impl ActorFactoryImpl {
             spawn_visibility,
         );
 
+        let now = chrono::Utc::now();
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
                 actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
-                    seconds: chrono::Utc::now().timestamp(),
-                    nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+                    seconds: now.timestamp(),
+                    nanos: now.timestamp_subsec_nanos() as i32,
                 }),
                 event_type: Some(
                     plexspaces_proto::actor_lifecycle_event::EventType::Activated(
@@ -184,67 +184,6 @@ impl ActorFactoryImpl {
 
     async fn take_actor_stopping(&self, actor_id: &ActorId) -> bool {
         self.stopping_actors.write().await.remove(actor_id)
-    }
-
-    /// Create temporary sender ActorRef for ask() pattern
-    ///
-    /// ## Purpose
-    /// Creates a temporary sender ActorRef that routes replies to ReplyWaiter.
-    /// This is used by the ask() pattern to collect replies asynchronously.
-    ///
-    /// ## Arguments
-    /// * `ctx` - RequestContext with proper tenant/namespace (first parameter)
-    /// * `temp_sender_id` - Temporary sender ID in canonical ActorId string form
-    /// * `correlation_id` - Correlation ID for matching replies
-    /// * `expires_at` - Expiration time for the temporary sender
-    ///
-    /// ## Returns
-    /// `Arc<dyn MessageSender>` - The temporary sender ActorRef
-    ///
-    /// ## Design
-    /// - Creates mailbox (never used - tell() routes to ReplyWaiter before mailbox)
-    /// - Creates ActorRef::local() with namespace from ctx
-    /// - Registers in ActorRegistry via register_temporary_sender() with ctx
-    /// - Returns temp_sender_ref for use in ask() pattern
-    pub async fn create_temporary_sender_impl(
-        &self,
-        ctx: &RequestContext,
-        temp_sender_id: ActorId,
-        correlation_id: String,
-        expires_at: Instant,
-    ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
-        // Create mailbox (never used - tell() routes to ReplyWaiter before mailbox)
-        let dummy_mailbox = Arc::new(
-            Mailbox::new(MailboxConfig::default(), temp_sender_id.to_string())
-                .await
-                .map_err(|e| format!("Failed to create temporary sender mailbox: {}", e))?,
-        );
-
-        // Create ActorRef::local() with tenant_id and namespace from ctx
-        // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef → RequestContext
-        let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
-            temp_sender_id.clone(),
-            ctx.tenant_id().to_string(), // CRITICAL: Use tenant_id from RequestContext
-            ctx.namespace().to_string(),
-            dummy_mailbox,
-            self.service_locator.clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        ));
-
-        // Register temporary sender ActorRef in ActorRegistry (so it can be looked up)
-        if let Some(registry) = self.service_locator.actor_registry().await {
-            registry
-                .register_temporary_sender(
-                    ctx,
-                    temp_sender_id.clone(),
-                    temp_sender_ref.clone(),
-                    correlation_id,
-                    expires_at,
-                )
-                .await;
-        }
-
-        Ok(temp_sender_ref)
     }
 
     /// Watch actor termination and handle cleanup
@@ -520,11 +459,6 @@ impl ActorFactoryImpl {
             }
 
             // OBSERVABILITY: Track unregistration completion
-            metrics::counter!("plexspaces_actor_unregistered_total",
-                "actor_id" => actor_id_clone.to_string(),
-                "reason" => reason.clone()
-            )
-            .increment(1);
         });
     }
 }
@@ -685,28 +619,17 @@ impl ActorFactory for ActorFactoryImpl {
                     VirtualActorFacet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY,
                 };
                 use std::time::Duration;
-                // Look up the configured idle_timeout from type-level metadata so resurrection
-                // honors whatever value was set in annotations or app-config.toml, not just the default.
-                let idle_timeout_str = {
-                    let configured: Option<String> =
-                        if let Some(va_mgr) = self.service_locator.virtual_actor_manager().await {
-                            va_mgr
-                                .get_virtual_actor_type(&actor_type)
-                                .await
-                                .and_then(|meta| meta.facet_config())
-                                .and_then(|fc: serde_json::Value| {
-                                    fc.get("virtual_actor")
-                                        .and_then(|v| v.get("idle_timeout"))
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.to_string())
-                                })
-                        } else {
-                            None
-                        };
-                    configured.unwrap_or_else(|| {
-                        format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS))
+                let idle_timeout_str = metadata
+                    .facet_config()
+                    .and_then(|fc: serde_json::Value| {
+                        fc.get("virtual_actor")
+                            .and_then(|v| v.get("idle_timeout"))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
                     })
-                };
+                    .unwrap_or_else(|| {
+                        format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS))
+                    });
                 // Use to_config_str with the enum variant so this never drifts from the canonical string.
                 use plexspaces_common::ActivationStrategy;
                 let eager_config = serde_json::json!({
@@ -972,6 +895,12 @@ impl ActorFactory for ActorFactoryImpl {
         // Build actor directly from spec fields — no ActorBuilder intermediate.
         // Actor::new creates a stub context; spawn_built_actor_impl replaces it with the real one.
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+        let tenant_id = if spawn_spec.tenant_id.is_empty() {
+            ctx.tenant_id().to_string()
+        } else {
+            spawn_spec.tenant_id.clone()
+        };
+
         let mailbox_config = spawn_spec
             .config
             .as_ref()
@@ -983,15 +912,15 @@ impl ActorFactory for ActorFactoryImpl {
                 cfg
             })
             .unwrap_or_else(mailbox_config_default);
-        let mailbox = Mailbox::new(mailbox_config, format!("mailbox_{}", actor_id))
-            .await
-            .map_err(|e| format!("Failed to create mailbox: {}", e))?;
-
-        let tenant_id = if spawn_spec.tenant_id.is_empty() {
-            ctx.tenant_id().to_string()
-        } else {
-            spawn_spec.tenant_id.clone()
-        };
+        let mailbox = Mailbox::new(
+            mailbox_config,
+            format!("mailbox_{}", actor_id),
+            tenant_id.clone(),
+            namespace.clone(),
+            None, // TODO: wire node-wide IdempotencyStore from ServiceLocator
+        )
+        .await
+        .map_err(|e| format!("Failed to create mailbox: {}", e))?;
 
         let mut actor = crate::ActorInstance::new(
             actor_id.clone(),
@@ -1068,17 +997,6 @@ impl ActorFactory for ActorFactoryImpl {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Delegate to the impl method with tenant validation
         self.stop_actor_impl(ctx, actor_id).await
-    }
-
-    async fn create_temporary_sender(
-        &self,
-        ctx: &RequestContext,
-        temp_sender_id: ActorId,
-        correlation_id: String,
-        expires_at: std::time::Instant,
-    ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
-        self.create_temporary_sender_impl(ctx, temp_sender_id, correlation_id, expires_at)
-            .await
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1209,12 +1127,13 @@ impl ActorFactoryImpl {
         let ctx = RequestContext::new_without_auth(actor_tenant_id, actor_namespace);
 
         // Emit Created event
+        let now = chrono::Utc::now();
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
                 actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
-                    seconds: chrono::Utc::now().timestamp(),
-                    nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+                    seconds: now.timestamp(),
+                    nanos: now.timestamp_subsec_nanos() as i32,
                 }),
                 event_type: Some(plexspaces_proto::actor_lifecycle_event::EventType::Created(
                     plexspaces_proto::v1::actor::ActorCreated {},
@@ -1223,12 +1142,13 @@ impl ActorFactoryImpl {
             .await;
 
         // Emit Starting event
+        let now = chrono::Utc::now();
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
                 actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
-                    seconds: chrono::Utc::now().timestamp(),
-                    nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+                    seconds: now.timestamp(),
+                    nanos: now.timestamp_subsec_nanos() as i32,
                 }),
                 event_type: Some(
                     plexspaces_proto::actor_lifecycle_event::EventType::Starting(
@@ -1718,12 +1638,13 @@ impl ActorFactoryImpl {
         }
 
         // Emit Deactivating event before unregistration
+        let now = chrono::Utc::now();
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
                 actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
-                    seconds: chrono::Utc::now().timestamp(),
-                    nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+                    seconds: now.timestamp(),
+                    nanos: now.timestamp_subsec_nanos() as i32,
                 }),
                 event_type: Some(
                     plexspaces_proto::actor_lifecycle_event::EventType::Deactivating(
@@ -1746,10 +1667,7 @@ impl ActorFactoryImpl {
 
         // Best-effort unregister from object registry (not all actors are registered there).
         self.maybe_unregister_actor_from_object_registry(
-            &RequestContext::new_without_auth(
-                ctx.tenant_id().to_string(),
-                namespace.clone(),
-            ),
+            &RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace.clone()),
             actor_id,
         )
         .await;
@@ -1780,12 +1698,13 @@ impl ActorFactoryImpl {
         .increment(1);
 
         // Emit Deactivated event after unregistration
+        let now = chrono::Utc::now();
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
                 actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
-                    seconds: chrono::Utc::now().timestamp(),
-                    nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+                    seconds: now.timestamp(),
+                    nanos: now.timestamp_subsec_nanos() as i32,
                 }),
                 event_type: Some(
                     plexspaces_proto::actor_lifecycle_event::EventType::Deactivated(

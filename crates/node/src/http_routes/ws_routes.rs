@@ -60,16 +60,16 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
+use plexspaces_actor::ServiceLocator;
 pub use plexspaces_proto::transport::ws::v1::WsFrame;
 use plexspaces_proto::transport::ws::v1::{ws_frame, WsError, WsNodeRegisterAck};
-use plexspaces_actor::ServiceLocator;
 use plexspaces_services::actor_service::ActorServiceImpl;
 
 use plexspaces_actor::{NodeRegistryTrait, RequestContext, RequestContextExt};
 
+use crate::http_jwt::JwtKeyPair;
 use crate::ws_registry::{WsRegistry, WsSession};
 use crate::ws_transport_client::PendingAsks;
-use crate::http_jwt::JwtKeyPair;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -78,12 +78,19 @@ use crate::http_jwt::JwtKeyPair;
 /// Shared state for the `/ws` endpoint.
 #[derive(Clone)]
 pub struct WsRouteState {
+    /// Actor service for routing messages to actors over WebSocket.
     pub actor_service: Arc<ActorServiceImpl>,
+    /// WebSocket session registry for tracking active connections.
     pub ws_registry: Arc<WsRegistry>,
+    /// Pending ask registry for correlating request/reply over WebSocket.
     pub pending_asks: Arc<PendingAsks>,
+    /// Service locator for accessing node-wide services.
     pub service_locator: Arc<dyn ServiceLocator>,
+    /// Optional node registry for cluster-aware routing.
     pub node_registry: Option<Arc<dyn NodeRegistryTrait>>,
+    /// When true, authentication checks are skipped.
     pub auth_disabled: bool,
+    /// JWT key pair for verifying bearer tokens. None when auth is disabled.
     pub jwt_key_pair: Option<Arc<JwtKeyPair>>,
 }
 
@@ -116,7 +123,12 @@ async fn ws_upgrade_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     // Validate JWT before upgrading — reject early to avoid wasting a connection.
-    let tenant_id = match extract_tenant_id(state.auth_disabled, state.jwt_key_pair.as_deref(), &params, &headers) {
+    let tenant_id = match extract_tenant_id(
+        state.auth_disabled,
+        state.jwt_key_pair.as_deref(),
+        &params,
+        &headers,
+    ) {
         Ok(tid) => tid,
         Err(msg) => {
             warn!("WS upgrade rejected: {}", msg);
@@ -148,8 +160,7 @@ fn extract_tenant_id(
         return Ok(tenant);
     }
 
-    let kp = jwt_key_pair
-        .ok_or_else(|| "Auth enabled but JWT key not configured".to_string())?;
+    let kp = jwt_key_pair.ok_or_else(|| "Auth enabled but JWT key not configured".to_string())?;
 
     // Prefer ?token= query param (browser WebSocket can't set headers).
     // validate_bearer_token_with_keypair expects "Bearer <token>" format.
@@ -175,20 +186,17 @@ fn extract_tenant_id(
 const WS_CHANNEL_CAPACITY: usize = 256;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-async fn handle_ws_connection(
-    socket: WebSocket,
-    tenant_id: String,
-    state: WsRouteState,
-) {
+async fn handle_ws_connection(socket: WebSocket, tenant_id: String, state: WsRouteState) {
     let (mut ws_sender, mut ws_receiver) = StreamExt::split(socket);
     let (tx, mut rx) = mpsc::channel::<WsFrame>(WS_CHANNEL_CAPACITY);
 
     // ── Step 1: Wait for NodeRegistration handshake frame ─────────────────────
     // ws_sender is passed so error frames can be flushed before the writer task starts.
-    let (node_id, node_role, node_registration, ack_request_id) = match await_registration(&mut ws_receiver, &mut ws_sender, &tenant_id).await {
-        Ok(result) => result,
-        Err(_) => return, // error already sent directly to client
-    };
+    let (node_id, node_role, node_registration, ack_request_id) =
+        match await_registration(&mut ws_receiver, &mut ws_sender, &tenant_id).await {
+            Ok(result) => result,
+            Err(_) => return, // error already sent directly to client
+        };
 
     // ── Step 2: Reject duplicate node_id (prevent session takeover) ─────────
     // A reconnecting client that sends the same node_id as an existing live session
@@ -196,7 +204,10 @@ async fn handle_ws_connection(
     // must wait for the old session to close (TCP close propagates the unregister)
     // or use a new node_id.
     if state.ws_registry.is_connected(&node_id).await {
-        warn!("WS duplicate node_id '{}' rejected (session takeover prevention)", node_id);
+        warn!(
+            "WS duplicate node_id '{}' rejected (session takeover prevention)",
+            node_id
+        );
         let err = WsFrame {
             request_id: ack_request_id,
             payload: Some(ws_frame::Payload::Error(WsError {
@@ -205,7 +216,9 @@ async fn handle_ws_connection(
                 message: format!("node_id '{}' already registered", node_id),
             })),
         };
-        let _ = ws_sender.send(Message::Binary(err.encode_to_vec().into())).await;
+        let _ = ws_sender
+            .send(Message::Binary(err.encode_to_vec().into()))
+            .await;
         return;
     }
 
@@ -235,22 +248,28 @@ async fn handle_ws_connection(
     let ack_bytes = ack_frame.encode_to_vec();
     let _ = ws_sender.send(Message::Binary(ack_bytes.into())).await;
 
-    info!("WS session registered: node_id={}, tenant={}", node_id, tenant_id);
+    info!(
+        "WS session registered: node_id={}, tenant={}",
+        node_id, tenant_id
+    );
 
     // ── Step 3: Register thin node in NodeRegistry for cluster membership ───────
     // This allows the node to appear in list_connected_nodes and be correctly excluded
     // from SWIM indirect ping intermediary selection.
-    let node_registry_ctx = RequestContext::new_without_auth(
-        tenant_id.clone(),
-        String::new(),
-    );
+    let node_registry_ctx = RequestContext::new_without_auth(tenant_id.clone(), String::new());
     if let Some(ref nr) = state.node_registry {
-        match nr.register_node(&node_registry_ctx, node_registration).await {
+        match nr
+            .register_node(&node_registry_ctx, node_registration)
+            .await
+        {
             Ok(_) => {
                 metrics::counter!("plexspaces_ws_thin_node_registered_total").increment(1);
             }
             Err(e) => {
-                warn!("Failed to register thin node {} in NodeRegistry: {}", node_id, e);
+                warn!(
+                    "Failed to register thin node {} in NodeRegistry: {}",
+                    node_id, e
+                );
                 metrics::counter!("plexspaces_ws_thin_node_registration_errors_total").increment(1);
             }
         }
@@ -301,18 +320,28 @@ async fn handle_ws_connection(
     // ── Cleanup ──────────────────────────────────────────────────────────────
     state.ws_registry.unregister(&node_id_for_cleanup).await;
     if let Some(ref nr) = state.node_registry {
-        match nr.unregister_node(&node_registry_ctx, &node_id_for_cleanup).await {
+        match nr
+            .unregister_node(&node_registry_ctx, &node_id_for_cleanup)
+            .await
+        {
             Ok(_) => {
                 metrics::counter!("plexspaces_ws_thin_node_unregistered_total").increment(1);
             }
             Err(e) => {
-                warn!("Failed to unregister thin node {} from NodeRegistry: {}", node_id_for_cleanup, e);
-                metrics::counter!("plexspaces_ws_thin_node_unregistration_errors_total").increment(1);
+                warn!(
+                    "Failed to unregister thin node {} from NodeRegistry: {}",
+                    node_id_for_cleanup, e
+                );
+                metrics::counter!("plexspaces_ws_thin_node_unregistration_errors_total")
+                    .increment(1);
             }
         }
     }
     // Cancel only asks for this session so other connected thin nodes are not affected.
-    state.pending_asks.cancel_for_node(&node_id_for_cleanup, "WS session closed").await;
+    state
+        .pending_asks
+        .cancel_for_node(&node_id_for_cleanup, "WS session closed")
+        .await;
     writer_handle.abort();
     info!("WS session closed: node_id={}", node_id_for_cleanup);
 }
@@ -329,7 +358,15 @@ async fn await_registration(
     ws_receiver: &mut futures_util::stream::SplitStream<WebSocket>,
     ws_sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     tenant_id: &str,
-) -> Result<(String, plexspaces_proto::node::v1::NodeRole, plexspaces_proto::node::v1::NodeRegistration, String), ()> {
+) -> Result<
+    (
+        String,
+        plexspaces_proto::node::v1::NodeRole,
+        plexspaces_proto::node::v1::NodeRegistration,
+        String,
+    ),
+    (),
+> {
     // Helper: send an error frame directly on the socket (writer task not yet running).
     // request_id is empty for pre-registration errors (no request to correlate against).
     async fn send_ws_error(
@@ -415,12 +452,7 @@ async fn await_registration(
 }
 
 /// Dispatch a decoded `WsFrame` to the appropriate handler.
-async fn dispatch_frame(
-    frame: WsFrame,
-    node_id: &str,
-    tenant_id: &str,
-    state: &WsRouteState,
-) {
+async fn dispatch_frame(frame: WsFrame, node_id: &str, tenant_id: &str, state: &WsRouteState) {
     let request_id = frame.request_id.clone();
     match frame.payload {
         Some(ws_frame::Payload::Tell(req)) => {
@@ -434,7 +466,11 @@ async fn dispatch_frame(
             state.pending_asks.resolve(&request_id, resp).await;
         }
         Some(ws_frame::Payload::Heartbeat(_hb)) => {
-            if let Some(tx) = state.ws_registry.update_heartbeat_and_get_sender(node_id).await {
+            if let Some(tx) = state
+                .ws_registry
+                .update_heartbeat_and_get_sender(node_id)
+                .await
+            {
                 let ack = WsFrame {
                     request_id,
                     payload: Some(ws_frame::Payload::HeartbeatAck(
@@ -506,11 +542,18 @@ async fn dispatch_frame(
         Some(ws_frame::Payload::NodeRegister(_)) => {
             warn!("Duplicate node_register frame from {}", node_id);
         }
-        None | Some(ws_frame::Payload::Error(_)) | Some(ws_frame::Payload::NodeRegisterAck(_))
-        | Some(ws_frame::Payload::TellResponse(_)) | Some(ws_frame::Payload::HeartbeatAck(_))
-        | Some(ws_frame::Payload::NodePingResponse(_)) | Some(ws_frame::Payload::MetricsResponse(_)) => {
+        None
+        | Some(ws_frame::Payload::Error(_))
+        | Some(ws_frame::Payload::NodeRegisterAck(_))
+        | Some(ws_frame::Payload::TellResponse(_))
+        | Some(ws_frame::Payload::HeartbeatAck(_))
+        | Some(ws_frame::Payload::NodePingResponse(_))
+        | Some(ws_frame::Payload::MetricsResponse(_)) => {
             if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("WS: ignored server-to-client or unknown frame from {}", node_id);
+                debug!(
+                    "WS: ignored server-to-client or unknown frame from {}",
+                    node_id
+                );
             }
         }
     }
@@ -540,12 +583,19 @@ async fn handle_tell(
     match ActorServiceTrait::send_message(&*state.actor_service, grpc_req).await {
         Ok(_) => {
             if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("WS tell dispatched: actor_type={}, request_id={}", actor_type, request_id);
+                debug!(
+                    "WS tell dispatched: actor_type={}, request_id={}",
+                    actor_type, request_id
+                );
             }
         }
         Err(status) => {
             if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("WS tell failed: actor_type={}, status={}", actor_type, status.message());
+                debug!(
+                    "WS tell failed: actor_type={}, status={}",
+                    actor_type,
+                    status.message()
+                );
             }
             let sender = state.ws_registry.get_sender(node_id).await;
             if let Some(tx) = sender {
@@ -601,7 +651,11 @@ async fn handle_ask(
         }
         Err(status) => {
             if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("WS ask failed: actor_type={}, status={}", actor_type, status.message());
+                debug!(
+                    "WS ask failed: actor_type={}, status={}",
+                    actor_type,
+                    status.message()
+                );
             }
             let resp = plexspaces_proto::actor::v1::AskReplyResponse {
                 request_id: req_id,
@@ -621,7 +675,12 @@ async fn handle_ask(
 /// Send an error frame to the client.
 /// `request_id` echoes the frame that triggered the error so clients can correlate
 /// it to an in-flight ask/tell on a multiplexed connection.
-async fn send_error(tx: &mpsc::Sender<WsFrame>, request_id: &str, code: u32, message: &str) -> Result<(), ()> {
+async fn send_error(
+    tx: &mpsc::Sender<WsFrame>,
+    request_id: &str,
+    code: u32,
+    message: &str,
+) -> Result<(), ()> {
     let frame = WsFrame {
         request_id: request_id.to_string(),
         payload: Some(ws_frame::Payload::Error(WsError {
@@ -658,7 +717,9 @@ mod tests {
 
     #[test]
     fn extract_tenant_id_with_auth_enabled_no_jwt_key_returns_error() {
-        let params = WsQueryParams { token: Some("some-token".to_string()) };
+        let params = WsQueryParams {
+            token: Some("some-token".to_string()),
+        };
         let headers = axum::http::HeaderMap::new();
 
         let result = extract_tenant_id(false, None, &params, &headers);
@@ -696,8 +757,8 @@ mod tests {
             is_admin: false,
             jti: None,
         };
-        let jwt = plexspaces_grpc_middleware::sign_jwt_with_keypair(&kp, &claims)
-            .expect("sign JWT");
+        let jwt =
+            plexspaces_grpc_middleware::sign_jwt_with_keypair(&kp, &claims).expect("sign JWT");
         let params = WsQueryParams { token: Some(jwt) };
         let headers = axum::http::HeaderMap::new();
 

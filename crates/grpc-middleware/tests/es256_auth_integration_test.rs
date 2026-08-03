@@ -13,8 +13,8 @@
 //! - JWKS endpoint data generation
 
 use plexspaces_grpc_middleware::jwt::{
-    sign_jwt_with_keypair, validate_bearer_token_with_keypair,
-    validate_jwt_token_with_keypair, JwtClaims,
+    sign_jwt_with_keypair, validate_bearer_token_with_keypair, validate_jwt_token_with_keypair,
+    JwtClaims,
 };
 use plexspaces_grpc_middleware::jwt_keys::JwtKeyPair;
 use std::path::Path;
@@ -48,7 +48,8 @@ fn test_es256_generate_sign_verify_roundtrip() {
     let claims = test_claims("tenant-abc", 3600);
     let token = sign_jwt_with_keypair(&kp, &claims).expect("signing should succeed");
 
-    let verified = validate_jwt_token_with_keypair(&kp, &token).expect("verification should succeed");
+    let verified =
+        validate_jwt_token_with_keypair(&kp, &token).expect("verification should succeed");
     assert_eq!(verified.sub, "test-user-123");
     assert_eq!(verified.tenant_id, "tenant-abc");
     assert_eq!(verified.roles, vec!["user", "admin"]);
@@ -175,10 +176,10 @@ fn test_es256_from_config_file_path() {
     JwtKeyPair::load_or_generate(&key_path).unwrap();
 
     let kp = JwtKeyPair::from_config(
-        "",                              // no inline PEM
-        key_path.to_str().unwrap(),      // file path
-        "",                              // no secret
-        false,                           // no auto-generate
+        "",                         // no inline PEM
+        key_path.to_str().unwrap(), // file path
+        "",                         // no secret
+        false,                      // no auto-generate
     )
     .expect("from_config with file path should work");
 
@@ -219,7 +220,10 @@ fn test_es256_from_config_inline_pem_takes_priority() {
 fn test_es256_from_config_rejects_hs256_secret() {
     let result = JwtKeyPair::from_config("", "", "my-hs256-secret", false);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("HS256 is not supported"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("HS256 is not supported"));
 }
 
 #[test]
@@ -239,8 +243,8 @@ fn test_es256_from_config_fails_when_nothing_configured_and_no_auto_generate() {
 #[test]
 fn test_es256_sec1_format_key_loads_correctly() {
     // Test that SEC1 format (BEGIN EC PRIVATE KEY) works via from_ec_pem
-    let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/ec-sec1-test.pem");
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ec-sec1-test.pem");
 
     if fixture_path.exists() {
         let pem = std::fs::read_to_string(&fixture_path).unwrap();
@@ -307,9 +311,17 @@ fn test_es256_rejects_token_signed_with_different_algorithm() {
     // Manually create an HS256-signed token (simulating a forged token)
     let now = chrono::Utc::now().timestamp();
     #[derive(serde::Serialize)]
-    struct FakeClaims { sub: String, exp: i64, iat: i64, tenant_id: String }
+    struct FakeClaims {
+        sub: String,
+        exp: i64,
+        iat: i64,
+        tenant_id: String,
+    }
     let claims = FakeClaims {
-        sub: "attacker".to_string(), exp: now + 3600, iat: now, tenant_id: "t1".to_string(),
+        sub: "attacker".to_string(),
+        exp: now + 3600,
+        iat: now,
+        tenant_id: "t1".to_string(),
     };
     let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
     let key = jsonwebtoken::EncodingKey::from_secret(b"secret");
@@ -325,7 +337,9 @@ fn test_es256_bearer_missing_header_returns_error() {
     let kp = JwtKeyPair::generate_es256().unwrap();
     let result = validate_bearer_token_with_keypair(&kp, None);
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Missing or invalid Authorization"));
+    assert!(result
+        .unwrap_err()
+        .contains("Missing or invalid Authorization"));
 }
 
 #[test]
@@ -374,7 +388,8 @@ fn test_es256_aud_as_string_accepted() {
     let token = jsonwebtoken::encode(&header, &claims, kp.encoding_key()).unwrap();
 
     // Verify it decodes correctly
-    let verified = validate_jwt_token_with_keypair(&kp, &token).expect("string aud should be accepted");
+    let verified =
+        validate_jwt_token_with_keypair(&kp, &token).expect("string aud should be accepted");
     assert_eq!(verified.tenant_id, "my-tenant");
     assert_eq!(verified.aud, vec!["plexspaces-api"]);
 }
@@ -403,7 +418,8 @@ fn test_es256_aud_as_empty_string_accepted() {
     header.kid = Some(kp.kid().to_string());
     let token = jsonwebtoken::encode(&header, &claims, kp.encoding_key()).unwrap();
 
-    let verified = validate_jwt_token_with_keypair(&kp, &token).expect("empty aud string should work");
+    let verified =
+        validate_jwt_token_with_keypair(&kp, &token).expect("empty aud string should work");
     assert!(verified.aud.is_empty());
 }
 
@@ -419,5 +435,9 @@ fn test_es256_key_file_permissions() {
 
     let meta = std::fs::metadata(&key_path).unwrap();
     let mode = meta.permissions().mode() & 0o777;
-    assert_eq!(mode, 0o600, "key file should have 0600 permissions, got {:o}", mode);
+    assert_eq!(
+        mode, 0o600,
+        "key file should have 0600 permissions, got {:o}",
+        mode
+    );
 }

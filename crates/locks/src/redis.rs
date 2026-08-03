@@ -75,7 +75,12 @@ impl RedisLockManager {
         format!("{}#{}#{}", ctx.tenant_id(), ctx.namespace(), lock_key)
     }
 
-    fn build_lock(lock_key: &str, holder_id: &str, version: &str, lease_duration_secs: u32) -> Lock {
+    fn build_lock(
+        lock_key: &str,
+        holder_id: &str,
+        version: &str,
+        lease_duration_secs: u32,
+    ) -> Lock {
         let now = SystemTime::now();
         let expires = now + std::time::Duration::from_secs(lease_duration_secs as u64);
         Lock {

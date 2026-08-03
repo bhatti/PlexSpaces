@@ -143,10 +143,13 @@ syntax = "proto3";
 package plexspaces.mailbox.v1;
 
 import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/channel/channel.proto";
 import "plexspaces/v1/common.proto";
+import "plexspaces/v1/common/idempotency.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/mailbox/mailbox;plexspaces_mailbox_v1";
 
@@ -179,52 +182,91 @@ enum MessagePriority {
 }
 
 // Mailbox configuration
+//
+// ## Bounded-queue semantics
+// When `capacity` > 0 and the in-memory channel is used, the mailbox is bounded.
+// Calls to `tell()` or `ask()` that arrive when the queue is full receive
+// gRPC status `RESOURCE_EXHAUSTED` (code 8) with `retry_after_ms` set in the
+// trailing metadata so clients know how long to back off.
+//
+// Persistent backends (Redis, Kafka, SQS) are inherently unbounded by default;
+// set `capacity` there only if the backend supports it.
+//
+// ## Environment variable overrides
+// All numeric limits can be overridden at runtime via environment variables:
+//
+//   PLEXSPACES_MAILBOX_CAPACITY          → capacity
+//   PLEXSPACES_MAILBOX_MAX_CAPACITY      → max_capacity (hard upper bound)
+//   PLEXSPACES_MAILBOX_RETRY_AFTER_MS    → retry_after_ms (backpressure hint)
+//
+// These are read once at node startup. Useful in k8s/Docker via the env: block.
 message MailboxConfig {
-  // Type of mailbox
-  MailboxType mailbox_type = 1;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "MailboxConfig"
+      description: "Configuration for actor mailboxes. Controls capacity, ordering, backpressure, and idempotency."
+    }
+  };
 
-  // Maximum queue capacity (0 = unlimited for UNBOUNDED)
-  uint32 capacity = 2;
+  // Type of mailbox
+  MailboxType mailbox_type = 1 [(google.api.field_behavior) = OPTIONAL];
+
+  // Maximum queue capacity for in-memory channels (0 = use max_capacity or default 10,000).
+  // Ignored for persistent backends (Redis, Kafka, SQS).
+  // Override via env: PLEXSPACES_MAILBOX_CAPACITY
+  uint32 capacity = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint32.lte = 10000000
+  ];
+
+  // Hard upper bound on queue depth (applies to in-memory channels only).
+  // 0 = use the node default (10,000). Cannot exceed 10,000,000.
+  // When this limit is reached, `tell()` and `ask()` return RESOURCE_EXHAUSTED.
+  // Override via env: PLEXSPACES_MAILBOX_MAX_CAPACITY
+  uint32 max_capacity = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint32.lte = 10000000
+  ];
 
   // Backpressure strategy when queue is full
-  BackpressureStrategy backpressure_strategy = 3;
+  BackpressureStrategy backpressure_strategy = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // How long (ms) to suggest callers wait before retrying after RESOURCE_EXHAUSTED.
+  // Sent in the `retry-after-ms` gRPC trailing metadata field.
+  // Default 0 → 100 ms. Override via env: PLEXSPACES_MAILBOX_RETRY_AFTER_MS
+  uint64 retry_after_ms = 5 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint64.lte = 60000
+  ];
 
   // Message timeout (how long messages wait before being dropped)
-  google.protobuf.Duration message_timeout = 4;
+  google.protobuf.Duration message_timeout = 6 [(google.api.field_behavior) = OPTIONAL];
 
   // Enable priority-based processing
-  bool enable_priority = 5;
+  bool enable_priority = 7 [(google.api.field_behavior) = OPTIONAL];
 
-  // Enable message deduplication
-  bool enable_deduplication = 6;
+  // Enable message deduplication (requires idempotency_key on messages)
+  bool enable_deduplication = 8 [(google.api.field_behavior) = OPTIONAL];
 
   // Deduplication window
-  google.protobuf.Duration deduplication_window = 7;
-
-  // Maximum cache size for message ID deduplication (default: 10000)
-  // LRU cache with fixed size - evicts least recently used when full
-  // Range: 100 to 1,000,000 entries
-  uint32 message_id_cache_size = 8;
-
-  // Maximum cache size for idempotency key deduplication (default: 10000)
-  // LRU cache with fixed size - evicts least recently used when full
-  // Range: 100 to 1,000,000 entries
-  uint32 idempotency_cache_size = 9;
+  google.protobuf.Duration deduplication_window = 9 [(google.api.field_behavior) = OPTIONAL];
 
   // Ordering strategy (how messages are ordered)
-  OrderingStrategy ordering_strategy = 10;
+  OrderingStrategy ordering_strategy = 10 [(google.api.field_behavior) = OPTIONAL];
 
   // Channel provider implementation (defaults to IN_MEMORY if not specified)
-  // This directly specifies which channel provider to use for the mailbox.
-  // The provider must be available/configured, otherwise mailbox creation will fail.
-  plexspaces.channel.v1.ChannelProvider channel_provider = 11;
+  plexspaces.channel.v1.ChannelProvider channel_provider = 11 [(google.api.field_behavior) = OPTIONAL];
 
   // Channel-specific configuration (optional, backend-specific)
-  // Only used if channel_provider is specified. If not provided, provider uses defaults.
-  plexspaces.channel.v1.ChannelConfig channel_config = 12;
+  plexspaces.channel.v1.ChannelConfig channel_config = 12 [(google.api.field_behavior) = OPTIONAL];
 
   // Metadata
   map<string, string> metadata = 13;
+
+  // Idempotency store configuration for this mailbox.
+  // When set, overrides the node-level IdempotencyConfig for this specific mailbox.
+  // Omit to inherit node-level settings (recommended).
+  plexspaces.common.v1.IdempotencyConfig idempotency = 14 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Backpressure strategy when mailbox is full
@@ -270,16 +312,24 @@ enum OrderingStrategy {
 // ## Purpose
 // Defines error types for mailbox operations.
 // Used in error responses and for error handling in mailbox service.
+// Mailbox error types
+//
+// ## Client handling
+// - MAILBOX_ERROR_FULL: transient; retry after `retry-after-ms` gRPC trailer (default 100 ms).
+//   Maps to gRPC RESOURCE_EXHAUSTED (code 8) which is in the default retry list.
+// - All other errors: non-retryable unless otherwise noted.
 enum MailboxError {
   MAILBOX_ERROR_UNSPECIFIED = 0;
 
   // Mailbox not found
   MAILBOX_ERROR_NOT_FOUND = 1;
 
-  // Mailbox is full (backpressure triggered)
+  // Mailbox is full (in-memory channel at capacity).
+  // Transient — retry after the `retry-after-ms` value in gRPC trailing metadata.
+  // Maps to gRPC RESOURCE_EXHAUSTED (code 8).
   MAILBOX_ERROR_FULL = 2;
 
-  // Message timeout (message expired)
+  // Message timeout (message expired before delivery)
   MAILBOX_ERROR_TIMEOUT = 3;
 
   // Invalid configuration
@@ -290,6 +340,31 @@ enum MailboxError {
 
   // Serialization/deserialization failed
   MAILBOX_ERROR_SERIALIZATION = 6;
+}
+
+// Error detail attached to RESOURCE_EXHAUSTED responses when a mailbox is full.
+// Sent as a trailing metadata value (key: "mailbox-full-bin") serialized as proto bytes.
+// Clients should wait at least `retry_after_ms` milliseconds before retrying.
+message MailboxFullDetail {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "MailboxFullDetail"
+      description: "Attached to RESOURCE_EXHAUSTED when a mailbox is full. Read retry_after_ms for back-off hint."
+    }
+  };
+
+  // Suggested back-off before retrying, in milliseconds.
+  // 0 means use a sensible default (e.g. 100 ms with jitter).
+  uint64 retry_after_ms = 1;
+
+  // Actor whose mailbox is full.
+  string actor_id = 2;
+
+  // Current queue depth at the time of the error.
+  uint32 current_depth = 3;
+
+  // Configured max capacity.
+  uint32 max_capacity = 4;
 }
 
 // Mailbox statistics

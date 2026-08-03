@@ -125,7 +125,10 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         }
         self.rebuild_client().await;
         tracing::info!(name = %link.name, "ServiceLinkService: added service link");
-        Ok(Response::new(AddServiceLinkResponse { request_id: ulid::Ulid::new().to_string(), link: Some(link) }))
+        Ok(Response::new(AddServiceLinkResponse {
+            request_id: ulid::Ulid::new().to_string(),
+            link: Some(link),
+        }))
     }
 
     async fn remove_service_link(
@@ -483,7 +486,10 @@ mod tests {
         let sl = make_service_locator();
         let svc = ServiceLinkServiceImpl::new(sl).await;
         let err = svc
-            .add_service_link(authed_request(AddServiceLinkRequest { link: None, request_id: ulid::Ulid::new().to_string() }))
+            .add_service_link(authed_request(AddServiceLinkRequest {
+                link: None,
+                request_id: ulid::Ulid::new().to_string(),
+            }))
             .await
             .unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);

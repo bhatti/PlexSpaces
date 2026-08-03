@@ -13,15 +13,14 @@ wit_bindgen::generate!({
 
 pub use exports::plexspaces::actor::actor::Guest;
 
+use plexspaces::actor::host_actor::pg_members;
 use plexspaces::actor::host_kv::{
     alarm_delete as raw_alarm_delete, alarm_get as raw_alarm_get, alarm_set as raw_alarm_set,
-    kv_cas as raw_kv_cas,
-    kv_get, kv_increment as raw_kv_increment,
-    kv_multi_get as raw_kv_multi_get, kv_multi_put as raw_kv_multi_put,
-    kv_put, kv_put_with_ttl as raw_kv_put_with_ttl,
+    kv_cas as raw_kv_cas, kv_get, kv_increment as raw_kv_increment,
+    kv_multi_get as raw_kv_multi_get, kv_multi_put as raw_kv_multi_put, kv_put,
+    kv_put_with_ttl as raw_kv_put_with_ttl,
 };
 pub use plexspaces::actor::host_kv::{kv_delete, kv_list};
-use plexspaces::actor::host_actor::pg_members;
 use plexspaces::actor::host_logging::{log, now_ms};
 use plexspaces::actor::host_shard::application_metrics_add;
 
@@ -213,25 +212,36 @@ pub fn kv_cas(key: &str, expected: Option<&[u8]>, new_value: &[u8]) -> Result<bo
 /// Fetch multiple keys in one call.
 /// Returns values in the same order as `keys`; `None` for missing keys.
 pub fn kv_multi_get(keys: &[&str]) -> Result<Vec<Option<Vec<u8>>>, String> {
-    let keys_json = serde_json::to_vec(keys)
-        .map_err(|e| format!("kv_multi_get: serialize keys: {e}"))?;
+    let keys_json =
+        serde_json::to_vec(keys).map_err(|e| format!("kv_multi_get: serialize keys: {e}"))?;
     let result_bytes = raw_kv_multi_get(&keys_json)?;
     let result: Vec<Option<String>> = serde_json::from_slice(&result_bytes)
         .map_err(|e| format!("kv_multi_get: parse response: {e}"))?;
-    result.into_iter()
-        .map(|v| v.map(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
-            .map_err(|e| format!("kv_multi_get: base64 decode: {e}")))
-            .transpose())
+    result
+        .into_iter()
+        .map(|v| {
+            v.map(|b64| {
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+                    .map_err(|e| format!("kv_multi_get: base64 decode: {e}"))
+            })
+            .transpose()
+        })
         .collect()
 }
 
 /// Store multiple key-value pairs in one call.
 pub fn kv_multi_put(entries: &[(&str, &[u8])]) -> Result<(), String> {
-    let encoded: std::collections::HashMap<&str, String> = entries.iter()
-        .map(|(k, v)| (*k, base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v)))
+    let encoded: std::collections::HashMap<&str, String> = entries
+        .iter()
+        .map(|(k, v)| {
+            (
+                *k,
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v),
+            )
+        })
         .collect();
-    let entries_json = serde_json::to_vec(&encoded)
-        .map_err(|e| format!("kv_multi_put: serialize: {e}"))?;
+    let entries_json =
+        serde_json::to_vec(&encoded).map_err(|e| format!("kv_multi_put: serialize: {e}"))?;
     raw_kv_multi_put(&entries_json)
 }
 

@@ -581,10 +581,20 @@ pub struct RuntimeConfig {
     #[prost(map="string, message", tag="16")]
     pub outbound_policy_templates: ::std::collections::HashMap<::prost::alloc::string::String, ClientTransportPolicy>,
     /// Static file directories to serve over HTTP.
+    ///
+    /// Each entry maps a URL mount path to a local filesystem directory.
+    /// Example: mount_path="/apps/chat", fs_path="/opt/plexspaces/static/chat"
+    /// → files under fs_path are served at <http://<node>/apps/chat/>
+    ///
+    /// Environment variable override: PLEXSPACES_STATIC_DIRS
+    /// Format: "<mount>:<path>\[:<mount2>:<path2>...\]"
     #[prost(message, repeated, tag="17")]
     pub static_dirs: ::prost::alloc::vec::Vec<StaticDirMount>,
 }
 /// A single static file directory mount.
+///
+/// ## Purpose
+/// Maps a URL mount path to a local filesystem directory for static file serving.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StaticDirMount {
@@ -2232,6 +2242,25 @@ impl TaskRouterErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

@@ -142,16 +142,17 @@ class WasmErrorCode(betterproto.Enum):
 class DeployWasmModuleRequestPreWarmStrategy(betterproto.Enum):
     """Pre-warm strategy"""
 
-    NONE = 0
+    PRE_WARM_STRATEGY_UNSPECIFIED = 0
+    NONE = 1
     """No pre-warming - nodes fetch on-demand (lazy)"""
 
-    ANNOUNCE = 1
+    ANNOUNCE = 2
     """Announce to all nodes - they decide whether to pre-fetch"""
 
-    PUSH_ALL = 2
+    PUSH_ALL = 3
     """Push to all nodes immediately (eager)"""
 
-    PUSH_TAGGED = 3
+    PUSH_TAGGED = 4
     """Push to subset of nodes (e.g., based on tags)"""
 
 
@@ -164,14 +165,15 @@ class HttpFetchRequest(betterproto.Message):
      request metadata/body as protobuf bytes so polyglot SDKs can share one model.
     """
 
-    headers: Dict[str, str] = betterproto.map_field(
-        1, betterproto.TYPE_STRING, betterproto.TYPE_STRING
-    )
+    request_id: str = betterproto.string_field(1)
     """
     Request headers to merge with service-link defaults and auth headers.
     """
 
-    body: bytes = betterproto.bytes_field(2)
+    headers: Dict[str, str] = betterproto.map_field(
+        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    body: bytes = betterproto.bytes_field(3)
     """Raw request body bytes."""
 
 
@@ -179,15 +181,16 @@ class HttpFetchRequest(betterproto.Message):
 class HttpFetchResponse(betterproto.Message):
     """Outbound HTTP response returned by actor-world host.http-fetch."""
 
-    status: int = betterproto.uint32_field(1)
+    request_id: str = betterproto.string_field(1)
     """HTTP status code."""
 
+    status: int = betterproto.uint32_field(2)
     headers: Dict[str, str] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Response headers."""
 
-    body: bytes = betterproto.bytes_field(3)
+    body: bytes = betterproto.bytes_field(4)
     """Raw response body bytes."""
 
 
@@ -560,13 +563,14 @@ class DeployWasmModuleRequest(betterproto.Message):
      - Idempotent: Re-deploying same module (same hash) is no-op
     """
 
-    module: "WasmModule" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """WASM module to deploy"""
 
-    pre_warm: "DeployWasmModuleRequestPreWarmStrategy" = betterproto.enum_field(2)
+    module: "WasmModule" = betterproto.message_field(2)
+    pre_warm: "DeployWasmModuleRequestPreWarmStrategy" = betterproto.enum_field(3)
     """How to distribute module to nodes"""
 
-    target_node_tags: List[str] = betterproto.string_field(3)
+    target_node_tags: List[str] = betterproto.string_field(4)
     """
     Node tags for PUSH_TAGGED strategy (e.g., ["us-east-1", "production"])
     """
@@ -576,16 +580,17 @@ class DeployWasmModuleRequest(betterproto.Message):
 class DeployWasmModuleResponse(betterproto.Message):
     """Deploy WASM module response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Was deployment successful?"""
 
-    module_hash: str = betterproto.string_field(2)
+    success: bool = betterproto.bool_field(2)
+    module_hash: str = betterproto.string_field(3)
     """Module hash (for cache lookup)"""
 
-    nodes_pre_warmed: int = betterproto.uint32_field(3)
+    nodes_pre_warmed: int = betterproto.uint32_field(4)
     """Number of nodes that received the module (for pre-warming)"""
 
-    error: "WasmError" = betterproto.message_field(4)
+    error: "WasmError" = betterproto.message_field(5)
     """
     Error details if deployment failed (replaces error_message)
     
@@ -614,7 +619,7 @@ class InstantiateActorRequest(betterproto.Message):
      - Config can override module defaults (e.g., more memory for specific actor)
     """
 
-    module_ref: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Module name or hash to instantiate
     
@@ -623,14 +628,15 @@ class InstantiateActorRequest(betterproto.Message):
      - Hash: "a1b2c3d4..." (direct cache lookup)
     """
 
-    actor_id: str = betterproto.string_field(2)
+    module_ref: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(3)
     """
     Actor ID to assign to this instance
     
      Format: ULID for sortability (see CLAUDE.md Core Principle 0)
     """
 
-    initial_state: bytes = betterproto.bytes_field(3)
+    initial_state: bytes = betterproto.bytes_field(4)
     """
     Initial state bytes (opaque to runtime)
     
@@ -641,14 +647,14 @@ class InstantiateActorRequest(betterproto.Message):
      - Migration state (actor moving to new node)
     """
 
-    config: "WasmConfig" = betterproto.message_field(4)
+    config: "WasmConfig" = betterproto.message_field(5)
     """
     Configuration overrides (optional)
     
      If not provided, uses module's default config or system defaults.
     """
 
-    target_node_id: str = betterproto.string_field(5)
+    target_node_id: str = betterproto.string_field(6)
     """
     Node ID to instantiate on (optional)
     
@@ -660,19 +666,20 @@ class InstantiateActorRequest(betterproto.Message):
 class InstantiateActorResponse(betterproto.Message):
     """Instantiate WASM actor response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Was instantiation successful?"""
 
-    actor_id: str = betterproto.string_field(2)
+    success: bool = betterproto.bool_field(2)
+    actor_id: str = betterproto.string_field(3)
     """Actor ID of instantiated actor"""
 
-    node_id: str = betterproto.string_field(3)
+    node_id: str = betterproto.string_field(4)
     """Node ID where actor is running"""
 
-    created_at: datetime = betterproto.message_field(4)
+    created_at: datetime = betterproto.message_field(5)
     """Instance creation time"""
 
-    error: "WasmError" = betterproto.message_field(5)
+    error: "WasmError" = betterproto.message_field(6)
     """
     Error details if instantiation failed (replaces error_message)
     
@@ -701,16 +708,17 @@ class MigrateActorRequest(betterproto.Message):
      - Atomic migration: Source actor paused until destination ready
     """
 
-    actor_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Actor ID to migrate"""
 
-    source_node_id: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(2)
+    source_node_id: str = betterproto.string_field(3)
     """Source node ID (current location)"""
 
-    target_node_id: str = betterproto.string_field(3)
+    target_node_id: str = betterproto.string_field(4)
     """Destination node ID (target location)"""
 
-    include_journal: bool = betterproto.bool_field(4)
+    include_journal: bool = betterproto.bool_field(5)
     """
     Include journal entries (for durable actors)
     
@@ -722,16 +730,17 @@ class MigrateActorRequest(betterproto.Message):
 class MigrateActorResponse(betterproto.Message):
     """Migrate WASM actor response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Was migration successful?"""
 
-    migration_time: timedelta = betterproto.message_field(2)
+    success: bool = betterproto.bool_field(2)
+    migration_time: timedelta = betterproto.message_field(3)
     """Migration duration (should be < 10ms for state-only)"""
 
-    state_size_bytes: int = betterproto.uint64_field(3)
+    state_size_bytes: int = betterproto.uint64_field(4)
     """Size of state transferred (bytes)"""
 
-    error: "WasmError" = betterproto.message_field(4)
+    error: "WasmError" = betterproto.message_field(5)
     """Error details if migration failed"""
 
 

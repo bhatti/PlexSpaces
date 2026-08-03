@@ -2,13 +2,13 @@
 // Tests for virtual actor suspension/passivation and reactivation
 
 use async_trait::async_trait;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::Message;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
     InitializableServiceLocator, RequestContextExt, ServiceLocator, ServiceLocatorBase,
 };
-use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::{
     DurabilityFacet, JournalError, JournalResult, JournalStorage, SqliteJournalStorage,
     StateLoader, VirtualActorFacet,
@@ -25,15 +25,7 @@ use super::test_helpers::{
     check_virtual_actor_exists_triplet, lookup_actor_ref, registry_ask, registry_tell,
     spawn_actor_helper, test_runtime_actor_id,
 };
-
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
-    plexspaces_actor::Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        ..Default::default()
-    }
-}
+use plexspaces_test_utils::messages::create_test_message;
 
 /// Helper to create a test message with message type
 fn create_test_message_with_type(
@@ -120,7 +112,7 @@ impl StateLoader for CounterStateLoader {
         // Store in shared state (in production, this would restore to the new actor instance)
         let mut shared = self.shared_count.write().await;
         *shared = count;
-        eprintln!("🟢 [STATE_LOADER] Restored count={} to shared state", count);
+        tracing::debug!(count, "state restored");
         Ok(())
     }
 
@@ -136,31 +128,7 @@ impl ActorTrait for CounterActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let message_id = msg.id.clone();
-        let sender_clone = msg.sender_id.clone();
-        let receiver_clone = msg.receiver_id.clone();
-        let correlation_id_clone = msg.correlation_id.clone();
-        let message_type_str = msg.message_type.to_string();
-
-        eprintln!("\n\n🔴🔴🔴 [COUNTER_ACTOR::handle_message] START: message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}\n\n", 
-            message_id, sender_clone, receiver_clone, correlation_id_clone, message_type_str);
-
-        if !sender_clone.is_empty() {
-            let is_temp = ActorId::from_canonical(&sender_clone)
-                .map(|actor_id| actor_id.is_temporary_sender())
-                .unwrap_or(false);
-            eprintln!("🔴🔴🔴 [COUNTER_ACTOR::handle_message] Sender check: sender_id={}, is_temporary_sender={}\n", sender_clone, is_temp);
-        } else {
-            eprintln!("🔴🔴🔴 [COUNTER_ACTOR::handle_message] NO SENDER IN MESSAGE!\n");
-        }
-
-        let result = self.route_message(ctx, msg).await;
-        eprintln!(
-            "\n\n🟢🟢🟢 [COUNTER_ACTOR::handle_message] END: message_id={}, result={:?}\n\n",
-            message_id,
-            result.is_ok()
-        );
-        result
+        self.route_message(ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {
@@ -175,17 +143,6 @@ impl GenServer for CounterActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        eprintln!("🔵 [COUNTER_ACTOR::handle_request] START: message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
-            msg.id, msg.sender_id, msg.receiver_id, msg.correlation_id, msg.message_type);
-
-        if !msg.sender_id.is_empty() {
-            let sender_id = &msg.sender_id;
-            let is_temp = ActorId::from_canonical(sender_id)
-                .map(|actor_id| actor_id.is_temporary_sender())
-                .unwrap_or(false);
-            eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sender check: sender_id={}, is_temporary_sender={}", sender_id, is_temp);
-        }
-
         let test_msg: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
 
@@ -202,10 +159,6 @@ impl GenServer for CounterActor {
             }
             TestMessage::GetCount => {
                 let count = *self.count.lock().await;
-                eprintln!(
-                    "🔵 [COUNTER_ACTOR::handle_request] GetCount: count={}",
-                    count
-                );
                 create_test_message(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
             }
             _ => {
@@ -221,11 +174,6 @@ impl GenServer for CounterActor {
             //   current_actor_id = the actor replying FROM = msg.receiver_id (this counter actor)
             let reply_to = &msg.sender_id;
             let current_actor_id = &msg.receiver_id;
-            let is_temp = ActorId::from_canonical(reply_to)
-                .map(|actor_id| actor_id.is_temporary_sender())
-                .unwrap_or(false);
-            eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sending reply: current_actor={}, reply_to={}, is_temporary_sender={}, correlation_id={:?}",
-                current_actor_id, reply_to, is_temp, msg.correlation_id);
             ctx.send_reply(
                 if msg.correlation_id.is_empty() {
                     None
@@ -243,22 +191,9 @@ impl GenServer for CounterActor {
             )
             .await
             .map_err(|e| {
-                eprintln!(
-                    "🔴 [COUNTER_ACTOR::handle_request] Failed to send reply: {}",
-                    e
-                );
                 BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
             })?;
-            eprintln!("🟢 [COUNTER_ACTOR::handle_request] Reply sent successfully: reply_to={}, is_temporary_sender={}", reply_to, is_temp);
-        } else {
-            eprintln!(
-                "🟡 [COUNTER_ACTOR::handle_request] No sender_id in message, cannot send reply"
-            );
         }
-        eprintln!(
-            "🟢 [COUNTER_ACTOR::handle_request] END: message_id={}",
-            msg.id
-        );
         Ok(())
     }
 }
@@ -375,7 +310,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     JournalStorage::save_checkpoint(&*storage_for_checkpoint, &checkpoint)
         .await
         .unwrap();
-    eprintln!("🟢 [TEST] Created checkpoint with count=1 before suspension (state restoration not yet implemented)");
+    tracing::debug!("checkpoint saved");
 
     // Suspend/passivate the actor
     let stop_ctx = node
@@ -442,8 +377,6 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     node.service_locator()
         .register_behavior_registry(Arc::new(registry))
         .await;
-    eprintln!("🟢 [TEST] Registered CounterActor in BehaviorRegistry as 'GenServer'");
-
     let actor_id = test_runtime_actor_id("counter-suspend-tell", "test-node");
 
     // Register eager virtual actor
@@ -466,10 +399,6 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // Verify actor is active immediately (spawn_built_actor is synchronous)
     let (exists, is_active, is_virtual) =
         check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
-    eprintln!(
-        "🔵 [TEST] After registration: exists={}, is_active={}, is_virtual={}, actor_id={}",
-        exists, is_active, is_virtual, actor_id
-    );
     assert!(exists, "Actor should exist after registration");
     assert!(is_virtual, "Actor should be virtual");
     assert!(
@@ -478,7 +407,6 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     );
 
     // Suspend the actor
-    eprintln!("🔵 [TEST] Suspending actor: actor_id={}", actor_id);
     let stop_ctx = node
         .service_locator()
         .request_context_for_system_operations()
@@ -494,10 +422,6 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // Verify actor is suspended after stop_actor passivates the virtual actor.
     let (exists_after, is_active_after, is_virtual_after) =
         check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
-    eprintln!(
-        "🔵 [TEST] After suspension: exists={}, is_active={}, is_virtual={}, actor_id={}",
-        exists_after, is_active_after, is_virtual_after, actor_id
-    );
     assert!(
         exists_after,
         "Actor should still exist after suspension (virtual actors are always addressable)"
@@ -512,27 +436,14 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     );
 
     // Call tell() on suspended actor - should reactivate automatically via registry routing
-    eprintln!(
-        "🔵 [TEST] Calling tell() on suspended actor - should activate: actor_id={}",
-        actor_id
-    );
-
     // Use "call" message type for GenServer (tell() can be used with call messages too)
     let tell_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
     registry_tell(&node, &actor_id, tell_msg).await.unwrap();
-    eprintln!(
-        "🟢 [TEST] tell() completed - actor should be activated: actor_id={}",
-        actor_id
-    );
 
     // Verify actor is active again after registry-owned reactivation
     let (exists_final, is_active_final, is_virtual_final) =
         check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
-    eprintln!(
-        "🔵 [TEST] After tell(): exists={}, is_active={}, is_virtual={}, actor_id={}",
-        exists_final, is_active_final, is_virtual_final, actor_id
-    );
     assert!(exists_final, "Actor should still exist after tell()");
     assert!(
         is_virtual_final,

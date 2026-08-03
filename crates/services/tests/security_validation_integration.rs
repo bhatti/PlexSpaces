@@ -76,7 +76,10 @@ async fn test_security_config_validation_mtls_missing_certs() {
             service_locator.register_security_config(config).await;
         });
     }));
-    assert!(result.is_err(), "Should panic when mTLS certificates are missing");
+    assert!(
+        result.is_err(),
+        "Should panic when mTLS certificates are missing"
+    );
 }
 
 #[tokio::test]

@@ -115,6 +115,19 @@ class NodeType(betterproto.Enum):
     PROCESS = 1
     KUBERNETES = 2
     FIRECRACKER = 3
+    THIN = 4
+
+
+class NodeRole(betterproto.Enum):
+    """
+    Node connectivity role.
+     gRPC-connected nodes are always FULL. WebSocket-connected nodes declare
+     their role in the WS handshake frame; thin nodes cannot accept inbound gRPC.
+    """
+
+    UNSPECIFIED = 0
+    FULL = 1
+    THIN = 2
 
 
 class NodeStatus(betterproto.Enum):
@@ -216,39 +229,46 @@ class ServiceLinkConfig(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class AddServiceLinkRequest(betterproto.Message):
-    link: "ServiceLinkConfig" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    link: "ServiceLinkConfig" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AddServiceLinkResponse(betterproto.Message):
-    link: "ServiceLinkConfig" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    link: "ServiceLinkConfig" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RemoveServiceLinkRequest(betterproto.Message):
-    name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    name: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetServiceLinkRequest(betterproto.Message):
-    name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    name: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetServiceLinkResponse(betterproto.Message):
-    link: "ServiceLinkConfig" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    link: "ServiceLinkConfig" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListServiceLinksRequest(betterproto.Message):
-    page_size: int = betterproto.int32_field(1)
-    page_token: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    page_size: int = betterproto.int32_field(2)
+    page_token: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class ListServiceLinksResponse(betterproto.Message):
-    links: List["ServiceLinkConfig"] = betterproto.message_field(1)
-    next_page_token: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    links: List["ServiceLinkConfig"] = betterproto.message_field(2)
+    next_page_token: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -766,6 +786,34 @@ class RuntimeConfig(betterproto.Message):
     Named policy templates referenced by ServiceLinkConfig.policy_template or application requirements.
     """
 
+    static_dirs: List["StaticDirMount"] = betterproto.message_field(17)
+    """
+    Static file directories to serve over HTTP.
+    
+     Each entry maps a URL mount path to a local filesystem directory.
+     Example: mount_path="/apps/chat", fs_path="/opt/plexspaces/static/chat"
+     → files under fs_path are served at http://<node>/apps/chat/
+    
+     Environment variable override: PLEXSPACES_STATIC_DIRS
+     Format: "<mount>:<path>[:<mount2>:<path2>...]"
+    """
+
+
+@dataclass(eq=False, repr=False)
+class StaticDirMount(betterproto.Message):
+    """
+    A single static file directory mount.
+
+     ## Purpose
+     Maps a URL mount path to a local filesystem directory for static file serving.
+    """
+
+    mount_path: str = betterproto.string_field(1)
+    """URL path prefix (e.g., "/apps/chat" or "apps/chat")"""
+
+    fs_path: str = betterproto.string_field(2)
+    """Local filesystem directory to serve (must exist at startup)"""
+
 
 @dataclass(eq=False, repr=False)
 class GrpcConfig(betterproto.Message):
@@ -1071,6 +1119,30 @@ class NodeCapabilities(betterproto.Message):
 
 
 @dataclass(eq=False, repr=False)
+class NodeResourceHints(betterproto.Message):
+    """
+    Real-time resource snapshot shared by PingResponse (live) and
+     NodeRegistration.resource_hints (startup estimate from thin nodes).
+     0 means unavailable on the reporting host.
+    """
+
+    cpu_percent: float = betterproto.float_field(1)
+    """
+    Current CPU utilisation, 0–100. Populated from sysinfo on full nodes;
+     set to 0 by thin nodes (browsers cannot read CPU usage).
+    """
+
+    memory_available_mb: int = betterproto.uint64_field(2)
+    """Available RAM in MiB. Populated from sysinfo; 0 means unavailable."""
+
+    available_cores: int = betterproto.uint32_field(3)
+    """
+    Logical CPU count (hardware_concurrency). Populated from
+     std::thread::available_parallelism (Rust) / navigator.hardwareConcurrency (JS).
+    """
+
+
+@dataclass(eq=False, repr=False)
 class NodeMetrics(betterproto.Message):
     """
     Node metrics (combined resource usage and operational metrics)
@@ -1153,76 +1225,85 @@ class NodeMetrics(betterproto.Message):
 class RegisterNodeRequest(betterproto.Message):
     """Request to register a node"""
 
-    node: "Node" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    node: "Node" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RegisterNodeResponse(betterproto.Message):
     """Response for node registration"""
 
-    node_id: str = betterproto.string_field(1)
-    registered_at: datetime = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    registered_at: datetime = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class UnregisterNodeRequest(betterproto.Message):
     """Request to unregister a node"""
 
-    node_id: str = betterproto.string_field(1)
-    force: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    force: bool = betterproto.bool_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetNodeRequest(betterproto.Message):
     """Request to get node status"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListNodesRequest(betterproto.Message):
     """Request to list nodes"""
 
-    node_type: "NodeType" = betterproto.enum_field(1)
-    status: "NodeStatus" = betterproto.enum_field(2)
-    page_size: int = betterproto.int32_field(3)
-    page_token: str = betterproto.string_field(4)
+    request_id: str = betterproto.string_field(1)
+    node_type: "NodeType" = betterproto.enum_field(2)
+    status: "NodeStatus" = betterproto.enum_field(3)
+    page_size: int = betterproto.int32_field(4)
+    page_token: str = betterproto.string_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class ListNodesResponse(betterproto.Message):
     """Response for list nodes"""
 
-    nodes: List["Node"] = betterproto.message_field(1)
-    next_page_token: str = betterproto.string_field(2)
-    total_count: int = betterproto.int32_field(3)
+    request_id: str = betterproto.string_field(1)
+    nodes: List["Node"] = betterproto.message_field(2)
+    next_page_token: str = betterproto.string_field(3)
+    total_count: int = betterproto.int32_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class AssignActorRequest(betterproto.Message):
     """Request to assign an actor to a node"""
 
-    node_id: str = betterproto.string_field(1)
-    actor_id: str = betterproto.string_field(2)
-    config: "__actor_v1__.ActorConfig" = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(3)
+    config: "__actor_v1__.ActorConfig" = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class AssignActorResponse(betterproto.Message):
     """Response for actor assignment"""
 
-    node_id: str = betterproto.string_field(1)
-    actor_id: str = betterproto.string_field(2)
-    assigned_at: datetime = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(3)
+    assigned_at: datetime = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class RemoveActorRequest(betterproto.Message):
     """Request to remove an actor from a node"""
 
-    node_id: str = betterproto.string_field(1)
-    actor_id: str = betterproto.string_field(2)
-    graceful: bool = betterproto.bool_field(3)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(3)
+    graceful: bool = betterproto.bool_field(4)
 
 
 @dataclass(eq=False, repr=False)
@@ -1238,22 +1319,25 @@ class ActorLock(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class AcquireActorLockRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    requesting_node_id: str = betterproto.string_field(2)
-    lease_duration: timedelta = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    requesting_node_id: str = betterproto.string_field(3)
+    lease_duration: timedelta = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class AcquireActorLockResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    lock: "ActorLock" = betterproto.message_field(2)
-    conflict_node_id: str = betterproto.string_field(3)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    lock: "ActorLock" = betterproto.message_field(3)
+    conflict_node_id: str = betterproto.string_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class ReleaseActorLockRequest(betterproto.Message):
-    actor_id: str = betterproto.string_field(1)
-    lock_token: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    actor_id: str = betterproto.string_field(2)
+    lock_token: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -1297,6 +1381,17 @@ class NodeRegistration(betterproto.Message):
     message_count: int = betterproto.uint64_field(7)
     error_count: int = betterproto.uint64_field(8)
     registered_at: datetime = betterproto.message_field(9)
+    node_role: "NodeRole" = betterproto.enum_field(10)
+    """
+    Connectivity role; defaults to FULL for all gRPC-registered nodes.
+     Thin nodes set this to NODE_ROLE_THIN in the WS handshake.
+    """
+
+    resource_hints: "NodeResourceHints" = betterproto.message_field(11)
+    """
+    Startup resource estimate from thin nodes (browser hardwareConcurrency etc.).
+     For full nodes this is populated from sysinfo at registration time.
+    """
 
 
 @dataclass(eq=False, repr=False)
@@ -1348,58 +1443,66 @@ class Heartbeat(betterproto.Message):
 class JoinLatticeRequest(betterproto.Message):
     """Lattice service requests"""
 
-    node: "NodeDiscovery" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    node: "NodeDiscovery" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class JoinLatticeResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    existing_nodes: List["NodeDiscovery"] = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
+    existing_nodes: List["NodeDiscovery"] = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class LeaveLatticeRequest(betterproto.Message):
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DiscoverNodesRequest(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
     capability_filters: Dict[str, str] = betterproto.map_field(
-        1, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
 @dataclass(eq=False, repr=False)
 class DiscoverNodesResponse(betterproto.Message):
-    nodes: List["NodeDiscovery"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    nodes: List["NodeDiscovery"] = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetReleaseSpecRequest(betterproto.Message):
     """GetReleaseSpec request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetReleaseSpecResponse(betterproto.Message):
     """GetReleaseSpec response"""
 
-    release_spec: "ReleaseSpec" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    release_spec: "ReleaseSpec" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RegisterNodesRequest(betterproto.Message):
     """RegisterNodes request - supports multiple nodes"""
 
-    nodes: List["NodeRegistration"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Nodes to register"""
 
-    cluster: str = betterproto.string_field(2)
+    nodes: List["NodeRegistration"] = betterproto.message_field(2)
+    cluster: str = betterproto.string_field(3)
     """Cluster name for grouping"""
 
     labels: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Labels for categorization"""
 
@@ -1408,11 +1511,12 @@ class RegisterNodesRequest(betterproto.Message):
 class RegisterNodesResponse(betterproto.Message):
     """RegisterNodes response"""
 
-    registered_node_ids: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """IDs of successfully registered nodes"""
 
+    registered_node_ids: List[str] = betterproto.string_field(2)
     errors: Dict[str, str] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Errors for nodes that failed to register"""
 
@@ -1421,23 +1525,25 @@ class RegisterNodesResponse(betterproto.Message):
 class UnregisterNodeResponse(betterproto.Message):
     """UnregisterNode response"""
 
-    success: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
+    success: bool = betterproto.bool_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListConnectedNodesRequest(betterproto.Message):
     """ListConnectedNodes request (paginated)"""
 
-    cluster: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by cluster name"""
 
-    page_size: int = betterproto.int32_field(2)
+    cluster: str = betterproto.string_field(2)
+    page_size: int = betterproto.int32_field(3)
     """Page size (default: 100, max: 1000)"""
 
-    page_token: str = betterproto.string_field(3)
+    page_token: str = betterproto.string_field(4)
     """Page token for pagination"""
 
-    include_health: bool = betterproto.bool_field(4)
+    include_health: bool = betterproto.bool_field(5)
     """Include health status in response"""
 
 
@@ -1445,13 +1551,14 @@ class ListConnectedNodesRequest(betterproto.Message):
 class ListConnectedNodesResponse(betterproto.Message):
     """ListConnectedNodes response"""
 
-    nodes: List["NodeRegistration"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """List of node registrations"""
 
-    next_page_token: str = betterproto.string_field(2)
+    nodes: List["NodeRegistration"] = betterproto.message_field(2)
+    next_page_token: str = betterproto.string_field(3)
     """Token for next page"""
 
-    total_count: int = betterproto.int32_field(3)
+    total_count: int = betterproto.int32_field(4)
     """Total count (if available)"""
 
 
@@ -1459,10 +1566,11 @@ class ListConnectedNodesResponse(betterproto.Message):
 class StreamConnectedNodesRequest(betterproto.Message):
     """StreamConnectedNodes request"""
 
-    cluster: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Filter by cluster name"""
 
-    include_health: bool = betterproto.bool_field(2)
+    cluster: str = betterproto.string_field(2)
+    include_health: bool = betterproto.bool_field(3)
     """Include health status"""
 
 
@@ -1470,8 +1578,9 @@ class StreamConnectedNodesRequest(betterproto.Message):
 class GetMetricsRequest(betterproto.Message):
     """GetMetrics request"""
 
-    node_id: str = betterproto.string_field(1)
-    include_extended: bool = betterproto.bool_field(2)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    include_extended: bool = betterproto.bool_field(3)
     """Include extended metrics (actor details, etc.)"""
 
 
@@ -1479,21 +1588,23 @@ class GetMetricsRequest(betterproto.Message):
 class CalculateCapacityRequest(betterproto.Message):
     """CalculateCapacity request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListNodeApplicationsRequest(betterproto.Message):
     """ListNodeApplications request"""
 
-    node_id: str = betterproto.string_field(1)
-    page_size: int = betterproto.int32_field(2)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    page_size: int = betterproto.int32_field(3)
     """Page size"""
 
-    page_token: str = betterproto.string_field(3)
+    page_token: str = betterproto.string_field(4)
     """Page token"""
 
-    status_filter: str = betterproto.string_field(4)
+    status_filter: str = betterproto.string_field(5)
     """Filter by status"""
 
 
@@ -1501,9 +1612,10 @@ class ListNodeApplicationsRequest(betterproto.Message):
 class ListNodeApplicationsResponse(betterproto.Message):
     """ListNodeApplications response"""
 
-    applications: List["NodeApplicationInfo"] = betterproto.message_field(1)
-    next_page_token: str = betterproto.string_field(2)
-    total_count: int = betterproto.int32_field(3)
+    request_id: str = betterproto.string_field(1)
+    applications: List["NodeApplicationInfo"] = betterproto.message_field(2)
+    next_page_token: str = betterproto.string_field(3)
+    total_count: int = betterproto.int32_field(4)
 
 
 @dataclass(eq=False, repr=False)
@@ -1524,18 +1636,20 @@ class NodeApplicationInfo(betterproto.Message):
 class GetHealthRequest(betterproto.Message):
     """GetHealth request"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class GetHealthResponse(betterproto.Message):
     """GetHealth response"""
 
-    status: "NodeHealthStatus" = betterproto.enum_field(1)
-    message: str = betterproto.string_field(2)
-    last_checked: datetime = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    status: "NodeHealthStatus" = betterproto.enum_field(2)
+    message: str = betterproto.string_field(3)
+    last_checked: datetime = betterproto.message_field(4)
     details: Dict[str, str] = betterproto.map_field(
-        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
 
 
@@ -1543,10 +1657,11 @@ class GetHealthResponse(betterproto.Message):
 class SendHeartbeatRequest(betterproto.Message):
     """SendHeartbeat request"""
 
-    node_id: str = betterproto.string_field(1)
-    capacity: "NodeCapacity" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    node_id: str = betterproto.string_field(2)
+    capacity: "NodeCapacity" = betterproto.message_field(3)
     metrics: Dict[str, float] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_DOUBLE
+        4, betterproto.TYPE_STRING, betterproto.TYPE_DOUBLE
     )
 
 
@@ -1554,21 +1669,23 @@ class SendHeartbeatRequest(betterproto.Message):
 class SendHeartbeatResponse(betterproto.Message):
     """SendHeartbeat response"""
 
-    acknowledged: bool = betterproto.bool_field(1)
-    server_time: datetime = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    acknowledged: bool = betterproto.bool_field(2)
+    server_time: datetime = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class PingRequest(betterproto.Message):
     """Ping request - Direct failure detection"""
 
-    source_node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Source node sending the ping"""
 
-    sequence_number: int = betterproto.uint64_field(2)
+    source_node_id: str = betterproto.string_field(2)
+    sequence_number: int = betterproto.uint64_field(3)
     """Sequence number for correlation"""
 
-    updates: List["MembershipUpdate"] = betterproto.message_field(3)
+    updates: List["MembershipUpdate"] = betterproto.message_field(4)
     """Piggybacked membership updates (for efficient dissemination)"""
 
 
@@ -1576,44 +1693,52 @@ class PingRequest(betterproto.Message):
 class PingResponse(betterproto.Message):
     """Ping response"""
 
-    node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Responding node's ID"""
 
-    sequence_number: int = betterproto.uint64_field(2)
+    node_id: str = betterproto.string_field(2)
+    sequence_number: int = betterproto.uint64_field(3)
     """Echo back sequence number"""
 
-    incarnation: int = betterproto.uint64_field(3)
+    incarnation: int = betterproto.uint64_field(4)
     """Current incarnation number (for conflict resolution)"""
 
-    updates: List["MembershipUpdate"] = betterproto.message_field(4)
+    updates: List["MembershipUpdate"] = betterproto.message_field(5)
     """Piggybacked membership updates"""
 
-    cluster_name: str = betterproto.string_field(5)
+    cluster_name: str = betterproto.string_field(6)
     """
     Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)
     """
 
-    node_address: str = betterproto.string_field(6)
+    node_address: str = betterproto.string_field(7)
     """Responding node's gRPC address"""
 
-    last_heartbeat: datetime = betterproto.message_field(7)
+    last_heartbeat: datetime = betterproto.message_field(8)
     """Last heartbeat observed by the responding node for itself"""
+
+    resources: "NodeResourceHints" = betterproto.message_field(9)
+    """
+    Live resource snapshot from the responding node.
+     Used by thin-node clients for work-aware task scheduling.
+    """
 
 
 @dataclass(eq=False, repr=False)
 class PingReqRequest(betterproto.Message):
     """Indirect ping request - Ask intermediary to ping target"""
 
-    source_node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Node requesting the indirect ping"""
 
-    target_node_id: str = betterproto.string_field(2)
+    source_node_id: str = betterproto.string_field(2)
+    target_node_id: str = betterproto.string_field(3)
     """Target node to ping"""
 
-    target_address: str = betterproto.string_field(3)
+    target_address: str = betterproto.string_field(4)
     """Target's address (in case intermediary doesn't know it)"""
 
-    sequence_number: int = betterproto.uint64_field(4)
+    sequence_number: int = betterproto.uint64_field(5)
     """Sequence number for correlation"""
 
 
@@ -1621,13 +1746,14 @@ class PingReqRequest(betterproto.Message):
 class PingReqResponse(betterproto.Message):
     """Indirect ping response"""
 
-    target_alive: bool = betterproto.bool_field(1)
+    request_id: str = betterproto.string_field(1)
     """Whether the target responded to indirect ping"""
 
-    target_incarnation: int = betterproto.uint64_field(2)
+    target_alive: bool = betterproto.bool_field(2)
+    target_incarnation: int = betterproto.uint64_field(3)
     """Target's incarnation (if alive)"""
 
-    updates: List["MembershipUpdate"] = betterproto.message_field(3)
+    updates: List["MembershipUpdate"] = betterproto.message_field(4)
     """Piggybacked membership updates"""
 
 
@@ -1657,13 +1783,14 @@ class MembershipUpdate(betterproto.Message):
 class SyncMembershipRequest(betterproto.Message):
     """Sync membership request - Full state exchange"""
 
-    source_node_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Requesting node's ID"""
 
-    members: List["MembershipUpdate"] = betterproto.message_field(2)
+    source_node_id: str = betterproto.string_field(2)
+    members: List["MembershipUpdate"] = betterproto.message_field(3)
     """Requesting node's full membership state"""
 
-    is_push: bool = betterproto.bool_field(3)
+    is_push: bool = betterproto.bool_field(4)
     """Whether this is a push (true) or pull (false) sync"""
 
 
@@ -1671,10 +1798,11 @@ class SyncMembershipRequest(betterproto.Message):
 class SyncMembershipResponse(betterproto.Message):
     """Sync membership response"""
 
-    members: List["MembershipUpdate"] = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Responding node's full membership state"""
 
-    updates_applied: int = betterproto.int32_field(2)
+    members: List["MembershipUpdate"] = betterproto.message_field(2)
+    updates_applied: int = betterproto.int32_field(3)
     """Number of updates received that were new/updated"""
 
 
@@ -1701,21 +1829,22 @@ class ConnectNodesRequest(betterproto.Message):
      ```
     """
 
-    node_addresses: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Node addresses to connect to (e.g., "node2:8000", "192.168.1.10:8000")
      Each address will be pinged to verify connectivity.
      At least one address is required, maximum 100 addresses per request.
     """
 
-    cluster: str = betterproto.string_field(2)
+    node_addresses: List[str] = betterproto.string_field(2)
+    cluster: str = betterproto.string_field(3)
     """
     Optional: cluster name for grouping connected nodes.
      If specified, nodes are tagged with this cluster for filtering.
      Must be alphanumeric with hyphens, max 63 characters (DNS label format).
     """
 
-    timeout: timedelta = betterproto.message_field(3)
+    timeout: timedelta = betterproto.message_field(4)
     """
     Default: 5 seconds if not specified.
      Range: 1 second to 60 seconds.
@@ -1732,23 +1861,24 @@ class ConnectNodesResponse(betterproto.Message):
      A request is considered successful if at least one node connected.
     """
 
-    connected: Dict[str, str] = betterproto.map_field(
-        1, betterproto.TYPE_STRING, betterproto.TYPE_STRING
-    )
+    request_id: str = betterproto.string_field(1)
     """
     Successfully connected nodes: node_id -> address.
      The node_id is retrieved from the remote node via Ping RPC.
     """
 
-    failed: Dict[str, str] = betterproto.map_field(
+    connected: Dict[str, str] = betterproto.map_field(
         2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    failed: Dict[str, str] = betterproto.map_field(
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """
     Failed connections: address -> error message.
      Contains addresses that could not be connected with error details.
     """
 
-    total_time: timedelta = betterproto.message_field(3)
+    total_time: timedelta = betterproto.message_field(4)
     """Total time taken for all connection attempts (parallel execution)."""
 
 
@@ -1770,14 +1900,15 @@ class DisconnectNodesRequest(betterproto.Message):
      ```
     """
 
-    node_ids: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     Node IDs to disconnect from.
      Use ListConnectedNodes to get current node IDs.
      At least one node_id is required, maximum 100 per request.
     """
 
-    notify_remote: bool = betterproto.bool_field(2)
+    node_ids: List[str] = betterproto.string_field(2)
+    notify_remote: bool = betterproto.bool_field(3)
     """
     Optional: graceful disconnect with notification.
      If true, attempts to notify remote node before disconnecting.
@@ -1789,11 +1920,12 @@ class DisconnectNodesRequest(betterproto.Message):
 class DisconnectNodesResponse(betterproto.Message):
     """DisconnectNodes response"""
 
-    disconnected: List[str] = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Successfully disconnected node IDs."""
 
+    disconnected: List[str] = betterproto.string_field(2)
     failed: Dict[str, str] = betterproto.map_field(
-        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Failed disconnections: node_id -> error message."""
 

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Common Types API
@@ -844,13 +844,14 @@ func (x *RetryPolicy) GetMaxDelay() *durationpb.Duration {
 type PageRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Offset for pagination (0-based, default: 0)
-	Offset int32 `protobuf:"varint,1,opt,name=offset,proto3" json:"offset,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Offset    int32  `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
 	// Limit/Page size (default: 50, max: 1000)
-	Limit int32 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	Limit int32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	// Filter string (optional)
-	Filter string `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
+	Filter string `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`
 	// Order by field (optional)
-	OrderBy       string `protobuf:"bytes,4,opt,name=order_by,json=orderBy,proto3" json:"order_by,omitempty"`
+	OrderBy       string `protobuf:"bytes,5,opt,name=order_by,json=orderBy,proto3" json:"order_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -885,6 +886,13 @@ func (*PageRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *PageRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *PageRequest) GetOffset() int32 {
 	if x != nil {
 		return x.Offset
@@ -917,13 +925,14 @@ func (x *PageRequest) GetOrderBy() string {
 type PageResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Total number of items (across all pages)
-	TotalSize int32 `protobuf:"varint,1,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	TotalSize int32  `protobuf:"varint,2,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
 	// Current offset
-	Offset int32 `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
+	Offset int32 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
 	// Current limit/page size
-	Limit int32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Limit int32 `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	// Whether there are more pages (has_next = offset + limit < total_size)
-	HasNext       bool `protobuf:"varint,4,opt,name=has_next,json=hasNext,proto3" json:"has_next,omitempty"`
+	HasNext       bool `protobuf:"varint,5,opt,name=has_next,json=hasNext,proto3" json:"has_next,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -956,6 +965,13 @@ func (x *PageResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PageResponse.ProtoReflect.Descriptor instead.
 func (*PageResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PageResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *PageResponse) GetTotalSize() int32 {
@@ -2006,13 +2022,14 @@ func (x *HttpHeader) GetValue() string {
 type OutboundHttpRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)
-	Method string `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Method    string `protobuf:"bytes,2,opt,name=method,proto3" json:"method,omitempty"`
 	// Path and optional query string relative to the link base URL (e.g. "/v1/items?a=1")
-	PathAndQuery string `protobuf:"bytes,2,opt,name=path_and_query,json=pathAndQuery,proto3" json:"path_and_query,omitempty"`
+	PathAndQuery string `protobuf:"bytes,3,opt,name=path_and_query,json=pathAndQuery,proto3" json:"path_and_query,omitempty"`
 	// Extra headers merged with link defaults and auth headers
-	Headers []*HttpHeader `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty"`
+	Headers []*HttpHeader `protobuf:"bytes,4,rep,name=headers,proto3" json:"headers,omitempty"`
 	// Request body bytes
-	Body          []byte `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
+	Body          []byte `protobuf:"bytes,5,opt,name=body,proto3" json:"body,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2047,6 +2064,13 @@ func (*OutboundHttpRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{17}
 }
 
+func (x *OutboundHttpRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *OutboundHttpRequest) GetMethod() string {
 	if x != nil {
 		return x.Method
@@ -2079,11 +2103,12 @@ func (x *OutboundHttpRequest) GetBody() []byte {
 type OutboundHttpResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// HTTP status code
-	Status uint32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Status    uint32 `protobuf:"varint,2,opt,name=status,proto3" json:"status,omitempty"`
 	// Response headers
-	Headers []*HttpHeader `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty"`
+	Headers []*HttpHeader `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty"`
 	// Response body bytes
-	Body          []byte `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	Body          []byte `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2116,6 +2141,13 @@ func (x *OutboundHttpResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use OutboundHttpResponse.ProtoReflect.Descriptor instead.
 func (*OutboundHttpResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *OutboundHttpResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *OutboundHttpResponse) GetStatus() uint32 {
@@ -2186,20 +2218,24 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\x12backoff_multiplier\x18\x02 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00$@)\x00\x00\x00\x00\x00\x00\xf0?R\x11backoffMultiplier\x12L\n" +
 	"\rinitial_delay\x18\x03 \x01(\v2\x19.google.protobuf.DurationB\f\xbaH\t\xaa\x01\x062\x04\x10\xc0\x84=R\finitialDelay\x12C\n" +
 	"\tmax_delay\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\bmaxDelay:5\x92A2\n" +
-	"0*\fRetry Policy2 Configuration for retry behavior\"\xe2\x01\n" +
-	"\vPageRequest\x12\x1f\n" +
-	"\x06offset\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x06offset\x12 \n" +
-	"\x05limit\x18\x02 \x01(\x05B\n" +
-	"\xbaH\a\x1a\x05\x18\xe8\a(\x01R\x05limit\x12 \n" +
-	"\x06filter\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\x06filter\x12#\n" +
-	"\border_by\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\aorderBy:I\x92AF\n" +
-	"D*\fPage Request24Standard pagination parameters with offset and limit\"\xb3\x01\n" +
-	"\fPageResponse\x12\x1d\n" +
+	"0*\fRetry Policy2 Configuration for retry behavior\"\x8a\x02\n" +
+	"\vPageRequest\x12&\n" +
 	"\n" +
-	"total_size\x18\x01 \x01(\x05R\ttotalSize\x12\x16\n" +
-	"\x06offset\x18\x02 \x01(\x05R\x06offset\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x19\n" +
-	"\bhas_next\x18\x04 \x01(\bR\ahasNext:;\x92A8\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x1f\n" +
+	"\x06offset\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x06offset\x12 \n" +
+	"\x05limit\x18\x03 \x01(\x05B\n" +
+	"\xbaH\a\x1a\x05\x18\xe8\a(\x01R\x05limit\x12 \n" +
+	"\x06filter\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\x06filter\x12#\n" +
+	"\border_by\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\aorderBy:I\x92AF\n" +
+	"D*\fPage Request24Standard pagination parameters with offset and limit\"\xdb\x01\n" +
+	"\fPageResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x1d\n" +
+	"\n" +
+	"total_size\x18\x02 \x01(\x05R\ttotalSize\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x05R\x06offset\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x19\n" +
+	"\bhas_next\x18\x05 \x01(\bR\ahasNext:;\x92A8\n" +
 	"6*\rPage Response2%Standard pagination response metadata\"\xf3\x03\n" +
 	"\x05Facet\x124\n" +
 	"\x04type\x18\x01 \x01(\tB \xe0A\x02\xbaH\x1ar\x18\x10\x01\x18\xff\x012\x11^[a-z][a-z0-9_]*$R\x04type\x12?\n" +
@@ -2314,16 +2350,20 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"HttpHeader\x12\x1a\n" +
 	"\x03key\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x03key\x12\x1e\n" +
-	"\x05value\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80@R\x05value\"\xb6\x01\n" +
-	"\x13OutboundHttpRequest\x12\x1f\n" +
-	"\x06method\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18\x10R\x06method\x12.\n" +
-	"\x0epath_and_query\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\fpathAndQuery\x12:\n" +
+	"\x05value\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80@R\x05value\"\xde\x01\n" +
+	"\x13OutboundHttpRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x1f\n" +
+	"\x06method\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18\x10R\x06method\x12.\n" +
+	"\x0epath_and_query\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\fpathAndQuery\x12:\n" +
+	"\aheaders\x18\x04 \x03(\v2 .plexspaces.common.v1.HttpHeaderR\aheaders\x12\x12\n" +
+	"\x04body\x18\x05 \x01(\fR\x04body\"\xa6\x01\n" +
+	"\x14OutboundHttpResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\rR\x06status\x12:\n" +
 	"\aheaders\x18\x03 \x03(\v2 .plexspaces.common.v1.HttpHeaderR\aheaders\x12\x12\n" +
-	"\x04body\x18\x04 \x01(\fR\x04body\"~\n" +
-	"\x14OutboundHttpResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\rR\x06status\x12:\n" +
-	"\aheaders\x18\x02 \x03(\v2 .plexspaces.common.v1.HttpHeaderR\aheaders\x12\x12\n" +
-	"\x04body\x18\x03 \x01(\fR\x04body*\x97\x01\n" +
+	"\x04body\x18\x04 \x01(\fR\x04body*\x97\x01\n" +
 	"\x12ActivationStrategy\x12#\n" +
 	"\x1fACTIVATION_STRATEGY_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18ACTIVATION_STRATEGY_LAZY\x10\x01\x12\x1d\n" +

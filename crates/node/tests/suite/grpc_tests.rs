@@ -452,7 +452,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let result = ActorServiceTrait::spawn_actor(
         &service,
         Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
-        request_id: ulid::Ulid::new().to_string(),
+            request_id: ulid::Ulid::new().to_string(),
             spec: Some(plexspaces_proto::actor::v1::ActorSpawnSpec {
                 identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                     name: String::new(),

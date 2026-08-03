@@ -21,10 +21,10 @@ mod actor_integration_tests {
     use async_trait::async_trait;
     use plexspaces_actor::ActorInstance as ActorStruct;
     use plexspaces_actor::Message;
-    use plexspaces_facet::Facet;
     use plexspaces_actor::{
         Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
     };
+    use plexspaces_facet::Facet;
     #[cfg(feature = "postgres-backend")]
     use plexspaces_journaling::sql::PostgresJournalStorage;
     #[cfg(feature = "sqlite-backend")]
@@ -125,7 +125,7 @@ mod actor_integration_tests {
         };
 
         let behavior = Box::new(CounterActor::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor".to_string())
+        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
         let actor_id = test_actor_id("counter-actor", "default");
@@ -181,7 +181,7 @@ mod actor_integration_tests {
 
         // Restart actor (simulate crash recovery)
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string())
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(
@@ -240,7 +240,7 @@ mod actor_integration_tests {
         };
 
         let behavior = Box::new(CounterActor::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-2".to_string())
+        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-2".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
         let actor_id = test_actor_id("counter-actor-2", "default");
@@ -307,7 +307,7 @@ mod actor_integration_tests {
 
         // Restart actor
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string())
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(
@@ -369,7 +369,7 @@ mod actor_integration_tests {
         let behavior = Box::new(CounterActorWrapper {
             counter: Arc::clone(&counter),
         });
-        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-3".to_string())
+        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-3".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
         let actor_id = test_actor_id("counter-actor-3", "default");
@@ -435,7 +435,7 @@ mod actor_integration_tests {
         let behavior2 = Box::new(CounterActorWrapper {
             counter: Arc::clone(&counter2),
         });
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string())
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(

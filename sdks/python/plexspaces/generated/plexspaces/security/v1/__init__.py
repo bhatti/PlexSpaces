@@ -247,85 +247,96 @@ class AuditLogEntry(betterproto.Message):
 class AuthenticateServiceRequest(betterproto.Message):
     """Service-to-service authentication (mTLS)"""
 
-    service_id: str = betterproto.string_field(1)
-    certificate: bytes = betterproto.bytes_field(2)
-    signature: bytes = betterproto.bytes_field(3)
+    request_id: str = betterproto.string_field(1)
+    service_id: str = betterproto.string_field(2)
+    certificate: bytes = betterproto.bytes_field(3)
+    signature: bytes = betterproto.bytes_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class AuthenticateServiceResponse(betterproto.Message):
-    identity: "ServiceIdentity" = betterproto.message_field(1)
-    token: str = betterproto.string_field(2)
-    expires_at: datetime = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    identity: "ServiceIdentity" = betterproto.message_field(2)
+    token: str = betterproto.string_field(3)
+    expires_at: datetime = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class AuthenticateApiRequest(betterproto.Message):
     """API authentication (JWT)"""
 
-    jwt_token: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    jwt_token: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class AuthenticateApiResponse(betterproto.Message):
-    service_id: str = betterproto.string_field(1)
-    scopes: List[str] = betterproto.string_field(2)
-    expires_at: datetime = betterproto.message_field(3)
+    request_id: str = betterproto.string_field(1)
+    service_id: str = betterproto.string_field(2)
+    scopes: List[str] = betterproto.string_field(3)
+    expires_at: datetime = betterproto.message_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class CreateApiKeyRequest(betterproto.Message):
     """API key management"""
 
-    name: str = betterproto.string_field(1)
-    description: str = betterproto.string_field(2)
-    scopes: List[str] = betterproto.string_field(3)
-    expires_in: timedelta = betterproto.message_field(4)
+    request_id: str = betterproto.string_field(1)
+    name: str = betterproto.string_field(2)
+    description: str = betterproto.string_field(3)
+    scopes: List[str] = betterproto.string_field(4)
+    expires_in: timedelta = betterproto.message_field(5)
 
 
 @dataclass(eq=False, repr=False)
 class CreateApiKeyResponse(betterproto.Message):
-    api_key: "ApiKey" = betterproto.message_field(1)
-    key: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    api_key: "ApiKey" = betterproto.message_field(2)
+    key: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class RevokeApiKeyRequest(betterproto.Message):
-    key_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    key_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class RevokeApiKeyResponse(betterproto.Message):
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class ListApiKeysRequest(betterproto.Message):
-    page_request: "__common_v1__.PageRequest" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    page_request: "__common_v1__.PageRequest" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListApiKeysResponse(betterproto.Message):
-    api_keys: List["ApiKey"] = betterproto.message_field(1)
-    page_response: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    api_keys: List["ApiKey"] = betterproto.message_field(2)
+    page_response: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class GetAuditLogsRequest(betterproto.Message):
     """Audit logs"""
 
-    start_time: datetime = betterproto.message_field(1)
-    end_time: datetime = betterproto.message_field(2)
-    service_id: str = betterproto.string_field(3)
-    action: str = betterproto.string_field(4)
-    resource: str = betterproto.string_field(5)
-    page_request: "__common_v1__.PageRequest" = betterproto.message_field(6)
+    request_id: str = betterproto.string_field(1)
+    start_time: datetime = betterproto.message_field(2)
+    end_time: datetime = betterproto.message_field(3)
+    service_id: str = betterproto.string_field(4)
+    action: str = betterproto.string_field(5)
+    resource: str = betterproto.string_field(6)
+    page_request: "__common_v1__.PageRequest" = betterproto.message_field(7)
 
 
 @dataclass(eq=False, repr=False)
 class GetAuditLogsResponse(betterproto.Message):
-    entries: List["AuditLogEntry"] = betterproto.message_field(1)
-    page_response: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    entries: List["AuditLogEntry"] = betterproto.message_field(2)
+    page_response: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -374,57 +385,61 @@ class User(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class GetOrCreateByEmailRequest(betterproto.Message):
-    email: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Email from OIDC id_token"""
 
-    tenant_id: str = betterproto.string_field(2)
+    email: str = betterproto.string_field(2)
+    tenant_id: str = betterproto.string_field(3)
     """Tenant ID (from OIDC org claim or config mapping)"""
 
-    display_name: str = betterproto.string_field(3)
+    display_name: str = betterproto.string_field(4)
     """Display name from OIDC profile"""
 
-    avatar_url: str = betterproto.string_field(4)
+    avatar_url: str = betterproto.string_field(5)
     """Avatar URL from OIDC profile"""
 
-    provider: str = betterproto.string_field(5)
+    provider: str = betterproto.string_field(6)
     """OIDC provider name"""
 
-    provider_sub: str = betterproto.string_field(6)
+    provider_sub: str = betterproto.string_field(7)
     """OIDC subject ID"""
 
-    roles: List[str] = betterproto.string_field(7)
+    roles: List[str] = betterproto.string_field(8)
     """Roles from OIDC claims"""
 
-    groups: List[str] = betterproto.string_field(8)
+    groups: List[str] = betterproto.string_field(9)
     """Groups from OIDC claims"""
 
 
 @dataclass(eq=False, repr=False)
 class GetOrCreateByEmailResponse(betterproto.Message):
-    user: "User" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """The user (existing or newly created)"""
 
-    created: bool = betterproto.bool_field(2)
+    user: "User" = betterproto.message_field(2)
+    created: bool = betterproto.bool_field(3)
     """Whether this was a new user creation"""
 
 
 @dataclass(eq=False, repr=False)
 class UpdateUserRequest(betterproto.Message):
-    user_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """User ID to update"""
 
-    display_name: str = betterproto.string_field(2)
+    user_id: str = betterproto.string_field(2)
+    display_name: str = betterproto.string_field(3)
     """Fields to update (only non-empty/set fields are applied)"""
 
-    admin: Optional[bool] = betterproto.bool_field(3, optional=True)
-    roles: List[str] = betterproto.string_field(4)
-    groups: List[str] = betterproto.string_field(5)
-    avatar_url: str = betterproto.string_field(6)
+    admin: Optional[bool] = betterproto.bool_field(4, optional=True)
+    roles: List[str] = betterproto.string_field(5)
+    groups: List[str] = betterproto.string_field(6)
+    avatar_url: str = betterproto.string_field(7)
 
 
 @dataclass(eq=False, repr=False)
 class UpdateUserResponse(betterproto.Message):
-    user: "User" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    user: "User" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
@@ -494,8 +509,9 @@ class ListUsersRequest(betterproto.Message):
     Paginated user listing request. Admins can filter across all tenants.
     """
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
-    tenant_id_filter: str = betterproto.string_field(2)
+    request_id: str = betterproto.string_field(1)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(2)
+    tenant_id_filter: str = betterproto.string_field(3)
     """
     Admin-only: filter to a specific tenant. Empty = caller's own tenant for non-admins.
     """
@@ -503,8 +519,9 @@ class ListUsersRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class ListUsersResponse(betterproto.Message):
-    users: List["User"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    users: List["User"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -513,55 +530,62 @@ class ListTenantsRequest(betterproto.Message):
     Paginated tenant listing request. Non-admins see only their own tenant.
     """
 
-    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListTenantsResponse(betterproto.Message):
-    tenants: List["Tenant"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    tenants: List["Tenant"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
 class CreateApiTokenRequest(betterproto.Message):
-    name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """User-assigned label for this token"""
 
-    scopes: List[str] = betterproto.string_field(2)
+    name: str = betterproto.string_field(2)
+    scopes: List[str] = betterproto.string_field(3)
     """Scopes to grant. Defaults to ["read", "write"] if empty."""
 
-    ttl: timedelta = betterproto.message_field(3)
+    ttl: timedelta = betterproto.message_field(4)
     """TTL for the token. Defaults to 100× the session JWT TTL if unset."""
 
 
 @dataclass(eq=False, repr=False)
 class CreateApiTokenResponse(betterproto.Message):
-    token: "ApiToken" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Token metadata (without the secret)"""
 
-    plaintext: str = betterproto.string_field(2)
+    token: "ApiToken" = betterproto.message_field(2)
+    plaintext: str = betterproto.string_field(3)
     """The plaintext token (psx_<secret>). Shown ONCE — store it now."""
 
 
 @dataclass(eq=False, repr=False)
 class DeleteApiTokenRequest(betterproto.Message):
-    token_id: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
+    token_id: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteApiTokenResponse(betterproto.Message):
-    pass
+    request_id: str = betterproto.string_field(1)
 
 
 @dataclass(eq=False, repr=False)
 class ListApiTokensRequest(betterproto.Message):
-    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
+    page: "__common_v1__.PageRequest" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class ListApiTokensResponse(betterproto.Message):
-    tokens: List["ApiToken"] = betterproto.message_field(1)
-    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+    request_id: str = betterproto.string_field(1)
+    tokens: List["ApiToken"] = betterproto.message_field(2)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(3)
 
 
 class UserServiceStub(betterproto.ServiceStub):

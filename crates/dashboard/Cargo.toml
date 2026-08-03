@@ -24,7 +24,7 @@ plexspaces-workflow = { workspace = true, optional = true }
 
 # Async runtime
 tokio = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # HTTP server
 axum = { version = "0.7", features = ["multipart"] }
@@ -39,7 +39,7 @@ prost-types = { workspace = true }
 
 # Utilities
 serde = { workspace = true }
-serde_json = "1.0"
+serde_json = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 sysinfo = "0.30"  # For system metrics (CPU, memory, disk)

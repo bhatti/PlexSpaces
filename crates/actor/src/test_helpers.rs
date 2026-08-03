@@ -183,7 +183,10 @@ async fn check_service_health(url: &str, timeout_duration: Duration) -> bool {
 async fn check_redis_port(addr: &str, timeout_duration: Duration) -> bool {
     use tokio::net::TcpStream;
 
-    matches!(timeout(timeout_duration, TcpStream::connect(addr)).await, Ok(Ok(_)))
+    matches!(
+        timeout(timeout_duration, TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
 }
 
 /// Get DynamoDB endpoint URL (from env or default)
@@ -388,8 +391,7 @@ pub async fn object_store_available() -> bool {
 /// Returns `BLOB_ENDPOINT` if set, otherwise the default port used by the embedded object
 /// store auto-started by the node (`http://127.0.0.1:9000`).
 pub fn get_object_store_endpoint() -> String {
-    std::env::var("BLOB_ENDPOINT")
-        .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string())
+    std::env::var("BLOB_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:9000".to_string())
 }
 
 // ============================================================================
@@ -467,5 +469,8 @@ pub fn firecracker_prerequisites_error() -> Option<String> {
 async fn check_tcp_port(addr: &str, timeout_duration: Duration) -> bool {
     use tokio::net::TcpStream;
 
-    matches!(timeout(timeout_duration, TcpStream::connect(addr)).await, Ok(Ok(_)))
+    matches!(
+        timeout(timeout_duration, TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
 }

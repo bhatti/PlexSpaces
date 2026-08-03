@@ -136,7 +136,8 @@ impl NatsChannel {
         }
 
         // Connect to NATS
-        let client = opts.connect(&servers)
+        let client = opts
+            .connect(&servers)
             .await
             .map_err(|e| ChannelError::BackendError(format!("Failed to connect to NATS: {}", e)))?;
 

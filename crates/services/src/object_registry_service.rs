@@ -35,10 +35,10 @@ use plexspaces_actor::{DiscoverOptions, ServiceLocator as ServiceLocatorTrait};
 use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::{
     object_registry_server::ObjectRegistry as ObjectRegistryGrpc, BatchHeartbeatRequest,
-    BatchHeartbeatResponse, DiscoverRequest, DiscoverResponse, HeartbeatRequest, HeartbeatResponse,
-    HealthStatus, ListObjectTypesRequest, ListObjectTypesResponse, LookupRequest, LookupResponse,
-    ObjectType, ObjectTypeSummary, RegisterRequest, RegisterResponse, UnregisterRequest,
-    UnregisterResponse,
+    BatchHeartbeatResponse, DiscoverRequest, DiscoverResponse, HealthStatus, HeartbeatRequest,
+    HeartbeatResponse, ListObjectTypesRequest, ListObjectTypesResponse, LookupRequest,
+    LookupResponse, ObjectType, ObjectTypeSummary, RegisterRequest, RegisterResponse,
+    UnregisterRequest, UnregisterResponse,
 };
 use plexspaces_service_traits::{ObjectRegistry, RegisterResult};
 use std::sync::Arc;
@@ -179,15 +179,18 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
             .ctx_from_request(&metadata, &body.tenant_id, &body.namespace)
             .await;
 
-        let object_type = ObjectType::try_from(body.object_type)
-            .unwrap_or(ObjectType::ObjectTypeUnspecified);
+        let object_type =
+            ObjectType::try_from(body.object_type).unwrap_or(ObjectType::ObjectTypeUnspecified);
 
         match self
             .registry
             .unregister(&ctx, object_type, &body.object_id)
             .await
         {
-            Ok(()) => Ok(Response::new(UnregisterResponse { request_id: body.request_id.clone(), unregistered: true })),
+            Ok(()) => Ok(Response::new(UnregisterResponse {
+                request_id: body.request_id.clone(),
+                unregistered: true,
+            })),
             Err(e) => {
                 let msg = e.to_string().to_lowercase();
                 if msg.contains("not found") || msg.contains("does not exist") {
@@ -340,10 +343,14 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
             .ctx_from_request(&metadata, &body.tenant_id, &body.namespace)
             .await;
 
-        let object_type = ObjectType::try_from(body.object_type)
-            .unwrap_or(ObjectType::ObjectTypeUnspecified);
+        let object_type =
+            ObjectType::try_from(body.object_type).unwrap_or(ObjectType::ObjectTypeUnspecified);
 
-        match self.registry.heartbeat(&ctx, object_type, &body.object_id).await {
+        match self
+            .registry
+            .heartbeat(&ctx, object_type, &body.object_id)
+            .await
+        {
             Ok(()) => Ok(Response::new(HeartbeatResponse {
                 request_id: body.request_id.clone(),
                 accepted: true,
@@ -539,7 +546,8 @@ mod tests {
         let svc = make_service().await;
         let mut r1 = reg("actor-a", "t1", "ns1");
         r1.alias = "Counter:w:ns1:t1".to_string();
-        r1.health_status = plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy as i32;
+        r1.health_status =
+            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy as i32;
 
         svc.register(Request::new(RegisterRequest {
             registration: Some(r1),

@@ -271,4 +271,3 @@ mod pool_registry;
 
 pub use elastic_pool::*;
 pub use pool_registry::PoolRegistry;
-

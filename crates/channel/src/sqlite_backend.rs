@@ -186,22 +186,29 @@ impl SqliteChannel {
 
         // Create connection pool
         let pool = SqlitePoolOptions::new()
-            .max_connections(1) // SQLite doesn't benefit from multiple connections
+            .max_connections(1)
             .connect(&connection_string)
             .await
             .map_err(|e| {
                 ChannelError::BackendError(format!("Failed to connect to SQLite: {}", e))
             })?;
 
-        // Enable WAL mode if configured
-        if sqlite_config.wal_mode {
-            sqlx::query("PRAGMA journal_mode=WAL")
-                .execute(&pool)
-                .await
-                .map_err(|e| {
-                    ChannelError::BackendError(format!("Failed to enable WAL mode: {}", e))
-                })?;
-        }
+        // Production SQLite PRAGMAs (ref: micrologics.org/blog/sqlite-in-production-*)
+        sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await
+            .map_err(|e| ChannelError::BackendError(format!("Failed to enable WAL mode: {}", e)))?;
+        sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        sqlx::query("PRAGMA busy_timeout=500").execute(&pool).await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        sqlx::query("PRAGMA cache_size=-64000").execute(&pool).await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        sqlx::query("PRAGMA mmap_size=1073741824").execute(&pool).await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        sqlx::query("PRAGMA journal_size_limit=67108864").execute(&pool).await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        // Disable auto-checkpoint to prevent WAL stalls under high write throughput.
+        sqlx::query("PRAGMA wal_autocheckpoint=0").execute(&pool).await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
 
         // Get table name
         let table_name = if sqlite_config.table_name.is_empty() {

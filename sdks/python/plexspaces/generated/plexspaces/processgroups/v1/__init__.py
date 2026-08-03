@@ -145,42 +145,48 @@ class GroupMembership(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class CreateGroupRequest(betterproto.Message):
-    group_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group name (required)"""
 
-    namespace: str = betterproto.string_field(3)
+    group_name: str = betterproto.string_field(2)
+    namespace: str = betterproto.string_field(4)
     """Namespace (optional hierarchical isolation within tenant)"""
 
-    metadata: "__common_v1__.Metadata" = betterproto.message_field(4)
+    metadata: "__common_v1__.Metadata" = betterproto.message_field(5)
     """Metadata (labels, annotations)"""
 
 
 @dataclass(eq=False, repr=False)
 class CreateGroupResponse(betterproto.Message):
-    group: "ProcessGroup" = betterproto.message_field(1)
+    request_id: str = betterproto.string_field(1)
     """Created group"""
+
+    group: "ProcessGroup" = betterproto.message_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class DeleteGroupRequest(betterproto.Message):
-    group_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group name to delete"""
+
+    group_name: str = betterproto.string_field(2)
 
 
 @dataclass(eq=False, repr=False)
 class JoinGroupRequest(betterproto.Message):
-    group_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group to join"""
 
-    actor_id: str = betterproto.string_field(3)
+    group_name: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(4)
     """Actor ID to add to group"""
 
-    node_id: str = betterproto.string_field(4)
+    node_id: str = betterproto.string_field(5)
     """
     Node hosting this actor (optional - can be looked up via ActorRegistry)
     """
 
-    topics: List[str] = betterproto.string_field(5)
+    topics: List[str] = betterproto.string_field(6)
     """
     Topics to subscribe to within the group (optional - empty = all topics)
     
@@ -203,81 +209,90 @@ class JoinGroupRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class LeaveGroupRequest(betterproto.Message):
-    group_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group to leave"""
 
-    actor_id: str = betterproto.string_field(3)
+    group_name: str = betterproto.string_field(2)
+    actor_id: str = betterproto.string_field(4)
     """Actor ID to remove from group"""
 
 
 @dataclass(eq=False, repr=False)
 class GetMembersRequest(betterproto.Message):
-    group_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group name"""
 
-    page_size: int = betterproto.int32_field(3)
-    """Pagination (optional)"""
-
-    page_token: str = betterproto.string_field(4)
-
-
-@dataclass(eq=False, repr=False)
-class GetMembersResponse(betterproto.Message):
-    member_ids: List[str] = betterproto.string_field(1)
-    """All members (cluster-wide)"""
-
-    next_page_token: str = betterproto.string_field(2)
-    """Pagination"""
-
-    total_count: int = betterproto.int32_field(3)
-
-
-@dataclass(eq=False, repr=False)
-class GetLocalMembersRequest(betterproto.Message):
-    group_name: str = betterproto.string_field(1)
-    """Group name"""
-
-
-@dataclass(eq=False, repr=False)
-class GetLocalMembersResponse(betterproto.Message):
-    member_ids: List[str] = betterproto.string_field(1)
-    """Local members only (this node)"""
-
-    local_count: int = betterproto.int32_field(2)
-    """Total count (local only)"""
-
-
-@dataclass(eq=False, repr=False)
-class ListGroupsRequest(betterproto.Message):
-    namespace: str = betterproto.string_field(2)
-    """Filter by namespace (optional)"""
-
-    name_pattern: str = betterproto.string_field(3)
-    """Filter by group name pattern (optional, e.g., "config-*")"""
-
+    group_name: str = betterproto.string_field(2)
     page_size: int = betterproto.int32_field(4)
-    """Pagination"""
+    """Pagination (optional)"""
 
     page_token: str = betterproto.string_field(5)
 
 
 @dataclass(eq=False, repr=False)
-class ListGroupsResponse(betterproto.Message):
-    groups: List["ProcessGroup"] = betterproto.message_field(1)
-    """Groups matching filter"""
+class GetMembersResponse(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    """All members (cluster-wide)"""
 
-    next_page_token: str = betterproto.string_field(2)
+    member_ids: List[str] = betterproto.string_field(2)
+    next_page_token: str = betterproto.string_field(3)
     """Pagination"""
 
-    total_count: int = betterproto.int32_field(3)
+    total_count: int = betterproto.int32_field(4)
+
+
+@dataclass(eq=False, repr=False)
+class GetLocalMembersRequest(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    """Group name"""
+
+    group_name: str = betterproto.string_field(2)
+
+
+@dataclass(eq=False, repr=False)
+class GetLocalMembersResponse(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    """Local members only (this node)"""
+
+    member_ids: List[str] = betterproto.string_field(2)
+    local_count: int = betterproto.int32_field(3)
+    """Total count (local only)"""
+
+
+@dataclass(eq=False, repr=False)
+class ListGroupsRequest(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    """Filter by namespace (optional)"""
+
+    namespace: str = betterproto.string_field(3)
+    name_pattern: str = betterproto.string_field(4)
+    """Filter by group name pattern (optional, e.g., "config-*")"""
+
+    page_size: int = betterproto.int32_field(5)
+    """Pagination"""
+
+    page_token: str = betterproto.string_field(6)
+
+
+@dataclass(eq=False, repr=False)
+class ListGroupsResponse(betterproto.Message):
+    request_id: str = betterproto.string_field(1)
+    """Groups matching filter"""
+
+    groups: List["ProcessGroup"] = betterproto.message_field(2)
+    next_page_token: str = betterproto.string_field(3)
+    """Pagination"""
+
+    total_count: int = betterproto.int32_field(4)
 
 
 @dataclass(eq=False, repr=False)
 class PublishToGroupRequest(betterproto.Message):
-    group_name: str = betterproto.string_field(1)
+    request_id: str = betterproto.string_field(1)
     """Group to publish to"""
 
-    topic: str = betterproto.string_field(4)
+    group_name: str = betterproto.string_field(2)
+    topic: str = betterproto.string_field(5)
     """
     Topic within the group (optional - if not specified, publishes to all members)
     
@@ -297,7 +312,7 @@ class PublishToGroupRequest(betterproto.Message):
      - group_name="events", topic="" → all event subscribers
     """
 
-    message: "__common_v1__.Message" = betterproto.message_field(3)
+    message: "__common_v1__.Message" = betterproto.message_field(4)
     """
     Message to broadcast to all members
     
@@ -313,7 +328,7 @@ class PublishToGroupRequest(betterproto.Message):
 
 @dataclass(eq=False, repr=False)
 class PublishToGroupResponse(betterproto.Message):
-    recipients_count: int = betterproto.uint32_field(1)
+    request_id: str = betterproto.string_field(1)
     """
     How many members received the message
     
@@ -322,11 +337,12 @@ class PublishToGroupResponse(betterproto.Message):
      - Remote members: May still be in-flight
     """
 
-    failures_count: int = betterproto.uint32_field(2)
+    recipients_count: int = betterproto.uint32_field(2)
+    failures_count: int = betterproto.uint32_field(3)
     """How many members were unreachable"""
 
     recipients_per_node: Dict[str, int] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_UINT32
+        4, betterproto.TYPE_STRING, betterproto.TYPE_UINT32
     )
     """Breakdown by node (for debugging)"""
 

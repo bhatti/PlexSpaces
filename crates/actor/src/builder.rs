@@ -532,7 +532,7 @@ impl ActorBuilder {
                 mailbox_config_default()
             });
         let mailbox_id = format!("mailbox_{actor_id}");
-        let mailbox = Mailbox::new(mailbox_config, mailbox_id)
+        let mailbox = Mailbox::new(mailbox_config, mailbox_id, String::new(), String::new(), None)
             .await
             .map_err(|e| std::io::Error::other(format!("Failed to create mailbox: {e}")))?;
 

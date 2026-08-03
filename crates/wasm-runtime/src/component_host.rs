@@ -589,7 +589,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
     async fn spawn(
         &mut self,
         module_ref: String,
-        initial_state: plexspaces::actor::types::Payload,
+        _initial_state: plexspaces::actor::types::Payload,
         options: plexspaces::actor::types::SpawnOptions,
     ) -> Result<plexspaces::actor::types::ActorId, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
@@ -613,10 +613,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             .find(|(k, _)| k == "role")
             .map(|(_, v)| v.clone())
             .unwrap_or_default();
-        let args: Vec<(String, String)> = labels
-            .into_iter()
-            .filter(|(k, _)| k != "role")
-            .collect();
+        let args: Vec<(String, String)> = labels.into_iter().filter(|(k, _)| k != "role").collect();
 
         // Drop span before await to ensure Send
         drop(_span);
@@ -5073,7 +5070,11 @@ impl RegistryImpl {
     /// Build a RequestContext using the trusted tenant_id from HostFunctions (injected from
     /// ApplicationSpec at deploy time) and the namespace from the request (user-supplied is
     /// accepted; falls back to the actor's namespace if empty).
-    fn request_ctx(host_functions: &HostFunctions, req_namespace: &str, actor_id: &ActorId) -> RequestContext {
+    fn request_ctx(
+        host_functions: &HostFunctions,
+        req_namespace: &str,
+        actor_id: &ActorId,
+    ) -> RequestContext {
         let tenant_id = &host_functions.tenant_id;
         let ns = if req_namespace.is_empty() {
             if host_functions.default_namespace.is_empty() {
@@ -5098,7 +5099,9 @@ impl RegistryImpl {
         resp.encode_to_vec()
     }
 
-    fn encode_regs(protos: &[plexspaces_proto::object_registry::v1::ObjectRegistration]) -> Vec<u8> {
+    fn encode_regs(
+        protos: &[plexspaces_proto::object_registry::v1::ObjectRegistration],
+    ) -> Vec<u8> {
         use prost::Message;
         let resp = plexspaces_proto::object_registry::v1::DiscoverResponse {
             registrations: protos.to_vec(),
@@ -5118,13 +5121,17 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
     ) -> Result<(), plexspaces::actor::types::ActorError> {
         use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_register_total").increment(1);
-        let req = plexspaces_proto::object_registry::v1::RegisterRequest::decode(
-            request.as_slice(),
-        )
-        .map_err(|e| make_actor_error("invalid-input", format!("registry register: {}", e)))?;
+        let req =
+            plexspaces_proto::object_registry::v1::RegisterRequest::decode(request.as_slice())
+                .map_err(|e| {
+                    make_actor_error("invalid-input", format!("registry register: {}", e))
+                })?;
 
         let mut registration = req.registration.ok_or_else(|| {
-            make_actor_error("invalid-input", "registry register: missing registration".to_string())
+            make_actor_error(
+                "invalid-input",
+                "registry register: missing registration".to_string(),
+            )
         })?;
         let object_id = registration.object_id.clone();
 
@@ -5138,7 +5145,11 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
-        let request_ctx = Self::request_ctx(&self.host_functions, &registration.namespace, &self.actor_id);
+        let request_ctx = Self::request_ctx(
+            &self.host_functions,
+            &registration.namespace,
+            &self.actor_id,
+        );
 
         match registry.register(&request_ctx, registration).await {
             Ok(()) => {
@@ -5148,7 +5159,10 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_register_errors_total").increment(1);
                 tracing::warn!(object_id = %object_id, error = %e, "Registry register failed");
-                Err(make_actor_error("internal", format!("Registry register failed: {}", e)))
+                Err(make_actor_error(
+                    "internal",
+                    format!("Registry register failed: {}", e),
+                ))
             }
         }
     }
@@ -5159,20 +5173,25 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
     ) -> Result<(), plexspaces::actor::types::ActorError> {
         use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_unregister_total").increment(1);
-        let req = plexspaces_proto::object_registry::v1::UnregisterRequest::decode(
-            request.as_slice(),
-        )
-        .map_err(|e| make_actor_error("invalid-input", format!("registry unregister: {}", e)))?;
+        let req =
+            plexspaces_proto::object_registry::v1::UnregisterRequest::decode(request.as_slice())
+                .map_err(|e| {
+                    make_actor_error("invalid-input", format!("registry unregister: {}", e))
+                })?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
         let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
-        let object_type = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
-            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
+        let object_type =
+            plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+                .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
 
-        match registry.unregister(&request_ctx, object_type, &req.object_id).await {
+        match registry
+            .unregister(&request_ctx, object_type, &req.object_id)
+            .await
+        {
             Ok(()) => {
                 metrics::counter!("plexspaces_wasm_registry_unregister_success_total").increment(1);
                 Ok(())
@@ -5180,8 +5199,15 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_unregister_errors_total").increment(1);
                 tracing::warn!(object_id = %req.object_id, error = %e, "Registry unregister failed");
-                let code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
-                Err(make_actor_error(code, format!("Registry unregister failed: {}", e)))
+                let code = if e.to_string().contains("not found") {
+                    "actor-not-found"
+                } else {
+                    "internal"
+                };
+                Err(make_actor_error(
+                    code,
+                    format!("Registry unregister failed: {}", e),
+                ))
             }
         }
     }
@@ -5192,18 +5218,17 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
     ) -> Result<Vec<u8>, plexspaces::actor::types::ActorError> {
         use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_lookup_total").increment(1);
-        let req = plexspaces_proto::object_registry::v1::LookupRequest::decode(
-            request.as_slice(),
-        )
-        .map_err(|e| make_actor_error("invalid-input", format!("registry lookup: {}", e)))?;
+        let req = plexspaces_proto::object_registry::v1::LookupRequest::decode(request.as_slice())
+            .map_err(|e| make_actor_error("invalid-input", format!("registry lookup: {}", e)))?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
         let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
-        let object_type = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
-            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
+        let object_type =
+            plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+                .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
 
         if !req.alias.is_empty() {
             match registry.lookup_by_alias(&request_ctx, &req.alias).await {
@@ -5217,12 +5242,18 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
                 }
                 Err(e) => {
                     metrics::counter!("plexspaces_wasm_registry_lookup_errors_total").increment(1);
-                    return Err(make_actor_error("internal", format!("Registry lookup_by_alias failed: {}", e)));
+                    return Err(make_actor_error(
+                        "internal",
+                        format!("Registry lookup_by_alias failed: {}", e),
+                    ));
                 }
             }
         }
 
-        match registry.lookup(&request_ctx, &req.object_id, Some(object_type)).await {
+        match registry
+            .lookup(&request_ctx, &req.object_id, Some(object_type))
+            .await
+        {
             Ok(Some(proto_reg)) => {
                 metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
                 Ok(Self::encode_reg(&proto_reg))
@@ -5234,7 +5265,10 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_lookup_errors_total").increment(1);
                 tracing::warn!(object_id = %req.object_id, error = %e, "Registry lookup failed");
-                Err(make_actor_error("internal", format!("Registry lookup failed: {}", e)))
+                Err(make_actor_error(
+                    "internal",
+                    format!("Registry lookup failed: {}", e),
+                ))
             }
         }
     }
@@ -5245,35 +5279,58 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
     ) -> Result<Vec<u8>, plexspaces::actor::types::ActorError> {
         use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_discover_total").increment(1);
-        let req = plexspaces_proto::object_registry::v1::DiscoverRequest::decode(
-            request.as_slice(),
-        )
-        .map_err(|e| make_actor_error("invalid-input", format!("registry discover: {}", e)))?;
+        let req =
+            plexspaces_proto::object_registry::v1::DiscoverRequest::decode(request.as_slice())
+                .map_err(|e| {
+                    make_actor_error("invalid-input", format!("registry discover: {}", e))
+                })?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
         let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
-        let object_type_opt = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
-            .ok()
-            .filter(|t| *t != plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-        let page_size = if req.page_size > 0 { req.page_size as usize } else { 100usize };
-        let category_opt = if req.object_category.is_empty() { None } else { Some(req.object_category.clone()) };
-        let caps_opt = if req.capabilities.is_empty() { None } else { Some(req.capabilities.clone()) };
-        let labels_opt = if req.labels.is_empty() { None } else { Some(req.labels.clone()) };
+        let object_type_opt =
+            plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+                .ok()
+                .filter(|t| {
+                    *t != plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified
+                });
+        let page_size = if req.page_size > 0 {
+            req.page_size as usize
+        } else {
+            100usize
+        };
+        let category_opt = if req.object_category.is_empty() {
+            None
+        } else {
+            Some(req.object_category.clone())
+        };
+        let caps_opt = if req.capabilities.is_empty() {
+            None
+        } else {
+            Some(req.capabilities.clone())
+        };
+        let labels_opt = if req.labels.is_empty() {
+            None
+        } else {
+            Some(req.labels.clone())
+        };
 
-        match registry.discover(
-            &request_ctx,
-            plexspaces_actor::DiscoverOptions {
-                object_type: object_type_opt,
-                object_category: category_opt,
-                capabilities: caps_opt,
-                labels: labels_opt,
-                limit: page_size,
-                ..Default::default()
-            },
-        ).await {
+        match registry
+            .discover(
+                &request_ctx,
+                plexspaces_actor::DiscoverOptions {
+                    object_type: object_type_opt,
+                    object_category: category_opt,
+                    capabilities: caps_opt,
+                    labels: labels_opt,
+                    limit: page_size,
+                    ..Default::default()
+                },
+            )
+            .await
+        {
             Ok(registrations) => {
                 metrics::counter!("plexspaces_wasm_registry_discover_success_total").increment(1);
                 Ok(Self::encode_regs(&registrations))
@@ -5281,7 +5338,10 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_discover_errors_total").increment(1);
                 tracing::warn!(error = %e, "Registry discover failed");
-                Err(make_actor_error("internal", format!("Registry discover failed: {}", e)))
+                Err(make_actor_error(
+                    "internal",
+                    format!("Registry discover failed: {}", e),
+                ))
             }
         }
     }
@@ -5292,20 +5352,25 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
     ) -> Result<(), plexspaces::actor::types::ActorError> {
         use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_heartbeat_total").increment(1);
-        let req = plexspaces_proto::object_registry::v1::HeartbeatRequest::decode(
-            request.as_slice(),
-        )
-        .map_err(|e| make_actor_error("invalid-input", format!("registry heartbeat: {}", e)))?;
+        let req =
+            plexspaces_proto::object_registry::v1::HeartbeatRequest::decode(request.as_slice())
+                .map_err(|e| {
+                    make_actor_error("invalid-input", format!("registry heartbeat: {}", e))
+                })?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
         let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
-        let object_type = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
-            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
+        let object_type =
+            plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+                .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
 
-        match registry.heartbeat(&request_ctx, object_type, &req.object_id).await {
+        match registry
+            .heartbeat(&request_ctx, object_type, &req.object_id)
+            .await
+        {
             Ok(()) => {
                 metrics::counter!("plexspaces_wasm_registry_heartbeat_success_total").increment(1);
                 Ok(())
@@ -5313,7 +5378,10 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_heartbeat_errors_total").increment(1);
                 tracing::warn!(object_id = %req.object_id, error = %e, "Registry heartbeat failed");
-                Err(make_actor_error("internal", format!("Registry heartbeat failed: {}", e)))
+                Err(make_actor_error(
+                    "internal",
+                    format!("Registry heartbeat failed: {}", e),
+                ))
             }
         }
     }
@@ -5332,17 +5400,23 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
 
         match registry.lookup_by_alias(&request_ctx, &alias).await {
             Ok(Some(proto_reg)) => {
-                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_success_total").increment(1);
+                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_success_total")
+                    .increment(1);
                 Ok(Self::encode_reg(&proto_reg))
             }
             Ok(None) => {
-                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_success_total").increment(1);
+                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_success_total")
+                    .increment(1);
                 Ok(Vec::new())
             }
             Err(e) => {
-                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_errors_total").increment(1);
+                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_errors_total")
+                    .increment(1);
                 tracing::warn!(alias = %alias, error = %e, "Registry lookup_by_alias failed");
-                Err(make_actor_error("internal", format!("Registry lookup_by_alias failed: {}", e)))
+                Err(make_actor_error(
+                    "internal",
+                    format!("Registry lookup_by_alias failed: {}", e),
+                ))
             }
         }
     }

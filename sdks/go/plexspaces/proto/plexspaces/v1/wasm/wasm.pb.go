@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces WebAssembly Runtime API
@@ -233,29 +233,32 @@ func (WasmErrorCode) EnumDescriptor() ([]byte, []int) {
 type DeployWasmModuleRequest_PreWarmStrategy int32
 
 const (
+	DeployWasmModuleRequest_PRE_WARM_STRATEGY_UNSPECIFIED DeployWasmModuleRequest_PreWarmStrategy = 0
 	// No pre-warming - nodes fetch on-demand (lazy)
-	DeployWasmModuleRequest_NONE DeployWasmModuleRequest_PreWarmStrategy = 0
+	DeployWasmModuleRequest_NONE DeployWasmModuleRequest_PreWarmStrategy = 1
 	// Announce to all nodes - they decide whether to pre-fetch
-	DeployWasmModuleRequest_ANNOUNCE DeployWasmModuleRequest_PreWarmStrategy = 1
+	DeployWasmModuleRequest_ANNOUNCE DeployWasmModuleRequest_PreWarmStrategy = 2
 	// Push to all nodes immediately (eager)
-	DeployWasmModuleRequest_PUSH_ALL DeployWasmModuleRequest_PreWarmStrategy = 2
+	DeployWasmModuleRequest_PUSH_ALL DeployWasmModuleRequest_PreWarmStrategy = 3
 	// Push to subset of nodes (e.g., based on tags)
-	DeployWasmModuleRequest_PUSH_TAGGED DeployWasmModuleRequest_PreWarmStrategy = 3
+	DeployWasmModuleRequest_PUSH_TAGGED DeployWasmModuleRequest_PreWarmStrategy = 4
 )
 
 // Enum value maps for DeployWasmModuleRequest_PreWarmStrategy.
 var (
 	DeployWasmModuleRequest_PreWarmStrategy_name = map[int32]string{
-		0: "NONE",
-		1: "ANNOUNCE",
-		2: "PUSH_ALL",
-		3: "PUSH_TAGGED",
+		0: "PRE_WARM_STRATEGY_UNSPECIFIED",
+		1: "NONE",
+		2: "ANNOUNCE",
+		3: "PUSH_ALL",
+		4: "PUSH_TAGGED",
 	}
 	DeployWasmModuleRequest_PreWarmStrategy_value = map[string]int32{
-		"NONE":        0,
-		"ANNOUNCE":    1,
-		"PUSH_ALL":    2,
-		"PUSH_TAGGED": 3,
+		"PRE_WARM_STRATEGY_UNSPECIFIED": 0,
+		"NONE":                          1,
+		"ANNOUNCE":                      2,
+		"PUSH_ALL":                      3,
+		"PUSH_TAGGED":                   4,
 	}
 )
 
@@ -293,9 +296,10 @@ func (DeployWasmModuleRequest_PreWarmStrategy) EnumDescriptor() ([]byte, []int) 
 type HttpFetchRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Request headers to merge with service-link defaults and auth headers.
-	Headers map[string]string `protobuf:"bytes,1,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	RequestId string            `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Headers   map[string]string `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Raw request body bytes.
-	Body          []byte `protobuf:"bytes,2,opt,name=body,proto3" json:"body,omitempty"`
+	Body          []byte `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -330,6 +334,13 @@ func (*HttpFetchRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{0}
 }
 
+func (x *HttpFetchRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *HttpFetchRequest) GetHeaders() map[string]string {
 	if x != nil {
 		return x.Headers
@@ -348,11 +359,12 @@ func (x *HttpFetchRequest) GetBody() []byte {
 type HttpFetchResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// HTTP status code.
-	Status uint32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Status    uint32 `protobuf:"varint,2,opt,name=status,proto3" json:"status,omitempty"`
 	// Response headers.
-	Headers map[string]string `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Headers map[string]string `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Raw response body bytes.
-	Body          []byte `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	Body          []byte `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -385,6 +397,13 @@ func (x *HttpFetchResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use HttpFetchResponse.ProtoReflect.Descriptor instead.
 func (*HttpFetchResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *HttpFetchResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *HttpFetchResponse) GetStatus() uint32 {
@@ -1039,11 +1058,12 @@ func (x *WasmConfig) GetMaxConcurrentInstantiations() uint32 {
 type DeployWasmModuleRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WASM module to deploy
-	Module *WasmModule `protobuf:"bytes,1,opt,name=module,proto3" json:"module,omitempty"`
+	RequestId string      `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Module    *WasmModule `protobuf:"bytes,2,opt,name=module,proto3" json:"module,omitempty"`
 	// How to distribute module to nodes
-	PreWarm DeployWasmModuleRequest_PreWarmStrategy `protobuf:"varint,2,opt,name=pre_warm,json=preWarm,proto3,enum=plexspaces.wasm.v1.DeployWasmModuleRequest_PreWarmStrategy" json:"pre_warm,omitempty"`
+	PreWarm DeployWasmModuleRequest_PreWarmStrategy `protobuf:"varint,3,opt,name=pre_warm,json=preWarm,proto3,enum=plexspaces.wasm.v1.DeployWasmModuleRequest_PreWarmStrategy" json:"pre_warm,omitempty"`
 	// Node tags for PUSH_TAGGED strategy (e.g., ["us-east-1", "production"])
-	TargetNodeTags []string `protobuf:"bytes,3,rep,name=target_node_tags,json=targetNodeTags,proto3" json:"target_node_tags,omitempty"`
+	TargetNodeTags []string `protobuf:"bytes,4,rep,name=target_node_tags,json=targetNodeTags,proto3" json:"target_node_tags,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1078,6 +1098,13 @@ func (*DeployWasmModuleRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *DeployWasmModuleRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *DeployWasmModuleRequest) GetModule() *WasmModule {
 	if x != nil {
 		return x.Module
@@ -1089,7 +1116,7 @@ func (x *DeployWasmModuleRequest) GetPreWarm() DeployWasmModuleRequest_PreWarmSt
 	if x != nil {
 		return x.PreWarm
 	}
-	return DeployWasmModuleRequest_NONE
+	return DeployWasmModuleRequest_PRE_WARM_STRATEGY_UNSPECIFIED
 }
 
 func (x *DeployWasmModuleRequest) GetTargetNodeTags() []string {
@@ -1103,16 +1130,17 @@ func (x *DeployWasmModuleRequest) GetTargetNodeTags() []string {
 type DeployWasmModuleResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Was deployment successful?
-	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success   bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	// Module hash (for cache lookup)
-	ModuleHash string `protobuf:"bytes,2,opt,name=module_hash,json=moduleHash,proto3" json:"module_hash,omitempty"`
+	ModuleHash string `protobuf:"bytes,3,opt,name=module_hash,json=moduleHash,proto3" json:"module_hash,omitempty"`
 	// Number of nodes that received the module (for pre-warming)
-	NodesPreWarmed uint32 `protobuf:"varint,3,opt,name=nodes_pre_warmed,json=nodesPreWarmed,proto3" json:"nodes_pre_warmed,omitempty"`
+	NodesPreWarmed uint32 `protobuf:"varint,4,opt,name=nodes_pre_warmed,json=nodesPreWarmed,proto3" json:"nodes_pre_warmed,omitempty"`
 	// Error details if deployment failed (replaces error_message)
 	//
 	// If deployment succeeded, this field is not set (code = OK).
 	// If deployment failed, code indicates failure reason.
-	Error         *WasmError `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *WasmError `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1145,6 +1173,13 @@ func (x *DeployWasmModuleResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DeployWasmModuleResponse.ProtoReflect.Descriptor instead.
 func (*DeployWasmModuleResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DeployWasmModuleResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *DeployWasmModuleResponse) GetSuccess() bool {
@@ -1197,11 +1232,12 @@ type InstantiateActorRequest struct {
 	// Supports both:
 	// - Name: "counter-actor@1.2.3" (fetches from registry)
 	// - Hash: "a1b2c3d4..." (direct cache lookup)
-	ModuleRef string `protobuf:"bytes,1,opt,name=module_ref,json=moduleRef,proto3" json:"module_ref,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ModuleRef string `protobuf:"bytes,2,opt,name=module_ref,json=moduleRef,proto3" json:"module_ref,omitempty"`
 	// Actor ID to assign to this instance
 	//
 	// Format: ULID for sortability (see CLAUDE.md Core Principle 0)
-	ActorId string `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	ActorId string `protobuf:"bytes,3,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	// Initial state bytes (opaque to runtime)
 	//
 	// Passed to WASM module's init() function.
@@ -1209,15 +1245,15 @@ type InstantiateActorRequest struct {
 	// - Empty (new actor with default state)
 	// - Snapshot (restoring actor from checkpoint)
 	// - Migration state (actor moving to new node)
-	InitialState []byte `protobuf:"bytes,3,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
+	InitialState []byte `protobuf:"bytes,4,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
 	// Configuration overrides (optional)
 	//
 	// If not provided, uses module's default config or system defaults.
-	Config *WasmConfig `protobuf:"bytes,4,opt,name=config,proto3" json:"config,omitempty"`
+	Config *WasmConfig `protobuf:"bytes,5,opt,name=config,proto3" json:"config,omitempty"`
 	// Node ID to instantiate on (optional)
 	//
 	// If not provided, scheduler chooses node based on load balancing.
-	TargetNodeId  string `protobuf:"bytes,5,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
+	TargetNodeId  string `protobuf:"bytes,6,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1250,6 +1286,13 @@ func (x *InstantiateActorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use InstantiateActorRequest.ProtoReflect.Descriptor instead.
 func (*InstantiateActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *InstantiateActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *InstantiateActorRequest) GetModuleRef() string {
@@ -1291,18 +1334,19 @@ func (x *InstantiateActorRequest) GetTargetNodeId() string {
 type InstantiateActorResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Was instantiation successful?
-	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success   bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	// Actor ID of instantiated actor
-	ActorId string `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	ActorId string `protobuf:"bytes,3,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	// Node ID where actor is running
-	NodeId string `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId string `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	// Instance creation time
-	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// Error details if instantiation failed (replaces error_message)
 	//
 	// If instantiation succeeded, this field is not set (code = OK).
 	// If instantiation failed, code indicates failure reason.
-	Error         *WasmError `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *WasmError `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1335,6 +1379,13 @@ func (x *InstantiateActorResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use InstantiateActorResponse.ProtoReflect.Descriptor instead.
 func (*InstantiateActorResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *InstantiateActorResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *InstantiateActorResponse) GetSuccess() bool {
@@ -1390,15 +1441,16 @@ func (x *InstantiateActorResponse) GetError() *WasmError {
 type MigrateActorRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Actor ID to migrate
-	ActorId string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActorId   string `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	// Source node ID (current location)
-	SourceNodeId string `protobuf:"bytes,2,opt,name=source_node_id,json=sourceNodeId,proto3" json:"source_node_id,omitempty"`
+	SourceNodeId string `protobuf:"bytes,3,opt,name=source_node_id,json=sourceNodeId,proto3" json:"source_node_id,omitempty"`
 	// Destination node ID (target location)
-	TargetNodeId string `protobuf:"bytes,3,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
+	TargetNodeId string `protobuf:"bytes,4,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
 	// Include journal entries (for durable actors)
 	//
 	// If true, migrate journal for replay on destination.
-	IncludeJournal bool `protobuf:"varint,4,opt,name=include_journal,json=includeJournal,proto3" json:"include_journal,omitempty"`
+	IncludeJournal bool `protobuf:"varint,5,opt,name=include_journal,json=includeJournal,proto3" json:"include_journal,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1433,6 +1485,13 @@ func (*MigrateActorRequest) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{10}
 }
 
+func (x *MigrateActorRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *MigrateActorRequest) GetActorId() string {
 	if x != nil {
 		return x.ActorId
@@ -1465,13 +1524,14 @@ func (x *MigrateActorRequest) GetIncludeJournal() bool {
 type MigrateActorResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Was migration successful?
-	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success   bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	// Migration duration (should be < 10ms for state-only)
-	MigrationTime *durationpb.Duration `protobuf:"bytes,2,opt,name=migration_time,json=migrationTime,proto3" json:"migration_time,omitempty"`
+	MigrationTime *durationpb.Duration `protobuf:"bytes,3,opt,name=migration_time,json=migrationTime,proto3" json:"migration_time,omitempty"`
 	// Size of state transferred (bytes)
-	StateSizeBytes uint64 `protobuf:"varint,3,opt,name=state_size_bytes,json=stateSizeBytes,proto3" json:"state_size_bytes,omitempty"`
+	StateSizeBytes uint64 `protobuf:"varint,4,opt,name=state_size_bytes,json=stateSizeBytes,proto3" json:"state_size_bytes,omitempty"`
 	// Error details if migration failed
-	Error         *WasmError `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *WasmError `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1504,6 +1564,13 @@ func (x *MigrateActorResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use MigrateActorResponse.ProtoReflect.Descriptor instead.
 func (*MigrateActorResponse) Descriptor() ([]byte, []int) {
 	return file_plexspaces_v1_wasm_wasm_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *MigrateActorResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *MigrateActorResponse) GetSuccess() bool {
@@ -1663,18 +1730,22 @@ var File_plexspaces_v1_wasm_wasm_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_wasm_wasm_proto_rawDesc = "" +
 	"\n" +
-	"\x1dplexspaces/v1/wasm/wasm.proto\x12\x12plexspaces.wasm.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xc4\x03\n" +
-	"\x10HttpFetchRequest\x12\x98\x01\n" +
-	"\aheaders\x18\x01 \x03(\v21.plexspaces.wasm.v1.HttpFetchRequest.HeadersEntryBK\x92AE2CAdditional request headers merged with the configured service link.\xe0A\x02R\aheaders\x12a\n" +
-	"\x04body\x18\x02 \x01(\fBM\x92A=2;Raw request body bytes encoded at the actor-world boundary.\xe0A\x02\xbaH\az\x05\x18\x80\x80\x80\x05R\x04body\x1a:\n" +
+	"\x1dplexspaces/v1/wasm/wasm.proto\x12\x12plexspaces.wasm.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xec\x03\n" +
+	"\x10HttpFetchRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x98\x01\n" +
+	"\aheaders\x18\x02 \x03(\v21.plexspaces.wasm.v1.HttpFetchRequest.HeadersEntryBK\x92AE2CAdditional request headers merged with the configured service link.\xe0A\x02R\aheaders\x12a\n" +
+	"\x04body\x18\x03 \x01(\fBM\x92A=2;Raw request body bytes encoded at the actor-world boundary.\xe0A\x02\xbaH\az\x05\x18\x80\x80\x80\x05R\x04body\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:v\x92As\n" +
-	"q*\x10HttpFetchRequest2LActor-world outbound HTTP request metadata/body exchanged as protobuf bytes.\xd2\x01\aheaders\xd2\x01\x04body\"\x94\x04\n" +
-	"\x11HttpFetchResponse\x12^\n" +
-	"\x06status\x18\x01 \x01(\rBF\x92A624HTTP status code returned by the named service link.\xe0A\x02\xbaH\a*\x05\x18\xd7\x04(dR\x06status\x12\x8a\x01\n" +
-	"\aheaders\x18\x02 \x03(\v22.plexspaces.wasm.v1.HttpFetchResponse.HeadersEntryB<\x92A624Response headers returned by the named service link.\xe0A\x02R\aheaders\x12a\n" +
-	"\x04body\x18\x03 \x01(\fBM\x92A=2;Raw response body bytes returned by the named service link.\xe0A\x02\xbaH\az\x05\x18\x80\x80\x80\x05R\x04body\x1a:\n" +
+	"q*\x10HttpFetchRequest2LActor-world outbound HTTP request metadata/body exchanged as protobuf bytes.\xd2\x01\aheaders\xd2\x01\x04body\"\xbc\x04\n" +
+	"\x11HttpFetchResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12^\n" +
+	"\x06status\x18\x02 \x01(\rBF\x92A624HTTP status code returned by the named service link.\xe0A\x02\xbaH\a*\x05\x18\xd7\x04(dR\x06status\x12\x8a\x01\n" +
+	"\aheaders\x18\x03 \x03(\v22.plexspaces.wasm.v1.HttpFetchResponse.HeadersEntryB<\x92A624Response headers returned by the named service link.\xe0A\x02R\aheaders\x12a\n" +
+	"\x04body\x18\x04 \x01(\fBM\x92A=2;Raw response body bytes returned by the named service link.\xe0A\x02\xbaH\az\x05\x18\x80\x80\x80\x05R\x04body\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:s\x92Ap\n" +
@@ -1724,46 +1795,59 @@ const file_plexspaces_v1_wasm_wasm_proto_rawDesc = "" +
 	"enable_aot\x18\x05 \x01(\bR\tenableAot\x12-\n" +
 	"\x12durability_enabled\x18\x06 \x01(\bR\x11durabilityEnabled\x12*\n" +
 	"\x11use_instance_pool\x18\a \x01(\bR\x0fuseInstancePool\x12B\n" +
-	"\x1dmax_concurrent_instantiations\x18\b \x01(\rR\x1bmaxConcurrentInstantiations\"\xb3\x02\n" +
-	"\x17DeployWasmModuleRequest\x12;\n" +
-	"\x06module\x18\x01 \x01(\v2\x1e.plexspaces.wasm.v1.WasmModuleB\x03\xe0A\x02R\x06module\x12V\n" +
-	"\bpre_warm\x18\x02 \x01(\x0e2;.plexspaces.wasm.v1.DeployWasmModuleRequest.PreWarmStrategyR\apreWarm\x129\n" +
-	"\x10target_node_tags\x18\x03 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x01R\x0etargetNodeTags\"H\n" +
-	"\x0fPreWarmStrategy\x12\b\n" +
-	"\x04NONE\x10\x00\x12\f\n" +
-	"\bANNOUNCE\x10\x01\x12\f\n" +
-	"\bPUSH_ALL\x10\x02\x12\x0f\n" +
-	"\vPUSH_TAGGED\x10\x03\"\xb4\x01\n" +
-	"\x18DeployWasmModuleResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1f\n" +
-	"\vmodule_hash\x18\x02 \x01(\tR\n" +
+	"\x1dmax_concurrent_instantiations\x18\b \x01(\rR\x1bmaxConcurrentInstantiations\"\xfe\x02\n" +
+	"\x17DeployWasmModuleRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12;\n" +
+	"\x06module\x18\x02 \x01(\v2\x1e.plexspaces.wasm.v1.WasmModuleB\x03\xe0A\x02R\x06module\x12V\n" +
+	"\bpre_warm\x18\x03 \x01(\x0e2;.plexspaces.wasm.v1.DeployWasmModuleRequest.PreWarmStrategyR\apreWarm\x129\n" +
+	"\x10target_node_tags\x18\x04 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x01R\x0etargetNodeTags\"k\n" +
+	"\x0fPreWarmStrategy\x12!\n" +
+	"\x1dPRE_WARM_STRATEGY_UNSPECIFIED\x10\x00\x12\b\n" +
+	"\x04NONE\x10\x01\x12\f\n" +
+	"\bANNOUNCE\x10\x02\x12\f\n" +
+	"\bPUSH_ALL\x10\x03\x12\x0f\n" +
+	"\vPUSH_TAGGED\x10\x04\"\xdc\x01\n" +
+	"\x18DeployWasmModuleResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x1f\n" +
+	"\vmodule_hash\x18\x03 \x01(\tR\n" +
 	"moduleHash\x12(\n" +
-	"\x10nodes_pre_warmed\x18\x03 \x01(\rR\x0enodesPreWarmed\x123\n" +
-	"\x05error\x18\x04 \x01(\v2\x1d.plexspaces.wasm.v1.WasmErrorR\x05error\"\xfe\x01\n" +
-	"\x17InstantiateActorRequest\x12,\n" +
+	"\x10nodes_pre_warmed\x18\x04 \x01(\rR\x0enodesPreWarmed\x123\n" +
+	"\x05error\x18\x05 \x01(\v2\x1d.plexspaces.wasm.v1.WasmErrorR\x05error\"\xa6\x02\n" +
+	"\x17InstantiateActorRequest\x12&\n" +
 	"\n" +
-	"module_ref\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\tmoduleRef\x12(\n" +
-	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12#\n" +
-	"\rinitial_state\x18\x03 \x01(\fR\finitialState\x126\n" +
-	"\x06config\x18\x04 \x01(\v2\x1e.plexspaces.wasm.v1.WasmConfigR\x06config\x12.\n" +
-	"\x0etarget_node_id\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\ftargetNodeId\"\xd8\x01\n" +
-	"\x18InstantiateActorResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x19\n" +
-	"\bactor_id\x18\x02 \x01(\tR\aactorId\x12\x17\n" +
-	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x129\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12,\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x123\n" +
-	"\x05error\x18\x05 \x01(\v2\x1d.plexspaces.wasm.v1.WasmErrorR\x05error\"\xd2\x01\n" +
-	"\x13MigrateActorRequest\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x123\n" +
-	"\x0esource_node_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fsourceNodeId\x123\n" +
-	"\x0etarget_node_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\ftargetNodeId\x12'\n" +
-	"\x0finclude_journal\x18\x04 \x01(\bR\x0eincludeJournal\"\xd1\x01\n" +
-	"\x14MigrateActorResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12@\n" +
-	"\x0emigration_time\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\rmigrationTime\x12(\n" +
-	"\x10state_size_bytes\x18\x03 \x01(\x04R\x0estateSizeBytes\x123\n" +
-	"\x05error\x18\x04 \x01(\v2\x1d.plexspaces.wasm.v1.WasmErrorR\x05error\"\xa4\x02\n" +
+	"module_ref\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\tmoduleRef\x12(\n" +
+	"\bactor_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12#\n" +
+	"\rinitial_state\x18\x04 \x01(\fR\finitialState\x126\n" +
+	"\x06config\x18\x05 \x01(\v2\x1e.plexspaces.wasm.v1.WasmConfigR\x06config\x12.\n" +
+	"\x0etarget_node_id\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\ftargetNodeId\"\x80\x02\n" +
+	"\x18InstantiateActorResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x19\n" +
+	"\bactor_id\x18\x03 \x01(\tR\aactorId\x12\x17\n" +
+	"\anode_id\x18\x04 \x01(\tR\x06nodeId\x129\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x123\n" +
+	"\x05error\x18\x06 \x01(\v2\x1d.plexspaces.wasm.v1.WasmErrorR\x05error\"\xfa\x01\n" +
+	"\x13MigrateActorRequest\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12(\n" +
+	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x123\n" +
+	"\x0esource_node_id\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fsourceNodeId\x123\n" +
+	"\x0etarget_node_id\x18\x04 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\ftargetNodeId\x12'\n" +
+	"\x0finclude_journal\x18\x05 \x01(\bR\x0eincludeJournal\"\xf9\x01\n" +
+	"\x14MigrateActorResponse\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12@\n" +
+	"\x0emigration_time\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\rmigrationTime\x12(\n" +
+	"\x10state_size_bytes\x18\x04 \x01(\x04R\x0estateSizeBytes\x123\n" +
+	"\x05error\x18\x05 \x01(\v2\x1d.plexspaces.wasm.v1.WasmErrorR\x05error\"\xa4\x02\n" +
 	"\tWasmError\x125\n" +
 	"\x04code\x18\x01 \x01(\x0e2!.plexspaces.wasm.v1.WasmErrorCodeR\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12D\n" +

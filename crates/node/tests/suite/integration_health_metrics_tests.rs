@@ -219,7 +219,7 @@ async fn test_metrics_service_export_prometheus() {
     let metrics_service = MetricsServiceImpl::new(handle);
     metrics::counter!("plexspaces_node_health_requests_total").increment(1);
     let request = tonic::Request::new(plexspaces_proto::metrics::v1::ExportPrometheusRequest {
-    request_id: ulid::Ulid::new().to_string(),
+        request_id: ulid::Ulid::new().to_string(),
     });
 
     let response = metrics_service.export_prometheus(request).await.unwrap();

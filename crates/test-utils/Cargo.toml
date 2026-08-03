@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# This file is part of PlexSpaces.
+#
+# PlexSpaces is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+[package]
+name = "plexspaces-test-utils"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared test utilities for PlexSpaces crates — eliminates duplicated helpers"
+
+[dependencies]
+plexspaces-proto = { workspace = true }
+plexspaces-common = { workspace = true }
+plexspaces-service-traits = { workspace = true }
+ulid = { workspace = true }
+prost-types = { workspace = true }
+
+[lib]
+name = "plexspaces_test_utils"
+path = "src/lib.rs"

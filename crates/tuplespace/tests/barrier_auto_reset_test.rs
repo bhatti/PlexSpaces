@@ -228,7 +228,7 @@ async fn test_barrier_auto_reset_with_different_counts() {
                 .await
                 .unwrap();
 
-            timeout(Duration::from_secs(3), rx.recv())
+            timeout(Duration::from_secs(2), rx.recv())
                 .await
                 .expect("Timeout in round 1");
         });
@@ -271,7 +271,7 @@ async fn test_barrier_auto_reset_with_different_counts() {
                 .await
                 .unwrap();
 
-            timeout(Duration::from_secs(3), rx.recv())
+            timeout(Duration::from_secs(2), rx.recv())
                 .await
                 .expect("Timeout in round 2");
         });
@@ -340,7 +340,7 @@ async fn test_barrier_multi_iteration_loop() {
                     .unwrap();
 
                 // Wait for all to arrive
-                timeout(Duration::from_secs(3), rx.recv())
+                timeout(Duration::from_secs(2), rx.recv())
                     .await
                     .expect(&format!("Timeout at iteration {}", iteration));
             });

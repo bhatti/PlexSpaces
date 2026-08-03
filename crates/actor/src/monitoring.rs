@@ -183,7 +183,6 @@ pub fn record_message_routing_metrics(
     }
 }
 
-
 /// Record connection metrics
 ///
 ///

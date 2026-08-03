@@ -2271,7 +2271,10 @@ mod tests {
         let full1 = SwimMember::new("full-1".to_string(), "localhost:8001".to_string());
         let full2 = SwimMember::new("full-2".to_string(), "localhost:8002".to_string());
         let mut thin = SwimMember::new("thin-1".to_string(), "localhost:8003".to_string());
-        thin.metadata.insert(super::super::SWIM_NODE_TYPE_KEY.to_string(), super::super::SWIM_NODE_TYPE_THIN.to_string());
+        thin.metadata.insert(
+            super::super::SWIM_NODE_TYPE_KEY.to_string(),
+            super::super::SWIM_NODE_TYPE_THIN.to_string(),
+        );
 
         protocol.upsert_member(full1).await;
         protocol.upsert_member(full2).await;
@@ -2280,10 +2283,14 @@ mod tests {
         let targets = protocol.select_indirect_targets("other-node").await;
 
         // Thin node must not appear as an intermediary
-        assert!(!targets.iter().any(|m| m.node_id == "thin-1"),
-            "thin node should be excluded from indirect ping intermediaries");
+        assert!(
+            !targets.iter().any(|m| m.node_id == "thin-1"),
+            "thin node should be excluded from indirect ping intermediaries"
+        );
         // Full nodes must be available
-        assert!(targets.iter().any(|m| m.node_id == "full-1" || m.node_id == "full-2"));
+        assert!(targets
+            .iter()
+            .any(|m| m.node_id == "full-1" || m.node_id == "full-2"));
     }
 
     #[tokio::test]

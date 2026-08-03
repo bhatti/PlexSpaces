@@ -25,7 +25,8 @@ struct JwtKeyPairInner {
     algorithm: Algorithm,
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
-    /// PEM of the private key (for persistence/logging key ID)
+    /// PEM of the private key (for persistence/logging key ID; read in tests via inner.private_key_pem)
+    #[allow(dead_code)]
     private_key_pem: Option<String>,
     /// PEM of the public key (for JWKS endpoint)
     public_key_pem: Option<String>,
@@ -71,13 +72,15 @@ impl JwtKeyPair {
             private_key_pem.to_string()
         };
 
-        let encoding_key = EncodingKey::from_ec_pem(effective_pem.as_bytes())
-            .map_err(|e| JwtKeyError::InvalidKey(format!("Failed to parse EC private key: {}", e)))?;
+        let encoding_key = EncodingKey::from_ec_pem(effective_pem.as_bytes()).map_err(|e| {
+            JwtKeyError::InvalidKey(format!("Failed to parse EC private key: {}", e))
+        })?;
 
         let public_key_pem = extract_public_key_pem(private_key_pem)?;
 
-        let decoding_key = DecodingKey::from_ec_pem(public_key_pem.as_bytes())
-            .map_err(|e| JwtKeyError::InvalidKey(format!("Failed to parse EC public key: {}", e)))?;
+        let decoding_key = DecodingKey::from_ec_pem(public_key_pem.as_bytes()).map_err(|e| {
+            JwtKeyError::InvalidKey(format!("Failed to parse EC public key: {}", e))
+        })?;
 
         let kid = compute_kid(&public_key_pem);
 
@@ -117,14 +120,16 @@ impl JwtKeyPair {
                     }
                 }
             }
-            let pem = std::fs::read_to_string(path)
-                .map_err(|e| JwtKeyError::Io(format!("Failed to read key file {:?}: {}", path, e)))?;
+            let pem = std::fs::read_to_string(path).map_err(|e| {
+                JwtKeyError::Io(format!("Failed to read key file {:?}: {}", path, e))
+            })?;
             Self::from_ec_pem(&pem)
         } else {
             let pem = generate_ec_private_key_pem()?;
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| JwtKeyError::Io(format!("Failed to create dir {:?}: {}", parent, e)))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    JwtKeyError::Io(format!("Failed to create dir {:?}: {}", parent, e))
+                })?;
             }
             // Atomic write: write to temp file with restrictive permissions, then rename
             let tmp_path = path.with_extension("pem.tmp");
@@ -139,17 +144,21 @@ impl JwtKeyPair {
                     .truncate(true)
                     .mode(0o600)
                     .open(&tmp_path)
-                    .map_err(|e| JwtKeyError::Io(format!("Failed to create temp key file: {}", e)))?;
-                file.write_all(pem.as_bytes())
-                    .map_err(|e| JwtKeyError::Io(format!("Failed to write temp key file: {}", e)))?;
+                    .map_err(|e| {
+                        JwtKeyError::Io(format!("Failed to create temp key file: {}", e))
+                    })?;
+                file.write_all(pem.as_bytes()).map_err(|e| {
+                    JwtKeyError::Io(format!("Failed to write temp key file: {}", e))
+                })?;
             }
             #[cfg(not(unix))]
             {
                 std::fs::write(&tmp_path, &pem)
                     .map_err(|e| JwtKeyError::Io(format!("Failed to write key file: {}", e)))?;
             }
-            std::fs::rename(&tmp_path, path)
-                .map_err(|e| JwtKeyError::Io(format!("Failed to rename key file {:?}: {}", path, e)))?;
+            std::fs::rename(&tmp_path, path).map_err(|e| {
+                JwtKeyError::Io(format!("Failed to rename key file {:?}: {}", path, e))
+            })?;
             tracing::info!(path = ?path, "Generated new ES256 JWT signing key");
             Self::from_ec_pem(&pem)
         }
@@ -211,18 +220,22 @@ impl JwtKeyPair {
         Self::from_config(&private_key_pem, &private_key_file, secret, true)
     }
 
+    /// Return the JWT signing algorithm (ES256 or HS256).
     pub fn algorithm(&self) -> Algorithm {
         self.inner.algorithm
     }
 
+    /// Return the encoding key used to sign tokens.
     pub fn encoding_key(&self) -> &EncodingKey {
         &self.inner.encoding_key
     }
 
+    /// Return the decoding key used to verify tokens.
     pub fn decoding_key(&self) -> &DecodingKey {
         &self.inner.decoding_key
     }
 
+    /// Return the key ID (kid) embedded in JWKS responses.
     pub fn kid(&self) -> &str {
         &self.inner.kid
     }
@@ -230,12 +243,6 @@ impl JwtKeyPair {
     /// Returns the public key PEM (only for ES256 keys).
     pub fn public_key_pem(&self) -> Option<&str> {
         self.inner.public_key_pem.as_deref()
-    }
-
-    /// Returns the private key PEM (only for ES256 keys).
-    /// Restricted to crate-internal use to minimize key exposure surface.
-    pub(crate) fn private_key_pem(&self) -> Option<&str> {
-        self.inner.private_key_pem.as_deref()
     }
 
     /// Returns true if this is an ES256 key (asymmetric).
@@ -296,12 +303,10 @@ impl JwtKeyPair {
     /// Generate JWKS JSON for the `/.well-known/jwks.json` endpoint.
     pub fn jwks_json(&self) -> serde_json::Value {
         match &self.inner.public_key_pem {
-            Some(pem) => {
-                match parse_ec_public_key_to_jwk(pem, &self.inner.kid) {
-                    Ok(jwk) => serde_json::json!({ "keys": [jwk] }),
-                    Err(_) => serde_json::json!({ "keys": [] }),
-                }
-            }
+            Some(pem) => match parse_ec_public_key_to_jwk(pem, &self.inner.kid) {
+                Ok(jwk) => serde_json::json!({ "keys": [jwk] }),
+                Err(_) => serde_json::json!({ "keys": [] }),
+            },
             None => serde_json::json!({ "keys": [] }),
         }
     }
@@ -313,11 +318,9 @@ fn generate_ec_private_key_pem() -> Result<String, JwtKeyError> {
     use ring::signature::EcdsaKeyPair;
 
     let rng = SystemRandom::new();
-    let pkcs8_bytes = EcdsaKeyPair::generate_pkcs8(
-        &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-        &rng,
-    )
-    .map_err(|e| JwtKeyError::KeyGeneration(format!("EC key generation failed: {}", e)))?;
+    let pkcs8_bytes =
+        EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
+            .map_err(|e| JwtKeyError::KeyGeneration(format!("EC key generation failed: {}", e)))?;
 
     let pem = pem_encode("PRIVATE KEY", pkcs8_bytes.as_ref());
     Ok(pem)
@@ -478,7 +481,9 @@ fn parse_ec_public_key_to_jwk(
 
     let point = &der[der.len() - 65..];
     if point[0] != 0x04 {
-        return Err(JwtKeyError::InvalidKey("Expected uncompressed EC point (0x04 prefix)".into()));
+        return Err(JwtKeyError::InvalidKey(
+            "Expected uncompressed EC point (0x04 prefix)".into(),
+        ));
     }
 
     let x = &point[1..33];
@@ -498,12 +503,16 @@ fn parse_ec_public_key_to_jwk(
     }))
 }
 
+/// Errors that can occur during JWT key operations.
 #[derive(Debug, thiserror::Error)]
 pub enum JwtKeyError {
+    /// The key material is malformed or unsupported.
     #[error("Invalid key: {0}")]
     InvalidKey(String),
+    /// Key generation failed.
     #[error("Key generation failed: {0}")]
     KeyGeneration(String),
+    /// I/O error when loading a key from disk.
     #[error("IO error: {0}")]
     Io(String),
 }
@@ -511,6 +520,7 @@ pub enum JwtKeyError {
 /// JWKS response for `/.well-known/jwks.json`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwksResponse {
+    /// List of JSON Web Keys in JWK format.
     pub keys: Vec<serde_json::Value>,
 }
 
@@ -524,7 +534,7 @@ mod tests {
         assert_eq!(kp.algorithm(), Algorithm::ES256);
         assert!(kp.is_asymmetric());
         assert!(kp.public_key_pem().is_some());
-        assert!(kp.private_key_pem().is_some());
+        assert!(kp.inner.private_key_pem.as_deref().is_some());
         assert!(kp.kid().starts_with("es256-"));
     }
 
@@ -550,8 +560,8 @@ mod tests {
         validation.validate_exp = true;
         validation.validate_aud = false;
 
-        let decoded = decode::<serde_json::Value>(&token, kp.decoding_key(), &validation)
-            .expect("decode");
+        let decoded =
+            decode::<serde_json::Value>(&token, kp.decoding_key(), &validation).expect("decode");
         assert_eq!(decoded.claims["sub"], "test-user");
         assert_eq!(decoded.claims["tenant_id"], "test-tenant");
     }
@@ -603,7 +613,7 @@ mod tests {
     #[test]
     fn test_roundtrip_pem() {
         let kp1 = JwtKeyPair::generate_es256().expect("gen");
-        let pem = kp1.private_key_pem().expect("pem");
+        let pem = kp1.inner.private_key_pem.as_deref().expect("pem");
         let kp2 = JwtKeyPair::from_ec_pem(pem).expect("from pem");
         assert_eq!(kp1.kid(), kp2.kid());
     }
@@ -627,8 +637,8 @@ mod tests {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_aud = false;
 
-        let decoded = decode::<serde_json::Value>(&token, kp.decoding_key(), &validation)
-            .expect("decode");
+        let decoded =
+            decode::<serde_json::Value>(&token, kp.decoding_key(), &validation).expect("decode");
         assert_eq!(decoded.claims["sub"], "user-1");
         assert_eq!(decoded.claims["tenant_id"], "tenant-1");
     }
@@ -636,10 +646,10 @@ mod tests {
     #[test]
     fn test_from_config_priority_inline_pem_first() {
         let kp = JwtKeyPair::generate_es256().expect("gen");
-        let pem = kp.private_key_pem().expect("pem");
+        let pem = kp.inner.private_key_pem.as_deref().expect("pem");
 
-        let result = JwtKeyPair::from_config(pem, "/nonexistent", "some-secret", true)
-            .expect("from_config");
+        let result =
+            JwtKeyPair::from_config(pem, "/nonexistent", "some-secret", true).expect("from_config");
         assert_eq!(result.algorithm(), Algorithm::ES256);
         assert_eq!(result.kid(), kp.kid());
     }
@@ -654,8 +664,7 @@ mod tests {
 
     #[test]
     fn test_from_config_auto_generate_when_nothing_set() {
-        let result = JwtKeyPair::from_config("", "", "", true)
-            .expect("from_config");
+        let result = JwtKeyPair::from_config("", "", "", true).expect("from_config");
         assert_eq!(result.algorithm(), Algorithm::ES256);
         assert!(result.is_asymmetric());
     }
@@ -703,7 +712,7 @@ mod tests {
         // SEC1 format key (openssl ecparam -genkey -name prime256v1 -noout)
         // Generate a key via ring and manually test the SEC1 path by re-encoding
         let pkcs8_kp = JwtKeyPair::generate_es256().expect("gen");
-        let pkcs8_pem = pkcs8_kp.private_key_pem().expect("pem");
+        let pkcs8_pem = pkcs8_kp.inner.private_key_pem.as_deref().expect("pem");
 
         // Simulate a SEC1 key by converting: load via ring, get raw private key,
         // Actually, let's test with a real SEC1 key from openssl output
@@ -722,7 +731,12 @@ mod tests {
             "exp": chrono::Utc::now().timestamp() + 3600,
             "iat": chrono::Utc::now().timestamp(),
         });
-        let token = encode(&Header::new(Algorithm::ES256), &claims, kp_reloaded.encoding_key()).expect("encode");
+        let token = encode(
+            &Header::new(Algorithm::ES256),
+            &claims,
+            kp_reloaded.encoding_key(),
+        )
+        .expect("encode");
         let mut v = Validation::new(Algorithm::ES256);
         v.validate_aud = false;
         decode::<serde_json::Value>(&token, kp_reloaded.decoding_key(), &v).expect("decode");
@@ -730,7 +744,12 @@ mod tests {
         // If SEC1 fixture exists, verify it works too
         if let Ok(sec1_kp) = kp {
             assert!(sec1_kp.is_asymmetric());
-            let token2 = encode(&Header::new(Algorithm::ES256), &claims, sec1_kp.encoding_key()).expect("encode sec1");
+            let token2 = encode(
+                &Header::new(Algorithm::ES256),
+                &claims,
+                sec1_kp.encoding_key(),
+            )
+            .expect("encode sec1");
             decode::<serde_json::Value>(&token2, sec1_kp.decoding_key(), &v).expect("decode sec1");
         }
     }

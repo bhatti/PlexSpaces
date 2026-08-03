@@ -25,15 +25,15 @@ axum = { workspace = true }
 tonic-web = { workspace = true }
 
 # Async
-tokio = { version = "1.42", features = ["full"] }
-async-trait = "0.1"
+tokio = { workspace = true }
+async-trait = { workspace = true }
 
 # Metrics (unified with MetricsService / `metrics` recorder)
 metrics = { workspace = true }
 prometheus = { version = "0.13", features = ["process"] }
 
 # Tracing
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-opentelemetry = "0.27"
 opentelemetry = { version = "0.27", features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
@@ -53,18 +53,18 @@ flate2 = "1.0"  # gzip
 zstd = "0.13"   # zstd
 
 # Error handling
-thiserror = "2.0"
+thiserror = { workspace = true }
 anyhow = "1.0"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Time
-chrono = "0.4"
+chrono = { workspace = true }
 
 # ID generation
-ulid = { version = "1.1", features = ["serde"] }
+ulid = { workspace = true }
 
 # Certificate generation (for mTLS auto-generation)
 rcgen = "0.13"

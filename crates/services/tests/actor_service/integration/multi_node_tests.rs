@@ -8,14 +8,14 @@
 //! to simulate multi-node scenarios without spawning real processes.
 
 use async_trait::async_trait;
-use plexspaces_common::RequestContextExt;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    FacetManager, InitializableServiceLocator, Message, MessageSender, ReplyWaiterRegistry,
+    FacetManager, InitializableServiceLocator, Message, MessageSender,
     RequestContext, VirtualActorManager,
 };
-use plexspaces_actor::behavior::GenServer;
+use plexspaces_common::RequestContextExt;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_object_registry::SqliteObjectRegistryRepository;
 use plexspaces_proto::actor::v1::{
@@ -305,11 +305,6 @@ async fn create_test_actor_service(
     service_locator: Arc<ServiceLocatorImpl>,
     node_id: String,
 ) -> ActorServiceImpl {
-    let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
-    service_locator
-        .register_service(reply_waiter_registry)
-        .await;
-
     ActorServiceImpl::new(service_locator, node_id)
 }
 
@@ -502,9 +497,12 @@ async fn test_connection_pooling() {
 /// 3. Verify both succeed
 #[tokio::test]
 async fn test_multiple_target_nodes() {
-    let (actor_registry, service_locator) =
-        create_test_registry_with_remote_actors("node1", "node1", &["actor-a@node1", "actor-b@node1"])
-            .await;
+    let (actor_registry, service_locator) = create_test_registry_with_remote_actors(
+        "node1",
+        "node1",
+        &["actor-a@node1", "actor-b@node1"],
+    )
+    .await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 

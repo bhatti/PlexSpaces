@@ -144,11 +144,11 @@ type CacheKey = String;
 type DiscoveryCacheStore = Arc<RwLock<DiscoveryCache<CacheKey, Vec<ObjectRegistration>>>>;
 static DISCOVERY_CACHE: once_cell::sync::Lazy<DiscoveryCacheStore> =
     once_cell::sync::Lazy::new(|| {
-    Arc::new(RwLock::new(DiscoveryCache::new(
-        1000,                    // capacity
-        Duration::from_secs(60), // 60 second TTL
-    )))
-});
+        Arc::new(RwLock::new(DiscoveryCache::new(
+            1000,                    // capacity
+            Duration::from_secs(60), // 60 second TTL
+        )))
+    });
 
 /// Clear the discovery cache (test-only helper)
 /// This is useful for tests to ensure clean state between test runs
@@ -607,12 +607,7 @@ pub async fn heartbeat_node(
 /// (Orleans grain directory pattern). Two actors with the same identity share
 /// this alias, so only one can be HEALTHY/DEGRADED at a time when
 /// `enforce_unique_placement=true`.
-pub fn build_actor_alias(
-    actor_type: &str,
-    name: &str,
-    namespace: &str,
-    tenant_id: &str,
-) -> String {
+pub fn build_actor_alias(actor_type: &str, name: &str, namespace: &str, tenant_id: &str) -> String {
     format!("{}:{}:{}:{}", actor_type, name, namespace, tenant_id)
 }
 
@@ -682,9 +677,7 @@ pub async fn register_actor<T: ObjectRegistryTrait + ?Sized>(
     let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     {
         let mut cache = DISCOVERY_CACHE.write().await;
-        cache.remove_matching(|key| {
-            key.starts_with("actor:") && key.ends_with(&tenant_ns_suffix)
-        });
+        cache.remove_matching(|key| key.starts_with("actor:") && key.ends_with(&tenant_ns_suffix));
     }
 
     object_registry
@@ -707,9 +700,7 @@ pub async fn unregister_actor<T: ObjectRegistryTrait + ?Sized>(
     let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     {
         let mut cache = DISCOVERY_CACHE.write().await;
-        cache.remove_matching(|key| {
-            key.starts_with("actor:") && key.ends_with(&tenant_ns_suffix)
-        });
+        cache.remove_matching(|key| key.starts_with("actor:") && key.ends_with(&tenant_ns_suffix));
     }
 
     object_registry

@@ -651,18 +651,6 @@ mod tests {
             }
         }
 
-        #[allow(dead_code)]
-        fn with_start_failure(mut self) -> Self {
-            self.should_fail_start = true;
-            self
-        }
-
-        #[allow(dead_code)]
-        fn with_stop_failure(mut self) -> Self {
-            self.should_fail_stop = true;
-            self
-        }
-
         async fn was_start_called(&self) -> bool {
             *self.start_called.read().await
         }

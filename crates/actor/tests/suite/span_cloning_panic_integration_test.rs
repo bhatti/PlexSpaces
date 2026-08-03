@@ -19,8 +19,8 @@
 
 use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
-use plexspaces_actor::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message};
 use plexspaces_actor::behavior::GenServer;
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,7 +100,7 @@ async fn test_span_cloning_panic_reproduction() {
     let _guard = span.enter();
 
     // Spawn actor from within the span (simulating actor spawned from gRPC handler)
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -198,8 +198,7 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
         let actor_impl = TestActor::new(processed.clone());
 
         let mailbox = Mailbox::new(
-            MailboxConfig::default(),
-            format!("mailbox-{}-{}", i, Ulid::new()),
+            MailboxConfig::default(), format!("mailbox-{}-{}", i, Ulid::new()), String::new(), String::new(), None,
         )
         .await
         .unwrap();

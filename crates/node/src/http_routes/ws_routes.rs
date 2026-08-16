@@ -183,7 +183,10 @@ fn extract_tenant_id(
 // Connection handler
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WS_CHANNEL_CAPACITY: usize = 256;
+// Thin-node connections are low-traffic: heartbeats + occasional ask/tell.
+// 32 frames is ample for burst; it also keeps per-connection RAM at ~1KB
+// instead of ~8KB, which matters at 100k+ concurrent connections.
+const WS_CHANNEL_CAPACITY: usize = 32;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn handle_ws_connection(socket: WebSocket, tenant_id: String, state: WsRouteState) {
@@ -235,6 +238,8 @@ async fn handle_ws_connection(socket: WebSocket, tenant_id: String, state: WsRou
         last_heartbeat: std::time::Instant::now(),
     };
     state.ws_registry.register(session).await;
+    let active_after_connect = state.ws_registry.session_count().await as f64;
+    metrics::gauge!("plexspaces_ws_thin_nodes_active").set(active_after_connect);
 
     // Send ack — writer task not yet running so send directly.
     let ack_frame = WsFrame {
@@ -254,25 +259,29 @@ async fn handle_ws_connection(socket: WebSocket, tenant_id: String, state: WsRou
     );
 
     // ── Step 3: Register thin node in NodeRegistry for cluster membership ───────
-    // This allows the node to appear in list_connected_nodes and be correctly excluded
-    // from SWIM indirect ping intermediary selection.
+    // Spawned as a background task so it does not block the upgrade critical path.
+    // At 100k+ concurrent connections the NodeRegistry write lock becomes a
+    // bottleneck if held on every upgrade; moving it off the hot path keeps
+    // handshake latency O(1) regardless of NodeRegistry contention.
     let node_registry_ctx = RequestContext::new_without_auth(tenant_id.clone(), String::new());
-    if let Some(ref nr) = state.node_registry {
-        match nr
-            .register_node(&node_registry_ctx, node_registration)
-            .await
-        {
-            Ok(_) => {
-                metrics::counter!("plexspaces_ws_thin_node_registered_total").increment(1);
+    if let Some(nr) = state.node_registry.clone() {
+        let node_id_for_reg = node_id.clone();
+        let ctx_reg = node_registry_ctx.clone();
+        tokio::spawn(async move {
+            match nr.register_node(&ctx_reg, node_registration).await {
+                Ok(_) => {
+                    metrics::counter!("plexspaces_ws_thin_node_registered_total").increment(1);
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to register thin node {} in NodeRegistry: {}",
+                        node_id_for_reg, e
+                    );
+                    metrics::counter!("plexspaces_ws_thin_node_registration_errors_total")
+                        .increment(1);
+                }
             }
-            Err(e) => {
-                warn!(
-                    "Failed to register thin node {} in NodeRegistry: {}",
-                    node_id, e
-                );
-                metrics::counter!("plexspaces_ws_thin_node_registration_errors_total").increment(1);
-            }
-        }
+        });
     }
 
     // ── Step 4: Writer task — drains the mpsc channel to the WS socket ──────
@@ -319,23 +328,26 @@ async fn handle_ws_connection(socket: WebSocket, tenant_id: String, state: WsRou
 
     // ── Cleanup ──────────────────────────────────────────────────────────────
     state.ws_registry.unregister(&node_id_for_cleanup).await;
-    if let Some(ref nr) = state.node_registry {
-        match nr
-            .unregister_node(&node_registry_ctx, &node_id_for_cleanup)
-            .await
-        {
-            Ok(_) => {
-                metrics::counter!("plexspaces_ws_thin_node_unregistered_total").increment(1);
+    let active_after_disconnect = state.ws_registry.session_count().await as f64;
+    metrics::gauge!("plexspaces_ws_thin_nodes_active").set(active_after_disconnect);
+    if let Some(nr) = state.node_registry.clone() {
+        let node_id_unreg = node_id_for_cleanup.clone();
+        let ctx_unreg = node_registry_ctx.clone();
+        tokio::spawn(async move {
+            match nr.unregister_node(&ctx_unreg, &node_id_unreg).await {
+                Ok(_) => {
+                    metrics::counter!("plexspaces_ws_thin_node_unregistered_total").increment(1);
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to unregister thin node {} from NodeRegistry: {}",
+                        node_id_unreg, e
+                    );
+                    metrics::counter!("plexspaces_ws_thin_node_unregistration_errors_total")
+                        .increment(1);
+                }
             }
-            Err(e) => {
-                warn!(
-                    "Failed to unregister thin node {} from NodeRegistry: {}",
-                    node_id_for_cleanup, e
-                );
-                metrics::counter!("plexspaces_ws_thin_node_unregistration_errors_total")
-                    .increment(1);
-            }
-        }
+        });
     }
     // Cancel only asks for this session so other connected thin nodes are not affected.
     state
@@ -501,20 +513,31 @@ async fn dispatch_frame(frame: WsFrame, node_id: &str, tenant_id: &str, state: &
         }
         Some(ws_frame::Payload::NodePing(req)) => {
             if let Some(tx) = state.ws_registry.get_sender(node_id).await {
-                let resources = {
-                    let available_cores = std::thread::available_parallelism()
-                        .map(|n| n.get() as u32)
-                        .unwrap_or(0);
-                    let mut sys = sysinfo::System::new_all();
-                    sys.refresh_all();
-                    let cpu_percent = sys.global_cpu_info().cpu_usage();
-                    let memory_available_mb = sys.available_memory() / (1024 * 1024);
-                    Some(plexspaces_proto::node::v1::NodeResourceHints {
-                        cpu_percent,
-                        memory_available_mb,
-                        available_cores,
+                // sysinfo::System::new_all() + refresh_all() call blocking OS APIs
+                // (sysctl on macOS, /proc reads on Linux) that can take several
+                // milliseconds.  Running them on a Tokio async worker thread would
+                // block the thread and starve other tasks.  spawn_blocking moves
+                // the work to Tokio's dedicated blocking thread pool.
+                let resources =
+                    match tokio::task::spawn_blocking(|| {
+                        let available_cores = std::thread::available_parallelism()
+                            .map(|n| n.get() as u32)
+                            .unwrap_or(0);
+                        let mut sys = sysinfo::System::new_all();
+                        sys.refresh_all();
+                        let cpu_percent = sys.global_cpu_info().cpu_usage();
+                        let memory_available_mb = sys.available_memory() / (1024 * 1024);
+                        plexspaces_proto::node::v1::NodeResourceHints {
+                            cpu_percent,
+                            memory_available_mb,
+                            available_cores,
+                        }
                     })
-                };
+                    .await
+                    {
+                        Ok(hints) => Some(hints),
+                        Err(_) => None, // spawn_blocking panicked — return pong without hints
+                    };
                 let pong = WsFrame {
                     request_id,
                     payload: Some(ws_frame::Payload::NodePingResponse(

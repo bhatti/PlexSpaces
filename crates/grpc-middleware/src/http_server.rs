@@ -45,6 +45,19 @@ use tower::Service;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::timeout::TimeoutLayer;
 
+/// Default TCP accept-queue depth.
+///
+/// macOS caps `listen(2)` backlog at `kern.ipc.somaxconn` (128 by default).
+/// Override at runtime with `PLEXSPACES_TCP_BACKLOG=<n>` to match the OS limit
+/// (`sudo sysctl -w kern.ipc.somaxconn=4096` on macOS,
+///  already 4096+ on Linux 5.4+).
+///
+/// The backlog only covers the *accept queue* — the rate-limiting bottleneck is
+/// the work done per connection once accepted (SWIM, WsRegistry, etc.).
+/// A backlog of 1024 is more than enough for any realistic burst; larger values
+/// waste kernel memory and mask underlying throughput problems.
+const DEFAULT_TCP_BACKLOG: u32 = 1024;
+
 /// mTLS configuration for the gRPC/HTTP server.
 #[derive(Clone)]
 pub struct MtlsServerConfig {
@@ -107,6 +120,42 @@ impl MtlsServerConfig {
 
         Ok(Arc::new(config))
     }
+}
+
+/// Create a `TcpListener` with `SO_REUSEADDR` and a custom accept-queue depth.
+///
+/// Using `socket2` gives us control over the `listen(2)` backlog, which Tokio's
+/// `TcpListener::bind` exposes only as the OS default (`SOMAXCONN`).  On macOS
+/// that default is 128; under a 50-VU burst all slots fill instantly and new
+/// SYNs are dropped, causing exponential-backoff retries (1 s, 3 s …) visible
+/// as 4 s+ upgrade latency in k6.
+///
+/// The kernel silently clamps `backlog` to `somaxconn`, so passing 1024 on an
+/// untuned macOS box behaves identically to the current code — the improvement
+/// is only realised once the operator raises `kern.ipc.somaxconn` or on Linux
+/// where the kernel default is already 4096.
+fn bind_tcp_listener(addr: SocketAddr, backlog: u32) -> std::io::Result<TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+
+    let domain = if addr.is_ipv6() {
+        Domain::IPV6
+    } else {
+        Domain::IPV4
+    };
+    let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_reuse_address(true)?;
+    // SO_REUSEPORT allows multiple sockets on the same port for load balancing
+    // across Tokio worker threads on Linux (no-op on macOS where the kernel
+    // still serialises accept, but harmless).
+    #[cfg(unix)]
+    socket.set_reuse_port(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(backlog as i32)?;
+
+    // Convert to a Tokio TcpListener without rebinding.
+    let std_listener: std::net::TcpListener = socket.into();
+    TcpListener::from_std(std_listener)
 }
 
 /// Public return type for the TLS server (listener + router + optional TLS acceptor).
@@ -185,6 +234,12 @@ impl GrpcHttpServerBuilder {
     ///
     /// Returns `(TcpListener, Router<()>)`. Caller drives with
     /// `axum::serve(listener, app).await`.
+    ///
+    /// The TCP listener is created via `socket2` so we can set:
+    /// - `SO_REUSEADDR`: allows fast server restart without TIME_WAIT delays
+    /// - Custom backlog: defaults to `DEFAULT_TCP_BACKLOG` (1024), overridable
+    ///   via `PLEXSPACES_TCP_BACKLOG` env var (capped at the OS `somaxconn`
+    ///   ceiling automatically by the kernel)
     pub async fn build(self) -> Result<(TcpListener, Router), ServerBuildError> {
         let grpc_router: Router = match self.routes {
             Some(routes) => routes.into_axum_router(),
@@ -206,12 +261,15 @@ impl GrpcHttpServerBuilder {
 
         let app = grpc_router.merge(http_with_timeout).layer(cors);
 
-        let listener = TcpListener::bind(self.addr)
-            .await
-            .map_err(|e| ServerBuildError::Bind {
-                addr: self.addr,
-                source: e,
-            })?;
+        let backlog = std::env::var("PLEXSPACES_TCP_BACKLOG")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(DEFAULT_TCP_BACKLOG);
+
+        let listener = bind_tcp_listener(self.addr, backlog).map_err(|e| ServerBuildError::Bind {
+            addr: self.addr,
+            source: e,
+        })?;
 
         Ok((listener, app))
     }

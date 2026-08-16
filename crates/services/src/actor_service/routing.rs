@@ -80,30 +80,45 @@ impl ActorServiceImpl {
         // Generate a ULID instance name for anonymous (bare-type) activation.
         let actor_name = ulid::Ulid::new().to_string();
 
-        let type_metadata = virtual_actor_manager
-            .get_virtual_actor_type(actor_type)
-            .await
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "No actors found for type '{}' in tenant '{}', namespace '{}'",
-                    actor_type,
-                    ctx.tenant_id(),
-                    ctx.namespace()
-                ))
-            })?;
+        // Try registered virtual type first (most common hot path).
+        if let Some(type_metadata) = virtual_actor_manager.get_virtual_actor_type(actor_type).await {
+            let target_actor_id = self.build_canonical_actor_id(
+                &actor_name,
+                actor_type,
+                type_metadata.namespace(),
+                &self.local_node_id,
+            )?;
+            virtual_actor_manager
+                .prime_instance_from_definition(&target_actor_id, &type_metadata)
+                .await;
+            return Ok(target_actor_id.to_string());
+        }
 
-        let target_actor_id = self.build_canonical_actor_id(
-            &actor_name,
+        // Fallback: look up actor_type as a named virtual actor definition (e.g.
+        // a WASM app registers a definition named "audit-log-test" whose real actor_type
+        // is "audit_log_test_wasm").  The bare name is used as both the instance name and
+        // the lookup key, producing a stable singleton-style canonical ID.
+        let namespace = ctx.namespace().to_string();
+        if let Some(def) = virtual_actor_manager.get_virtual_actor_definition(&namespace, actor_type).await {
+            let real_actor_type = def.spec.identity.as_ref().map(|id| id.actor_type.as_str()).unwrap_or(actor_type);
+            let target_actor_id = self.build_canonical_actor_id(
+                actor_type,
+                real_actor_type,
+                &namespace,
+                &self.local_node_id,
+            )?;
+            virtual_actor_manager
+                .prime_instance_from_definition(&target_actor_id, &def)
+                .await;
+            return Ok(target_actor_id.to_string());
+        }
+
+        Err(Status::not_found(format!(
+            "No actors found for type '{}' in tenant '{}', namespace '{}'",
             actor_type,
-            type_metadata.namespace(),
-            &self.local_node_id,
-        )?;
-
-        virtual_actor_manager
-            .prime_instance_from_definition(&target_actor_id, &type_metadata)
-            .await;
-
-        Ok(target_actor_id.to_string())
+            ctx.tenant_id(),
+            ctx.namespace()
+        )))
     }
 
     /// Resolves a canonical actor ID from a client-supplied target string.
@@ -193,7 +208,7 @@ impl ActorServiceImpl {
                     return Some(candidate_id.to_string());
                 }
 
-                // Step 3: look up actor_type as a named virtual actor definition slot.
+                // Step 3a: look up actor_type as a named virtual actor definition slot.
                 // Handles WASM apps where multiple named roles share one behavior class:
                 // "alerts:channel" → instance_name="alerts", actor_type="channel"
                 // "channel" is a named definition whose actor_type provides the real behavior.
@@ -204,7 +219,25 @@ impl ActorServiceImpl {
                         return Some(real_id.to_string());
                     }
                 }
+
+                // Step 3b: look up instance_name as a named virtual actor definition slot.
+                // Handles the "definition_name:instance_id" pattern where the left side is the
+                // definition name (e.g. "weather") and the right side is the specific instance
+                // (e.g. "session-1"): "weather:session-1" → "session-1//weather_actor_wasm::ns@node"
+                if let Some(def) = manager.get_virtual_actor_definition(&namespace, instance_name).await {
+                    let real_actor_type = def.spec.identity.as_ref().map(|id| id.actor_type.as_str()).unwrap_or(instance_name);
+                    if let Ok(real_id) = self.build_canonical_actor_id(actor_type, real_actor_type, &namespace, &self.local_node_id) {
+                        manager.prime_instance_from_definition(&real_id, &def).await;
+                        return Some(real_id.to_string());
+                    }
+                }
             }
+
+            // Step 4: all dynamic lookups missed — caller supplied both instance name and actor
+            // type explicitly (e.g. "weather:weather_actor_wasm"), so build the canonical ID
+            // directly.  The actor may not be live yet; the caller is responsible for
+            // activating it (e.g. via ActorRegistry::tell/ask).
+            return Some(candidate_id.to_string());
         }
 
         None
@@ -277,10 +310,21 @@ impl ActorServiceImpl {
         wait_for_response: bool,
         timeout: Option<Duration>,
     ) -> Result<(String, String, Option<Message>), Status> {
-        let requested_target = self
-            .canonical_actor_id_from_client_target(&ctx, requested_actor_type)
-            .await
-            .unwrap_or_else(|| requested_actor_type.to_string());
+        // If the target already looks like a canonical ID, skip resolution.
+        let requested_target = if requested_actor_type.contains("//") {
+            requested_actor_type.to_string()
+        } else {
+            self.canonical_actor_id_from_client_target(&ctx, requested_actor_type)
+                .await
+                .ok_or_else(|| {
+                    Status::not_found(format!(
+                        "Actor '{}' not found in tenant '{}', namespace '{}'",
+                        requested_actor_type,
+                        ctx.tenant_id(),
+                        ctx.namespace()
+                    ))
+                })?
+        };
         Self::set_message_receiver_id(&mut message, &requested_target);
 
         self.route_message(

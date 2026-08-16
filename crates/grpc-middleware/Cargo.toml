@@ -75,6 +75,9 @@ tempfile = "3.10"
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 
+# TCP listener tuning (SO_REUSEADDR, custom backlog)
+socket2 = "0.5"
+
 [dev-dependencies]
 tokio-test = "0.4"
 hyper = "1.0"

@@ -2952,3 +2952,114 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
         "activation_strategy in VirtualActorMetadata must be Lazy"
     );
 }
+
+/// Regression test: LRU eviction must not cause concurrent activation timeouts.
+///
+/// When the pool is full and multiple VUs concurrently activate unique virtual actors,
+/// the eviction + stop path must complete fast enough that activations return within
+/// a tight deadline.  Before the fix, the activation guard winner held the
+/// active_instances_by_type write lock while calling stop_actor (which re-acquired the
+/// same write lock), causing a re-entrant deadlock that only resolved via HTTP timeout.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_lru_eviction_does_not_stall_concurrent_activations() {
+    let (node, _db_dir) = build_test_node("evict-test-node").await;
+    let service_locator = node.service_locator();
+    let actor_type = "counter-evict";
+    let namespace = "evict-ns";
+    let tenant_id = "test-tenant";
+
+    register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
+
+    let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            actor_type.to_string(),
+            None,
+            namespace.to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "5m",
+                    "activation_strategy": "lazy"
+                }
+            }),
+            Some(tenant_id.to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Set a small pool so eviction fires after just 3 active actors.
+    virtual_actor_manager.set_max_pool_per_actor_type(3).await;
+
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "evict-test-node".to_string(),
+    ));
+
+    let invoke = |name: String| {
+        let svc = actor_service.clone();
+        let ns = namespace.to_string();
+        let at = actor_type.to_string();
+        let tid = tenant_id.to_string();
+        async move {
+            let start = std::time::Instant::now();
+            let result = invoke_virtual_actor(
+                &svc,
+                &tid,
+                &ns,
+                &name,
+                &at,
+                "POST",
+                serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+                HashMap::new(),
+                true,
+            )
+            .await;
+            (name, result, start.elapsed())
+        }
+    };
+
+    // Phase 1: fill the pool serially so eviction fires predictably.
+    for i in 0..5usize {
+        let name = format!("evict-serial-{}", i);
+        let (n, result, elapsed) = invoke(name).await;
+        assert!(
+            result.is_ok(),
+            "serial activation {} failed: {:?}",
+            n,
+            result.err()
+        );
+        // Each activation must complete well under 5s even with the 100ms stop sleep.
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "serial activation {} took {:?} — expected < 5s",
+            n,
+            elapsed
+        );
+    }
+
+    // Phase 2: 8 concurrent activations (pool=3, all new unique names → eviction on every call).
+    // None of them should time out — the deadline is 10s per activation.
+    let mut handles = Vec::new();
+    for i in 0..8usize {
+        let name = format!("evict-concurrent-{}", i);
+        handles.push(tokio::spawn(invoke(name)));
+    }
+
+    let deadline = Duration::from_secs(10);
+    for handle in handles {
+        let (name, result, elapsed) = handle.await.expect("task should not panic");
+        assert!(
+            result.is_ok(),
+            "concurrent activation {} failed: {:?}",
+            name,
+            result.err()
+        );
+        assert!(
+            elapsed < deadline,
+            "concurrent activation {} took {:?} — LRU eviction is stalling activations",
+            name,
+            elapsed
+        );
+    }
+}

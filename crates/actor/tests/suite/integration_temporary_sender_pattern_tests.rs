@@ -393,42 +393,36 @@ impl GenServer for ForwarderActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        // Forward the request to target actor
-        let node_id = self
-            .target_actor_id
-            .split('@')
-            .nth(1)
-            .unwrap_or("unknown")
-            .to_string();
-        let target_ref = ActorRef::remote(
-            self.target_actor_id.clone(),
-            ctx.tenant_id.clone(), // tenant_id
-            ctx.namespace.clone(), // namespace
-            node_id,
-            ctx.service_locator.clone(),
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
         let request: CounterMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
 
-        // Forward request to target actor using ask()
-        // Get forwarder's own actor ID from context
+        let target_id = ActorId::from_canonical(&self.target_actor_id)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Bad target id: {}", e)))?;
+
         let forwarder_id = ctx
             .self_ref()
             .map(|r| r.id().to_string())
             .unwrap_or_else(|| msg.receiver_id.clone());
         let mut forward_msg = create_test_message(serde_json::to_vec(&request).unwrap());
         forward_msg.receiver_id = self.target_actor_id.clone();
-        forward_msg.sender_id = forwarder_id; // Use forwarder's own ID as sender
+        forward_msg.sender_id = forwarder_id;
         forward_msg.message_type = "call".to_string();
 
         let routing_ctx = plexspaces_actor::RequestContext::new_without_auth(
             ctx.tenant_id.clone(),
             ctx.namespace.clone(),
         );
-        let reply = target_ref
-            .ask(&routing_ctx, forward_msg, Duration::from_secs(5))
+
+        // Use ActorRegistry.ask() — it routes locally for actors registered on this node and
+        // via gRPC for genuinely remote actors.  This avoids the ActorRef::remote restriction
+        // that rejects refs pointing at the local node.
+        let registry = ctx
+            .service_locator
+            .actor_registry()
+            .await
+            .ok_or_else(|| BehaviorError::ProcessingError("ActorRegistry unavailable".into()))?;
+        let reply = registry
+            .ask(&routing_ctx, &target_id, forward_msg, Duration::from_secs(5))
             .await
             .map_err(|e| BehaviorError::ProcessingError(format!("Forward ask failed: {}", e)))?;
 
@@ -636,14 +630,13 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
                         if !msg.correlation_id.is_empty() {
                             reply_msg.correlation_id = msg.correlation_id.clone();
                         }
-                        // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
-                        // This ensures proper routing to ReplyWaiter
+                        // Use ActorRegistry.tell() to route to temporary senders
+                        // (lookup_actor does not find temporary senders; tell() dispatches
+                        //  them via PendingAsks.resolve() which is what ask() waits on)
                         if let Ok(sender_id) = ActorId::from_canonical(sender) {
-                            if let Some(sender_ref) =
-                                actor_registry1_clone.lookup_actor(&sender_id).await
-                            {
-                                let _ = sender_ref.tell(&reply_ctx, reply_msg).await;
-                            }
+                            let _ = actor_registry1_clone
+                                .tell(&reply_ctx, &sender_id, reply_msg)
+                                .await;
                         }
                     }
                 }
@@ -788,14 +781,13 @@ async fn test_chained_asks_multi_node() {
                         if !msg.correlation_id.is_empty() {
                             reply_msg.correlation_id = msg.correlation_id.clone();
                         }
-                        // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
-                        // This ensures proper routing to ReplyWaiter
+                        // Use ActorRegistry.tell() to route to temporary senders
+                        // (lookup_actor does not find temporary senders; tell() dispatches
+                        //  them via PendingAsks.resolve() which is what ask() waits on)
                         if let Ok(sender_id) = ActorId::from_canonical(sender) {
-                            if let Some(sender_ref) =
-                                actor_registry1_clone.lookup_actor(&sender_id).await
-                            {
-                                let _ = sender_ref.tell(&reply_ctx, reply_msg).await;
-                            }
+                            let _ = actor_registry1_clone
+                                .tell(&reply_ctx, &sender_id, reply_msg)
+                                .await;
                         }
                     }
                 }
@@ -938,14 +930,13 @@ async fn test_concurrent_asks_multi_node() {
                         if !msg.correlation_id.is_empty() {
                             reply_msg.correlation_id = msg.correlation_id.clone();
                         }
-                        // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
-                        // This ensures proper routing to ReplyWaiter
+                        // Use ActorRegistry.tell() to route to temporary senders
+                        // (lookup_actor does not find temporary senders; tell() dispatches
+                        //  them via PendingAsks.resolve() which is what ask() waits on)
                         if let Ok(sender_id) = ActorId::from_canonical(sender) {
-                            if let Some(sender_ref) =
-                                actor_registry1_clone.lookup_actor(&sender_id).await
-                            {
-                                let _ = sender_ref.tell(&reply_ctx, reply_msg).await;
-                            }
+                            let _ = actor_registry1_clone
+                                .tell(&reply_ctx, &sender_id, reply_msg)
+                                .await;
                         }
                     }
                 }
@@ -953,21 +944,11 @@ async fn test_concurrent_asks_multi_node() {
         }
     });
 
-    // Create ActorRef for remote counter using local_node_id (triggers "local via remote" path)
-    let counter_ref = ActorRef::remote(
-        counter_id.clone(),
-        "test".to_string(),        // tenant_id
-        "default".to_string(),     // namespace
-        local_node_id.to_string(), // Matches local_node_id, so "local via remote" path is used
-        node1_service_locator.clone(),
-        ActorVisibility::ActorVisibilityPublic,
-    );
-
-    // ACT: Spawn 10 concurrent ask() calls
+    // ACT: Spawn 10 concurrent ask() calls via ActorRegistry (handles local routing correctly)
     let mut handles = vec![];
     for i in 0..10 {
-        let counter_ref_clone = counter_ref.clone();
-        let counter_ref_id = counter_ref.id().to_string();
+        let registry_clone = actor_registry1.clone();
+        let counter_id_clone = counter_id.clone();
         let ask_ctx = plexspaces_actor::RequestContext::new_without_auth(
             "test".to_string(),
             "default".to_string(),
@@ -976,11 +957,12 @@ async fn test_concurrent_asks_multi_node() {
             let request = CounterMessage::Increment;
             let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());
             msg.message_type = "call".to_string();
-            msg.receiver_id = counter_ref_id;
+            msg.receiver_id = counter_id_clone.to_string();
 
-            let reply = counter_ref_clone
-                .ask(&ask_ctx, msg, Duration::from_secs(10))
-                .await;
+            let reply = registry_clone
+                .ask(&ask_ctx, &counter_id_clone, msg, Duration::from_secs(10))
+                .await
+                .map_err(|e| plexspaces_actor::ActorRefError::SendFailed(e.to_string()));
             (i, reply)
         });
         handles.push(handle);

@@ -59,6 +59,9 @@ from .proto_wire import (
 # Global reference to actual host module (set by runtime)
 _host_impl = None
 
+# Whether host initialization has been attempted (prevents re-init)
+_host_init_attempted = False
+
 # Whether the host is a real WIT host (payload = list<u8> = bytes) or mock (string)
 _host_is_wit = False
 
@@ -994,7 +997,14 @@ class EventLog:
         key = f"{prefix}seq:{self.watermark}"
         try:
             serialized = json.dumps(entry)
-            _get_host_kv().kv_put(key, _to_payload_bytes(serialized))
+            result = _get_host_kv().kv_put(key, _to_payload_bytes(serialized))
+            if isinstance(result, (str, bytes)):
+                r = result.decode("utf-8") if isinstance(result, bytes) else result
+                if r.startswith("ERROR:"):
+                    raise RuntimeError(r)
+        except RuntimeError:
+            self.watermark -= 1
+            raise
         except Exception as e:
             self.watermark -= 1
             raise RuntimeError(f"EventLog.append: {e}") from e
@@ -2101,6 +2111,80 @@ class Host:
             if isinstance(result, str) and result.startswith("ERROR:"):
                 raise RuntimeError(result)
             return json.loads(result)
+
+    def kv_list(self, prefix: str = "") -> str:
+        """List KV keys with optional prefix. Returns JSON array string."""
+        raw = _get_host_kv().kv_list(prefix)
+        if raw is None:
+            return "[]"
+        if isinstance(raw, list):
+            return json.dumps(raw)
+        if isinstance(raw, (bytes, bytearray)):
+            raw = _from_payload_bytes(raw)
+        return raw if raw else "[]"
+
+    def kv_put_json(self, key: str, value: Any) -> None:
+        """Serialize value as JSON and store under key. Raises ValueError/TypeError on unmarshalable input."""
+        serialized = json.dumps(value)
+        _get_host_kv().kv_put(key, _to_payload_bytes(serialized))
+
+    def kv_get_json(self, key: str) -> Optional[Any]:
+        """Get a JSON-serialized value by key. Returns None if not found or invalid JSON."""
+        raw = _from_payload_bytes(_get_host_kv().kv_get(key))
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def http_fetch(
+        self,
+        link_name: str,
+        method: str,
+        path_and_query: str,
+        headers: Optional[Dict[str, str]] = None,
+        body: Optional[Union[str, bytes]] = None,
+    ) -> Dict[str, Any]:
+        """Execute an outbound HTTP request via a named service link."""
+        return _http_fetch(link_name, method, path_and_query, headers, body)
+
+    def lock_acquire(
+        self,
+        tenant_id: str,
+        namespace: str,
+        holder_id: str,
+        lock_name: str,
+        lease_duration_secs: int = 30,
+        timeout_ms: int = 0,
+    ) -> str:
+        """Acquire a distributed lock. Returns JSON string with lock details."""
+        result = _get_host_locks().lock_acquire(holder_id, lock_name, lease_duration_secs, timeout_ms)
+        return _decode_lock_payload(bytes(result) if result else b"")
+
+    def lock_release(
+        self,
+        lock_id: str,
+        tenant_id: str,
+        namespace: str,
+        holder_id: str,
+        lock_version: str,
+    ) -> None:
+        """Release a held distributed lock."""
+        _get_host_locks().lock_release(lock_id, holder_id, lock_version)
+
+    def lock_renew(
+        self,
+        lock_id: str,
+        tenant_id: str,
+        namespace: str,
+        holder_id: str,
+        lock_version: str,
+        lease_duration_secs: int = 30,
+    ) -> str:
+        """Renew a distributed lock lease. Returns JSON string with updated lock details."""
+        result = _get_host_locks().lock_renew(lock_id, holder_id, lock_version, lease_duration_secs)
+        return _decode_lock_payload(bytes(result) if result else b"")
 
     def send_after(self, delay_ms: int, msg_type: str, payload: Any = None) -> str:
         """

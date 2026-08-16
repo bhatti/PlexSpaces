@@ -2388,16 +2388,29 @@ async fn initialize_services_impl(
         }
     }
 
-    if let Some(ref default_virtual_actor_config) =
-        final_runtime_config.default_virtual_actor_config
     {
-        use plexspaces_common::virtual_actor_config::get_max_pool_per_actor_type;
-        let max_pool = get_max_pool_per_actor_type(Some(default_virtual_actor_config));
+        use plexspaces_common::virtual_actor_config::{
+            get_max_pool_per_actor_type, DEFAULT_MAX_POOL_PER_ACTOR_TYPE,
+        };
+        let config_pool = final_runtime_config
+            .default_virtual_actor_config
+            .as_ref()
+            .map(|c| get_max_pool_per_actor_type(Some(c)))
+            .unwrap_or(DEFAULT_MAX_POOL_PER_ACTOR_TYPE);
+        // PLEXSPACES_MAX_VIRTUAL_POOL env var overrides release.yaml (0 = unlimited).
+        let max_pool = match std::env::var("PLEXSPACES_MAX_VIRTUAL_POOL")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            Some(0) => u32::MAX,
+            Some(n) => n,
+            None => config_pool,
+        };
         if let Some(manager) = service_locator.virtual_actor_manager().await {
             manager.set_max_pool_per_actor_type(max_pool).await;
             tracing::info!(
                 max_pool_per_actor_type = max_pool,
-                "VirtualActorManager max_pool_per_actor_type set from RuntimeConfig"
+                "VirtualActorManager max_pool_per_actor_type set"
             );
         }
     }

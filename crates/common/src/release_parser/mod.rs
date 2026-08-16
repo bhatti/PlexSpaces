@@ -542,7 +542,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             cluster_seed_nodes: toml.node.cluster_seed_nodes,
             grpc_connection_pool_size: 2,               // Default
             max_connections: 100,                       // Default
-            heartbeat_interval_ms: 5000,                // Default
+            heartbeat_interval_ms: 10000,                // Default
             clustering_enabled: true,                   // Default
             metadata: std::collections::HashMap::new(), // Default
             node_registry: None,
@@ -1201,7 +1201,7 @@ mod tests {
                 cluster_seed_nodes: vec![],
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
-                heartbeat_interval_ms: 5000,
+                heartbeat_interval_ms: 10000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
@@ -1354,7 +1354,7 @@ mod tests {
                 cluster_seed_nodes: vec![],
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
-                heartbeat_interval_ms: 5000,
+                heartbeat_interval_ms: 10000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
@@ -1477,7 +1477,7 @@ mod tests {
                 cluster_seed_nodes: vec![],
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
-                heartbeat_interval_ms: 5000,
+                heartbeat_interval_ms: 10000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
@@ -1623,7 +1623,7 @@ mod tests {
                 cluster_seed_nodes: vec![],
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
-                heartbeat_interval_ms: 5000,
+                heartbeat_interval_ms: 10000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
@@ -1725,7 +1725,7 @@ mod tests {
                 cluster_seed_nodes: vec![],
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
-                heartbeat_interval_ms: 5000,
+                heartbeat_interval_ms: 10000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
@@ -1809,7 +1809,7 @@ mod tests {
                 cluster_seed_nodes: vec![],
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
-                heartbeat_interval_ms: 5000,
+                heartbeat_interval_ms: 10000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,

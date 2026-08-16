@@ -49,6 +49,7 @@ ulid = { workspace = true }
 chrono = { workspace = true }
 libc = "0.2"  # For signal handling in shutdown coordinator
 sysinfo = "0.30"  # For system resource metrics (CPU, memory, disk)
+dashmap = "5"  # Sharded concurrent map for WsRegistry (replaces single RwLock<HashMap>)
 rand = "0.8"
 regex = "1.10"  # For config key pattern matching
 

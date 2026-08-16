@@ -123,7 +123,7 @@ impl NodeBuilder {
     /// Set the heartbeat interval in milliseconds
     ///
     /// ## Arguments
-    /// * `interval_ms` - Heartbeat interval in milliseconds (default: 5000)
+    /// * `interval_ms` - Heartbeat interval in milliseconds (default: 10000)
     ///
     /// ## Example
     /// ```rust,ignore
@@ -413,7 +413,7 @@ impl NodeBuilder {
     /// ## Defaults
     /// - Listen address: "0.0.0.0:8000" if not provided
     /// - Max connections: 100 if not provided
-    /// - Heartbeat interval: 5000ms if not provided
+    /// - Heartbeat interval: 10000ms if not provided
     /// - Clustering: enabled if not provided
     ///
     /// ## Services Initialization
@@ -559,11 +559,12 @@ mod tests {
         let node = NodeBuilder::new(NodeId::new("test-node")).build().await;
 
         assert_eq!(node.id().as_str(), "test-node");
-        // Verify default config
+        // Verify default config.  heartbeat_interval_ms is 0 until config_manager::initialize()
+        // resolves it; that resolution only happens during Node::start() (not build()).
         let config = node.config();
         assert_eq!(config.listen_addr, "0.0.0.0:8000");
         assert_eq!(config.max_connections, 100);
-        assert_eq!(config.heartbeat_interval_ms, 5000);
+        assert_eq!(config.heartbeat_interval_ms, 0);
         assert!(config.clustering_enabled);
     }
 

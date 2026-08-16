@@ -14,5 +14,5 @@ restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenServer"
 facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "eager" } }
 ]

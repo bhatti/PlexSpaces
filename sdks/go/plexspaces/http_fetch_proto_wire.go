@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-// encodeHttpFetchRequestWire builds HttpFetchRequest: map headers (field 1), body (field 2).
+// encodeHttpFetchRequestWire builds HttpFetchRequest: map headers (field 2), body (field 3).
 func encodeHttpFetchRequestWire(headers map[string]string, body []byte) ([]byte, error) {
 	var buf []byte
 	for k, v := range headers {
@@ -23,12 +23,12 @@ func encodeHttpFetchRequestWire(headers map[string]string, body []byte) ([]byte,
 		var entry []byte
 		entry = appendLengthDelimited(entry, 1, []byte(k))
 		entry = appendLengthDelimited(entry, 2, []byte(v))
-		buf = appendLengthDelimited(buf, 1, entry)
+		buf = appendLengthDelimited(buf, 2, entry)
 	}
 	if body == nil {
 		body = []byte{}
 	}
-	buf = appendLengthDelimited(buf, 2, body)
+	buf = appendLengthDelimited(buf, 3, body)
 	return buf, nil
 }
 
@@ -50,14 +50,14 @@ func decodeHttpFetchResponseWire(data []byte) (map[string]any, error) {
 		fn := int(tag >> 3)
 		wt := tag & 7
 		switch {
-		case fn == 1 && wt == 0:
+		case fn == 2 && wt == 0:
 			v, m, err := readVarint(data, pos)
 			if err != nil {
 				return nil, err
 			}
 			pos += m
 			out["status"] = float64(v)
-		case fn == 2 && wt == 2:
+		case fn == 3 && wt == 2:
 			sl, np, err := readLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
@@ -68,7 +68,7 @@ func decodeHttpFetchResponseWire(data []byte) (map[string]any, error) {
 				return nil, err
 			}
 			headers[k] = v
-		case fn == 3 && wt == 2:
+		case fn == 4 && wt == 2:
 			sl, np, err := readLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err

@@ -1070,7 +1070,15 @@ impl ActorRegistry {
             // We are the winner. Queue our message, then activate.
             manager.queue_message(ctx, actor_id, message).await;
 
-            let actor_factory = self.require_actor_factory().await?;
+            // Resolve actor_factory before activating. On error, release the guard
+            // first so waiters are never left hanging — then propagate the error.
+            let actor_factory = match self.require_actor_factory().await {
+                Ok(f) => f,
+                Err(e) => {
+                    manager.release_activation_guard(actor_id);
+                    return Err(e);
+                }
+            };
             let activate_result = actor_factory.activate_virtual_actor(actor_id).await;
             // Always release so waiters unblock, even on failure.
             manager.release_activation_guard(actor_id);

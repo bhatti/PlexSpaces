@@ -140,12 +140,12 @@ pub const ENV_REDIS_NAMESPACE: &str = "PLEXSPACES_REDIS_NAMESPACE";
 /// Connection pool size
 pub const ENV_POOL_SIZE: &str = "PLEXSPACES_POOL_SIZE";
 
-/// Node heartbeat interval in milliseconds (default: 5000)
-/// Override for load tests or tuning: PLEXSPACES_HEARTBEAT_INTERVAL_MS=15000
+/// Node heartbeat interval in milliseconds (default: 10000)
+/// Override for load tests: PLEXSPACES_HEARTBEAT_INTERVAL_MS=30000
 pub const ENV_HEARTBEAT_INTERVAL_MS: &str = "PLEXSPACES_HEARTBEAT_INTERVAL_MS";
 
-/// Default heartbeat interval in milliseconds
-pub const DEFAULT_HEARTBEAT_INTERVAL_MS: u64 = 5000;
+/// Default heartbeat interval in milliseconds (10 seconds)
+pub const DEFAULT_HEARTBEAT_INTERVAL_MS: u64 = 10000;
 
 // ============================================================================
 // KeyValue-specific Environment Variables

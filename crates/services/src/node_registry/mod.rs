@@ -1846,6 +1846,40 @@ impl NodeRegistryTrait for NodeRegistry {
             }
         }
 
+        // Merge currently-connected thin nodes from WsRegistry.
+        //
+        // Thin nodes skip the SQLite heartbeat path (see send_heartbeat), so their
+        // ObjectRegistry entries are never updated after initial registration and will
+        // eventually fall below the recent_node_registrations_from_registry recency
+        // window. SWIM entries persist until gossip declares them Dead, but a
+        // standalone (non-clustered) node has gossip disabled so SWIM entries live
+        // forever — the correct liveness signal is the open WS socket.
+        //
+        // WsRegistry.list_thin_nodes() returns only currently-connected node IDs.
+        // We synthesise a minimal NodeRegistration for each and insert it into
+        // nodes_by_id so the result is always authoritative for thin clients.
+        // Any richer registration data already in the map (from SWIM/cache/ObjectRegistry)
+        // takes precedence via `or_insert` semantics.
+        {
+            let sl_guard = self.service_locator.read().await;
+            if let Some(ref sl) = *sl_guard {
+                if let Some(ws_reg) = sl.get_ws_registry().await {
+                    for node_id in ws_reg.list_thin_nodes().await {
+                        nodes_by_id.entry(node_id.clone()).or_insert_with(|| {
+                            NodeRegistration {
+                                node_id: node_id.clone(),
+                                // Thin nodes have no inbound gRPC address; use the ws:// URI
+                                // that register_node writes so address-dedup logic stays consistent.
+                                node_address: format!("ws://{}", node_id),
+                                node_role: plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32,
+                                ..Default::default()
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
         let mut nodes_by_address: HashMap<String, NodeRegistration> = HashMap::new();
         for registration in nodes_by_id.into_values() {
             let address_key = canonical_node_address_key(&registration.node_address);
@@ -1897,46 +1931,65 @@ impl NodeRegistryTrait for NodeRegistry {
             }
         }
 
-        // Always refresh the ObjectRegistry heartbeat.
-        // register_node() always writes to ObjectRegistry regardless of use_shared_db, so
-        // the heartbeat must also always be refreshed there — otherwise scan_stale_object_heartbeats
-        // marks the local node Dead after 3× heartbeat_interval.
-        // For use_shared_db=true we apply DB-backoff retry; for in-memory we call directly.
-        let object_registry = self.object_registry.clone();
-        let node_id_owned = node_id.to_string();
-        let capacity_clone = capacity.clone();
-        let heartbeat_timestamp_clone = heartbeat_timestamp;
-        let system_ctx = self.system_registry_context(None).await;
-
-        let refresh_result = if self.config.use_shared_db {
-            self.with_db_backoff("heartbeat", || {
-                let registry = object_registry.clone();
-                let ctx = system_ctx.clone();
-                let nid = node_id_owned.clone();
-                let cap = capacity_clone.clone();
-                let ts = heartbeat_timestamp_clone;
-                async move {
-                    Self::refresh_node_heartbeat_in_registry(&registry, &ctx, &nid, ts, cap).await
-                }
+        // Thin nodes (WS-only) must not write SQLite on every heartbeat.
+        //
+        // At 100k thin-node connections × 1 heartbeat/5 s = 20k SQLite writes/s, all
+        // serialised through a pool of max_connections=1.  Thin-node liveness is
+        // authoritatively tracked by WsRegistry (open socket ↔ alive); the ObjectRegistry
+        // heartbeat timestamp is only used by scan_stale_object_heartbeats to evict *full*
+        // nodes that silently disappear.  Thin nodes are cleaned up when their WS socket
+        // closes (unregister_node is called from ws_routes.rs on every disconnect), so
+        // the SQLite heartbeat path adds no safety for them — only throughput cost.
+        let is_thin_node = self
+            .swim
+            .get_member(node_id)
+            .await
+            .map(|m| {
+                m.metadata.get(SWIM_NODE_TYPE_KEY).map(|s| s.as_str())
+                    == Some(SWIM_NODE_TYPE_THIN)
             })
-            .await
-        } else {
-            Self::refresh_node_heartbeat_in_registry(
-                &object_registry,
-                &system_ctx,
-                &node_id_owned,
-                heartbeat_timestamp_clone,
-                capacity_clone,
-            )
-            .await
-        };
+            .unwrap_or(false);
 
-        if let Err(e) = refresh_result {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!(
-                    "Heartbeat ObjectRegistry update failed (non-critical): {}",
-                    e
-                );
+        if !is_thin_node {
+            // Full nodes: always refresh the ObjectRegistry heartbeat so
+            // scan_stale_object_heartbeats does not mark them Dead.
+            let object_registry = self.object_registry.clone();
+            let node_id_owned = node_id.to_string();
+            let capacity_clone = capacity.clone();
+            let heartbeat_timestamp_clone = heartbeat_timestamp;
+            let system_ctx = self.system_registry_context(None).await;
+
+            let refresh_result = if self.config.use_shared_db {
+                self.with_db_backoff("heartbeat", || {
+                    let registry = object_registry.clone();
+                    let ctx = system_ctx.clone();
+                    let nid = node_id_owned.clone();
+                    let cap = capacity_clone.clone();
+                    let ts = heartbeat_timestamp_clone;
+                    async move {
+                        Self::refresh_node_heartbeat_in_registry(&registry, &ctx, &nid, ts, cap)
+                            .await
+                    }
+                })
+                .await
+            } else {
+                Self::refresh_node_heartbeat_in_registry(
+                    &object_registry,
+                    &system_ctx,
+                    &node_id_owned,
+                    heartbeat_timestamp_clone,
+                    capacity_clone,
+                )
+                .await
+            };
+
+            if let Err(e) = refresh_result {
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        "Heartbeat ObjectRegistry update failed (non-critical): {}",
+                        e
+                    );
+                }
             }
         }
 

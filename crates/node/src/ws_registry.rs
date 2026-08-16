@@ -33,13 +33,12 @@
 //! `WsRegistry` is constructed in `Node::start()` and injected into all consumers
 //! via `Arc<WsRegistry>`. There are no thread-locals or statics.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
+use dashmap::DashMap;
 use plexspaces_proto::node::v1::NodeRole;
 use plexspaces_proto::transport::ws::v1::WsFrame;
 use tokio::sync::mpsc;
-use tokio::sync::RwLock;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WsSession
@@ -80,20 +79,27 @@ pub struct WsSession {
 /// between WS and gRPC routing. The sender retrieved via `get_sender` is used to
 /// enqueue outbound frames for an active session.
 ///
+/// # Concurrency
+/// Uses `DashMap` (16 shards by default) instead of a single `RwLock<HashMap>`.
+/// Each shard is independently locked, so heartbeats from 20k thin nodes/s do
+/// not contend on a single lock.  All operations are O(1) with shard-level
+/// locking only, and methods remain `async` for API stability even though no
+/// await points are needed.
+///
 /// # Lifecycle
 /// - Created once in `Node::start()` and shared via `Arc<WsRegistry>`.
 /// - `register()` is called by the WS upgrade handler after a successful handshake.
 /// - `unregister()` is called when the socket is closed (normal or abnormal).
 /// - `update_heartbeat()` is called when a heartbeat frame arrives.
 pub struct WsRegistry {
-    sessions: RwLock<HashMap<String, WsSession>>,
+    sessions: DashMap<String, WsSession>,
 }
 
 impl WsRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
         Self {
-            sessions: RwLock::new(HashMap::new()),
+            sessions: DashMap::new(),
         }
     }
 
@@ -102,73 +108,62 @@ impl WsRegistry {
     /// If a session already exists for `session.node_id`, it is replaced
     /// (e.g., reconnect after a transient disconnect).
     pub async fn register(&self, session: WsSession) {
-        let mut sessions = self.sessions.write().await;
-        sessions.insert(session.node_id.clone(), session);
+        self.sessions.insert(session.node_id.clone(), session);
     }
 
     /// Remove the session for `node_id`. No-op if not present.
     pub async fn unregister(&self, node_id: &str) {
-        let mut sessions = self.sessions.write().await;
-        sessions.remove(node_id);
+        self.sessions.remove(node_id);
     }
 
     /// Return the outbound sender for `node_id`, or `None` if not connected.
     pub async fn get_sender(&self, node_id: &str) -> Option<mpsc::Sender<WsFrame>> {
-        let sessions = self.sessions.read().await;
-        sessions.get(node_id).map(|s| s.sender.clone())
+        self.sessions.get(node_id).map(|s| s.sender.clone())
     }
 
     /// Return `true` if `node_id` has an active WS session.
     pub async fn is_connected(&self, node_id: &str) -> bool {
-        let sessions = self.sessions.read().await;
-        sessions.contains_key(node_id)
+        self.sessions.contains_key(node_id)
     }
 
     /// Return all node IDs connected with `NODE_ROLE_THIN`.
     pub async fn list_thin_nodes(&self) -> Vec<String> {
-        let sessions = self.sessions.read().await;
-        sessions
-            .values()
-            .filter(|s| s.role == NodeRole::NodeRoleThin)
-            .map(|s| s.node_id.clone())
+        self.sessions
+            .iter()
+            .filter(|e| e.value().role == NodeRole::NodeRoleThin)
+            .map(|e| e.key().clone())
             .collect()
     }
 
     /// Return all connected node IDs regardless of role.
     pub async fn list_all_nodes(&self) -> Vec<String> {
-        let sessions = self.sessions.read().await;
-        sessions.keys().cloned().collect()
+        self.sessions.iter().map(|e| e.key().clone()).collect()
     }
 
     /// Update the heartbeat timestamp for `node_id`. No-op if not registered.
     pub async fn update_heartbeat(&self, node_id: &str) {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(node_id) {
+        if let Some(mut session) = self.sessions.get_mut(node_id) {
             session.last_heartbeat = Instant::now();
         }
     }
 
-    /// Update heartbeat and return the sender in one write-lock acquisition.
+    /// Update heartbeat and return the sender in a single shard-lock operation.
     ///
-    /// Avoids the double-lock pattern of calling `update_heartbeat` then `get_sender`
-    /// separately (which would release and re-acquire the lock between the two ops).
+    /// With DashMap, `get_mut` holds only the shard lock for `node_id`, so
+    /// this is still a single atomic operation — no double-lock risk.
     pub async fn update_heartbeat_and_get_sender(
         &self,
         node_id: &str,
     ) -> Option<mpsc::Sender<WsFrame>> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(node_id) {
-            session.last_heartbeat = Instant::now();
-            Some(session.sender.clone())
-        } else {
-            None
-        }
+        self.sessions.get_mut(node_id).map(|mut s| {
+            s.last_heartbeat = Instant::now();
+            s.sender.clone()
+        })
     }
 
     /// Return the current session count.
     pub async fn session_count(&self) -> usize {
-        let sessions = self.sessions.read().await;
-        sessions.len()
+        self.sessions.len()
     }
 }
 

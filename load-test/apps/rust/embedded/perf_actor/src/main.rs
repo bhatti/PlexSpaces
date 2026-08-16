@@ -194,6 +194,16 @@ async fn main() {
         .await;
     sl.register_behavior_registry(Arc::new(registry)).await;
 
+    // PERF_MAX_VIRTUAL_POOL: max live virtual actor instances per type (LRU eviction limit).
+    // 0 = unlimited (no eviction, actors accumulate until OOM — use for regular capacity test).
+    // Default 0 (unlimited) so lifecycle and capacity tests both see full scale.
+    // Set to a large value (e.g. 200000) for virtual capacity test to bound RSS while still
+    // demonstrating hundreds of thousands of unique actor activations.
+    let max_virtual_pool: u32 = std::env::var("PERF_MAX_VIRTUAL_POOL")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
     // Register "gen_server" as a virtual actor type so the HTTP routing layer
     // auto-activates any unknown instance name on first request (e.g. "virtual-vuN").
     if let Some(mgr) = sl.virtual_actor_manager().await {
@@ -201,17 +211,23 @@ async fn main() {
             "gen_server".to_string(),
             None,
             "perf-embedded".to_string(),
-            serde_json::json!({ "virtual_actor": { "idle_timeout": "10m", "activation_strategy": "lazy" } }),
+            serde_json::json!({ "virtual_actor": { "idle_timeout": "10m", "activation_strategy": "eager" } }),
             None,
             None,
         )
         .await
         .unwrap_or_else(|e| panic!("failed to register virtual actor type: {e}"));
+
+        // 0 = unlimited: use u32::MAX sentinel so LRU tracking still has a finite cap field.
+        let effective_cap = if max_virtual_pool == 0 { u32::MAX } else { max_virtual_pool };
+        mgr.set_max_pool_per_actor_type(effective_cap).await;
+        info!("Virtual actor pool cap set to {} (0 = unlimited)", max_virtual_pool);
     }
 
     info!("PerfActor embedded node ready on port {port}");
     info!("  Pre-warmed actors:   POST .../perf-embedded/perf-vuN:gen_server/ask");
     info!("  Virtual (on-demand): POST .../perf-embedded/virtual-vuN:gen_server/ask  (auto-activates)");
+    info!("  max_virtual_pool={max_virtual_pool}  warm_count={warm_count}");
 
     tokio::signal::ctrl_c().await.ok();
     node.shutdown(std::time::Duration::from_secs(5)).await;

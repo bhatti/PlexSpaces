@@ -1127,28 +1127,67 @@ impl VirtualActorManager {
             .map(|i| i.actor_id.clone())
             .collect();
 
-        // Remove evicted actors from tracking
+        // Remove evicted actors from active tracking.
         instances.retain(|i| !evicted.contains(&i.actor_id));
 
-        // Deactivate evicted actors while preserving metadata for later reactivation.
-        if let Some(service_locator) = service_locator {
-            for actor_id in &evicted {
+        // Acquire activation guards BEFORE releasing the write lock.
+        // This blocks concurrent callers from activating these actors while we stop them.
+        // If activation is already in flight (another caller won the guard first), skip
+        // that actor — don't race with an active activation — and restore it to tracking.
+        let mut guarded: Vec<ActorId> = Vec::with_capacity(evicted.len());
+        for actor_id in &evicted {
+            let (won, _) = self.try_acquire_activation(actor_id);
+            if won {
+                guarded.push(actor_id.clone());
+            } else {
+                instances.push(ActiveInstance {
+                    actor_id: actor_id.clone(),
+                    last_access: std::time::SystemTime::now(),
+                });
+            }
+        }
+
+        // Drop the write lock now that activation guards are held.
+        // remove_from_active_tracking (via stop_actor) also acquires this write lock;
+        // dropping here prevents a re-entrant deadlock on tokio's non-re-entrant RwLock.
+        drop(active_instances);
+
+        // Stop each guarded actor and mark it as suspended in the metadata.
+        // Per Orleans design, virtual actors are always addressable: instance metadata
+        // is NEVER removed on eviction. last_deactivated marks the actor as passivated
+        // so the next activation knows to re-spawn it from the preserved spec.
+        if let Some(ref service_locator) = service_locator {
+            for actor_id in &guarded {
                 if let Some(actor_factory) = service_locator.get_actor_factory().await {
                     let ctx = service_locator
                         .request_context_for_system_operations()
                         .await;
                     if actor_factory.stop_actor(&ctx, actor_id).await.is_ok() {
+                        // Mark as deactivated (not removed — metadata survives for reactivation).
+                        let now = std::time::SystemTime::now();
+                        let mut virtual_actors = self.registry.virtual_actors().write().await;
+                        if let Some(meta) = virtual_actors.get_mut(actor_id) {
+                            meta.last_deactivated = Some(now);
+                        }
+                        drop(virtual_actors);
                         tracing::debug!(
                             actor_id = %actor_id,
                             actor_type = %actor_type,
-                            "LRU-evicted virtual actor suspended (metadata preserved)"
+                            "LRU-evicted virtual actor suspended (metadata preserved for reactivation)"
                         );
                     }
                 }
+                // Always release the guard — waiters must not hang if the stop was skipped.
+                self.release_activation_guard(actor_id);
+            }
+        } else {
+            // No service_locator — release guards without stopping actors.
+            for actor_id in &guarded {
+                self.release_activation_guard(actor_id);
             }
         }
 
-        evicted
+        guarded
     }
 
     /// Update last access time for an active actor (for LRU tracking)

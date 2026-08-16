@@ -65,7 +65,7 @@ pub async fn create_default_service_locator(
         effective_node.max_connections = 100;
     }
     if effective_node.heartbeat_interval_ms == 0 {
-        effective_node.heartbeat_interval_ms = 5000;
+        effective_node.heartbeat_interval_ms = 10000;
     }
     effective_node.clustering_enabled = original_node
         .as_ref()

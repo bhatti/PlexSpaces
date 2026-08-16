@@ -798,6 +798,54 @@ impl Node {
 
     /// Send heartbeat with node capacity through NodeRegistry.
     async fn send_heartbeat_with_capacity(&self) -> Result<(), NodeError> {
+        // Get cluster_name from NodeConfig if available (same as registration)
+        let cluster_name = self
+            .service_locator
+            .get_node_config()
+            .await
+            .and_then(|config| {
+                if !config.cluster_name.is_empty() {
+                    Some(config.cluster_name)
+                } else {
+                    None
+                }
+            });
+
+        // Use same context as registration (internal context, cluster_name as namespace if defined)
+        let ctx = if let Some(cluster) = &cluster_name {
+            let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+                self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+            service_locator_trait
+                .request_context_for_system_operations_with_namespace(cluster.clone())
+                .await
+        } else {
+            let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+                self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+            service_locator_trait
+                .request_context_for_system_operations()
+                .await
+        };
+
+        // Send heartbeat immediately with no capacity so the timestamp advances without
+        // waiting for sysinfo (which can take hundreds of ms on macOS).
+        if let Some(node_registry) = self.service_locator.get_node_registry().await {
+            if let Err(e) = node_registry
+                .send_heartbeat(&ctx, self.id.as_str(), None)
+                .await
+            {
+                return Err(NodeError::NetworkError(format!(
+                    "NodeRegistry heartbeat failed: {}",
+                    e
+                )));
+            }
+        } else {
+            return Err(NodeError::ConfigError(
+                "NodeRegistry not found in ServiceLocator".to_string(),
+            ));
+        }
+
+        // Compute capacity in the background (spawn_blocking for sysinfo) and update
+        // metrics separately so the heartbeat timestamp is already visible.
         let node_capacity = self.calculate_node_capacity().await;
         let active_actors = {
             let metrics = self.metrics.read().await;
@@ -850,50 +898,18 @@ impl Node {
         }
         metrics.insert("active_actors".to_string(), active_actors as f64);
 
-        // Get cluster_name from NodeConfig if available (same as registration)
-        let cluster_name = self
-            .service_locator
-            .get_node_config()
-            .await
-            .and_then(|config| {
-                if !config.cluster_name.is_empty() {
-                    Some(config.cluster_name)
-                } else {
-                    None
-                }
-            });
-
-        // Use same context as registration (internal context, cluster_name as namespace if defined)
-        let ctx = if let Some(cluster) = &cluster_name {
-            // Use cluster_name as namespace for cluster isolation (same as registration)
-            let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
-                self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
-            service_locator_trait
-                .request_context_for_system_operations_with_namespace(cluster.clone())
-                .await
-        } else {
-            // Use default internal context (same as registration)
-            let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
-                self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
-            service_locator_trait
-                .request_context_for_system_operations()
-                .await
-        };
-
+        // Update capacity metrics with a second heartbeat call that carries the capacity.
         if let Some(node_registry) = self.service_locator.get_node_registry().await {
             if let Err(e) = node_registry
                 .send_heartbeat(&ctx, self.id.as_str(), Some(node_capacity))
                 .await
             {
-                return Err(NodeError::NetworkError(format!(
-                    "NodeRegistry heartbeat failed: {}",
-                    e
-                )));
+                tracing::debug!(
+                    node_id = %self.id.as_str(),
+                    error = %e,
+                    "NodeRegistry capacity update failed (non-critical)"
+                );
             }
-        } else {
-            return Err(NodeError::ConfigError(
-                "NodeRegistry not found in ServiceLocator".to_string(),
-            ));
         }
 
         // Scan for stale object registrations and advance their health lifecycle.
@@ -1510,22 +1526,33 @@ impl Node {
 
         tokio::spawn(async move {
             loop {
-                // Add 1-3s jitter to spread heartbeat load across nodes and avoid thundering herd.
-                let jitter_ms = {
+                // Add jitter to spread heartbeat load across nodes and avoid thundering herd.
+                // - Sub-second intervals (test mode): no jitter — avoids flaky tests.
+                // - 1 s – 14 s (default 10 s): up to 1.5 s jitter.
+                // - 15 s+ (load-test / high-scale: e.g. 30 s): up to 10 s jitter.
+                let jitter_ms = if heartbeat_interval < 1000 {
+                    0
+                } else if heartbeat_interval < 15_000 {
                     use rand::Rng;
-                    rand::thread_rng().gen_range(1000..=3000u64)
+                    rand::thread_rng().gen_range(0..=1500u64)
+                } else {
+                    use rand::Rng;
+                    rand::thread_rng().gen_range(0..=10_000u64)
                 };
                 tokio::time::sleep(tokio::time::Duration::from_millis(heartbeat_interval + jitter_ms)).await;
 
-                // Heartbeat updates this node's own node-registry and object-registry state.
-                // Also scans for stale object registrations inline (no separate background task).
-                if let Err(e) = node_for_heartbeat.send_heartbeat_with_capacity().await {
-                    tracing::warn!(
-                        node_id = %node_for_heartbeat.id.as_str(),
-                        error = %e,
-                        "Failed to send heartbeat"
-                    );
-                }
+                // Fire heartbeat as a separate task so the sysinfo spawn_blocking call (which
+                // can take hundreds of ms on macOS) does not delay the next heartbeat cycle.
+                let n = node_for_heartbeat.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = n.send_heartbeat_with_capacity().await {
+                        tracing::warn!(
+                            node_id = %n.id.as_str(),
+                            error = %e,
+                            "Failed to send heartbeat"
+                        );
+                    }
+                });
             }
         });
 

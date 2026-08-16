@@ -133,14 +133,31 @@ async fn test_node_registration_and_heartbeat() {
 
     let initial_heartbeat = registration.last_heartbeat.clone();
 
-    // Wait for at least one more heartbeat cycle
-    sleep(Duration::from_millis(400)).await;
-
-    let updated = object_registry
-        .lookup_full(&ctx, ObjectType::ObjectTypeNode, "test-node-1")
-        .await
-        .expect("lookup should not error")
-        .expect("node should still be registered");
+    // Poll until heartbeat advances (heartbeat_interval_ms=100; allow up to 5s under load)
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let updated = loop {
+        sleep(Duration::from_millis(50)).await;
+        let reg = object_registry
+            .lookup_full(&ctx, ObjectType::ObjectTypeNode, "test-node-1")
+            .await
+            .expect("lookup should not error")
+            .expect("node should still be registered");
+        let advanced = match (&initial_heartbeat, &reg.last_heartbeat) {
+            (Some(init), Some(after)) => {
+                after.seconds > init.seconds
+                    || (after.seconds == init.seconds && after.nanos > init.nanos)
+            }
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if advanced {
+            break reg;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "heartbeat timestamp did not advance within 5s"
+        );
+    };
 
     assert!(
         updated.last_heartbeat.is_some(),

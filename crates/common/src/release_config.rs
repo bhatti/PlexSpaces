@@ -123,7 +123,7 @@ pub async fn create_default_release_config(
         cluster_seed_nodes: vec![],
         cluster_name: String::new(),
         max_connections: 100,
-        heartbeat_interval_ms: 5000,
+        heartbeat_interval_ms: 10000,
         clustering_enabled: false, // Disabled by default
         grpc_connection_pool_size: 2,
         metadata: std::collections::HashMap::new(),

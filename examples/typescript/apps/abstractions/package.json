@@ -11,6 +11,7 @@
     "build:bundle": "node build-bundle.mjs"
   },
   "dependencies": {
+    "@esbuild/darwin-arm64": "^0.24.2",
     "@plexspaces/sdk": "^0.1"
   },
   "devDependencies": {

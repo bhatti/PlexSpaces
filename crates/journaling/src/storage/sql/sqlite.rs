@@ -794,6 +794,18 @@ impl JournalStorage for SqliteJournalStorage {
             return Ok((0, 0, 0));
         }
 
+        // Assign all sequence numbers BEFORE opening the transaction.
+        // With max_connections(1), calling next_event_sequence() (which uses pool.fetch_one)
+        // inside an open transaction would deadlock waiting for the already-held connection.
+        let mut prepared: Vec<ActorEvent> = Vec::with_capacity(events.len());
+        for event in events.iter() {
+            let mut event = event.clone();
+            if event.sequence == 0 {
+                event.sequence = self.next_event_sequence(&event.actor_id).await?;
+            }
+            prepared.push(event);
+        }
+
         let mut tx = self
             .pool
             .begin()
@@ -803,13 +815,7 @@ impl JournalStorage for SqliteJournalStorage {
         let mut first_sequence = 0u64;
         let mut last_sequence = 0u64;
 
-        for (i, event) in events.iter().enumerate() {
-            let mut event = event.clone();
-
-            if event.sequence == 0 {
-                event.sequence = self.next_event_sequence(&event.actor_id).await?;
-            }
-
+        for (i, event) in prepared.iter().enumerate() {
             if i == 0 {
                 first_sequence = event.sequence;
             }

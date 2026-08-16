@@ -1,0 +1,13 @@
+{
+  "name": "plexspaces-capacity-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Custom Node.js scripts for actor and WS capacity testing",
+  "scripts": {
+    "actors": "node actor_capacity.js",
+    "ws": "node ws_capacity.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

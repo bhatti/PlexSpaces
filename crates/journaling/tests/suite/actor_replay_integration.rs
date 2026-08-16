@@ -53,13 +53,18 @@ mod actor_integration_tests {
                 .await;
         let node_id = id.node_id().to_string();
         let service_locator: Arc<dyn plexspaces_actor::ServiceLocator> = locator_impl;
-        let context = Arc::new(ActorContext::new(
-            node_id,
-            tenant_id.clone(),
-            namespace.clone(),
-            service_locator,
-            None,
-        ));
+        let self_ref = plexspaces_service_traits::ActorRef::new(id.clone())
+            .expect("test actor self_ref should be constructable");
+        let context = Arc::new(
+            ActorContext::new(
+                node_id,
+                tenant_id.clone(),
+                namespace.clone(),
+                service_locator,
+                None,
+            )
+            .with_self_ref(self_ref),
+        );
         ActorStruct::new(id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
     }
 

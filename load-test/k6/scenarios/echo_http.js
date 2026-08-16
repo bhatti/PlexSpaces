@@ -108,14 +108,15 @@ export function setup() {
 }
 
 export default function () {
-  // In time-based runs: skip requests in the final (ASK_TIMEOUT + 1)s to prevent
-  // in-flight requests from racing with the server-side ask timeout and producing 504s.
+  // In time-based runs: skip the last 5s to prevent in-flight requests from racing
+  // the test deadline. Virtual actors are pre-warmed in setup(), so they respond
+  // in normal time — we use a fixed 5s grace instead of scaling by ASK_TIMEOUT.
+  const GRACE_S = 5;
   let httpTimeout = `${ASK_TIMEOUT + 1}s`;
   if (DURATION) {
     const durSecs = parseDurationSecs(DURATION);
     const remaining = durSecs * (1 - exec.scenario.progress);
-    // Skip the last (ASK_TIMEOUT + 3)s to prevent in-flight requests from racing the server ask timeout.
-    if (remaining <= ASK_TIMEOUT + 3) {
+    if (remaining <= GRACE_S) {
       return;
     }
     // Clamp HTTP timeout so k6 never waits longer than remaining time.

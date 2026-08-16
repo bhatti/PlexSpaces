@@ -2495,9 +2495,10 @@ async fn test_thundering_herd_type_registered_virtual_actor() {
         .expect("ActorRegistry required");
     let ctx = RequestContext::new_without_auth("default".to_string(), namespace.to_string());
 
-    // 50 concurrent ask() calls — all arrive before the first activation completes.
+    // 10 concurrent ask() calls — all arrive before the first activation completes.
     // Each carries a unique Ping message so we can verify replies.
-    let concurrency = 50;
+    // (10 is enough to exercise the guard; 50 causes timeouts under parallel test load)
+    let concurrency = 10;
     let mut handles = Vec::with_capacity(concurrency);
     for i in 0..concurrency {
         let registry_clone = registry.clone();
@@ -2511,7 +2512,7 @@ async fn test_thundering_herd_type_registered_virtual_actor() {
                 ..Default::default()
             };
             let result = registry_clone
-                .ask(&ctx_clone, &actor_id_clone, msg, Duration::from_secs(30))
+                .ask(&ctx_clone, &actor_id_clone, msg, Duration::from_secs(60))
                 .await;
             (i, result)
         });

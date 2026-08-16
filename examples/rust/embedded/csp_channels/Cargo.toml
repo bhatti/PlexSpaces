@@ -1,0 +1,31 @@
+# Standalone example - not part of workspace
+[workspace]
+
+[package]
+name = "csp_channels"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Pure Rust CSP-style structured concurrency with scatter-gather pattern"
+
+[lib]
+name = "csp_channels"
+path = "src/lib.rs"
+
+[[bin]]
+name = "csp_channels"
+path = "src/main.rs"
+
+[[test]]
+name = "scatter_gather_test"
+path = "tests/scatter_gather_test.rs"
+
+[dependencies]
+tokio = { version = "1.42", features = ["full"] }
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+
+[dev-dependencies]
+pretty_assertions = "1.4"

@@ -1,0 +1,4 @@
+[build]
+# Use shared workspace target directory (not local target/)
+# Relative path from examples/rust/embedded/csp_channels to workspace root
+target-dir = "../../../../target"

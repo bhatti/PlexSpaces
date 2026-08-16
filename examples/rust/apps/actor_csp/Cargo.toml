@@ -1,0 +1,32 @@
+# Actor-CSP: Structured concurrency with supervised actors + Linda tuplespace
+#
+# Scatter-gather pattern: fan out to N service actors, collect first K responses
+# within a timeout, cancel stragglers. Supervisor manages worker lifecycle.
+# Build: ./build.sh (cargo build --target wasm32-wasip1 then wasm-tools component embed + new).
+# Test: Start server with ./scripts/server.sh, then ./test.sh [HTTP_PORT].
+
+[workspace]
+
+[package]
+name = "actor-csp-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Structured concurrency with actors, supervisors, and Linda tuplespace coordination"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+plexspaces-proto = { path = "../../../../crates/proto", default-features = false }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
+prost = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.36"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

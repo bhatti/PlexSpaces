@@ -549,11 +549,12 @@ def encode_create_shard_group_request(request: Dict[str, Any]) -> bytes:
     Encode CreateShardGroupRequest proto.
 
     CreateShardGroupRequest {
-        DataParallelConfig config = 1;
-        string actor_type = 2;
-        ActorConfig shard_config = 3;  (not supported)
-        bytes initial_state = 4;
-        map<string, string> metadata = 5;
+        string request_id = 1;
+        DataParallelConfig config = 2;
+        string actor_type = 3;
+        ActorConfig shard_config = 4;  (not supported)
+        bytes initial_state = 5;
+        map<string, string> metadata = 6;
     }
     """
     m = request
@@ -562,21 +563,21 @@ def encode_create_shard_group_request(request: Dict[str, Any]) -> bytes:
     part = _partition_enum(str(_cfg_get(m, 'partition_strategy') or ''))
     reb = _rebalance_enum(str(_cfg_get(m, 'rebalance_policy') or ''))
     cfg = _encode_data_parallel_config(group_id, shard_count, part, reb, _cfg_get(m, 'placement'))
-    out = _encode_length_delimited(1, cfg)
-    out = _append_string_field(out, 2, str(m.get('actor_type', '')))
-    # initial_state (field 4, bytes)
+    out = _encode_length_delimited(2, cfg)
+    out = _append_string_field(out, 3, str(m.get('actor_type', '')))
+    # initial_state (field 5, bytes)
     st = m.get('initial_state')
     if st is not None:
         if isinstance(st, (bytes, bytearray)):
-            out += _encode_length_delimited(4, bytes(st))
+            out += _encode_length_delimited(5, bytes(st))
         elif isinstance(st, str) and st:
-            out += _encode_length_delimited(4, st.encode('utf-8'))
+            out += _encode_length_delimited(5, st.encode('utf-8'))
         elif isinstance(st, dict):
-            out += _encode_length_delimited(4, json.dumps(st).encode('utf-8'))
-    # metadata (field 5, map<string, string>)
+            out += _encode_length_delimited(5, json.dumps(st).encode('utf-8'))
+    # metadata (field 6, map<string, string>)
     meta = m.get('metadata', {})
     if isinstance(meta, dict) and meta:
-        out = _append_string_map(out, 5, {k: str(v) for k, v in meta.items()})
+        out = _append_string_map(out, 6, {k: str(v) for k, v in meta.items()})
     return out
 
 
@@ -585,16 +586,18 @@ def encode_scatter_gather_request(request: Dict[str, Any]) -> bytes:
     Encode ScatterGatherRequest proto.
 
     ScatterGatherRequest {
-        string group_id = 1;
-        Message query = 2;
-        Duration timeout = 3;
-        ShardGroupAggregationStrategy aggregation = 4;
-        uint32 min_responses = 5;
+        string request_id = 1;
+        string group_id = 2;
+        Message query = 3;
+        Duration timeout = 4;
+        ShardGroupAggregationStrategy aggregation = 5;
+        uint32 min_responses = 6;
     }
     """
     m = request
     mt = str(m.get('message_type', ''))
-    query = m.get('query', {})
+    # Accept both 'query' (canonical) and 'payload' (actor convention) as the message body.
+    query = m.get('query', m.get('payload', {}))
     if isinstance(query, dict):
         if not mt:
             mt = str(query.get('op', ''))
@@ -603,13 +606,13 @@ def encode_scatter_gather_request(request: Dict[str, Any]) -> bytes:
         payload = b'{}'
     qm = _encode_common_message(mt, payload)
     req = b''
-    req = _append_string_field(req, 1, str(m.get('group_id', '')))
-    req += _encode_length_delimited(2, qm)
+    req = _append_string_field(req, 2, str(m.get('group_id', '')))
+    req += _encode_length_delimited(3, qm)
     d = _encode_duration_from_ms(_to_int(m.get('timeout_ms')))
     if d:
-        req += _encode_length_delimited(3, d)
-    req = _append_varint_field(req, 4, _aggregation_enum(str(m.get('aggregation', ''))))
-    req = _append_varint_field(req, 5, _to_int(m.get('min_responses')))
+        req += _encode_length_delimited(4, d)
+    req = _append_varint_field(req, 5, _aggregation_enum(str(m.get('aggregation', ''))))
+    req = _append_varint_field(req, 6, _to_int(m.get('min_responses')))
     return req
 
 
@@ -618,26 +621,28 @@ def encode_broadcast_shard_group_request(request: Dict[str, Any]) -> bytes:
     Encode BroadcastShardGroupRequest proto.
 
     BroadcastShardGroupRequest {
-        string group_id = 1;
-        Message message = 2;
-        Duration timeout = 3;
-        uint32 min_acks = 4;
+        string request_id = 1;
+        string group_id = 2;
+        Message message = 3;
+        Duration timeout = 4;
+        uint32 min_acks = 5;
     }
     """
     m = request
-    body = m.get('message', {})
+    # Accept 'message' (canonical) or 'payload' (actor convention).
+    body = m.get('message', m.get('payload', {}))
     if not isinstance(body, dict):
         body = {}
     mt = str(m.get('message_type', '') or body.get('op', ''))
     payload = json.dumps(body).encode('utf-8')
     msg = _encode_common_message(mt, payload)
     req = b''
-    req = _append_string_field(req, 1, str(m.get('group_id', '')))
-    req += _encode_length_delimited(2, msg)
+    req = _append_string_field(req, 2, str(m.get('group_id', '')))
+    req += _encode_length_delimited(3, msg)
     d = _encode_duration_from_ms(_to_int(m.get('timeout_ms')))
     if d:
-        req += _encode_length_delimited(3, d)
-    req = _append_varint_field(req, 4, _to_int(m.get('min_acks')))
+        req += _encode_length_delimited(4, d)
+    req = _append_varint_field(req, 5, _to_int(m.get('min_acks')))
     return req
 
 
@@ -646,16 +651,18 @@ def _encode_reduce_like_request(request: Dict[str, Any]) -> bytes:
     Shared encoder for ReduceShardGroupRequest and AllReduceShardGroupRequest.
 
     Both have the same wire layout:
-        string group_id = 1;
-        Message map_function = 2;
-        Duration timeout = 3;
-        uint32 min_responses = 4;
-        CollectiveReduction reduction = 5;
-        CollectiveTargetField target = 6;
+        string request_id = 1;
+        string group_id = 2;
+        Message map_function = 3;
+        Duration timeout = 4;
+        uint32 min_responses = 5;
+        CollectiveReduction reduction = 6;
+        CollectiveTargetField target = 7;
     """
     m = request
     mt = str(m.get('message_type', ''))
-    body = m.get('map_function', {})
+    # Accept 'map_function' (canonical), 'payload', or 'query' (actor conventions).
+    body = m.get('map_function', m.get('payload', m.get('query', {})))
     if not isinstance(body, dict):
         body = {}
     if not mt:
@@ -663,17 +670,20 @@ def _encode_reduce_like_request(request: Dict[str, Any]) -> bytes:
     payload = json.dumps(body).encode('utf-8')
     mf = _encode_common_message(mt, payload)
     req = b''
-    req = _append_string_field(req, 1, str(m.get('group_id', '')))
-    req += _encode_length_delimited(2, mf)
+    req = _append_string_field(req, 2, str(m.get('group_id', '')))
+    req += _encode_length_delimited(3, mf)
     d = _encode_duration_from_ms(_to_int(m.get('timeout_ms')))
     if d:
-        req += _encode_length_delimited(3, d)
-    req = _append_varint_field(req, 4, _to_int(m.get('min_responses')))
-    req = _append_varint_field(req, 5, _reduction_enum(str(m.get('reduction', ''))))
-    target = str(m.get('target', ''))
+        req += _encode_length_delimited(4, d)
+    req = _append_varint_field(req, 5, _to_int(m.get('min_responses')))
+    # Accept 'reduction' (canonical) or 'reduce_op' (actor convention).
+    reduction = str(m.get('reduction', m.get('reduce_op', '')))
+    req = _append_varint_field(req, 6, _reduction_enum(reduction))
+    # Accept 'target' (canonical) or 'reduce_field' (actor convention).
+    target = str(m.get('target', m.get('reduce_field', '')))
     if target:
         tf = _encode_length_delimited(1, target.encode('utf-8'))
-        req += _encode_length_delimited(6, tf)
+        req += _encode_length_delimited(7, tf)
     return req
 
 
@@ -692,15 +702,17 @@ def encode_map_shard_group_request(request: Dict[str, Any]) -> bytes:
     Encode MapShardGroupRequest proto.
 
     MapShardGroupRequest {
-        string group_id = 1;
-        Message map_function = 2;
-        Duration timeout = 3;
-        uint32 min_responses = 4;
+        string request_id = 1;
+        string group_id = 2;
+        Message map_function = 3;
+        Duration timeout = 4;
+        uint32 min_responses = 5;
     }
     """
     m = request
     mt = str(m.get('message_type', ''))
-    body = m.get('map_function', {})
+    # Accept 'map_function' (canonical) or 'payload' (actor convention).
+    body = m.get('map_function', m.get('payload', {}))
     if not isinstance(body, dict):
         body = {}
     if not mt:
@@ -708,12 +720,12 @@ def encode_map_shard_group_request(request: Dict[str, Any]) -> bytes:
     payload = json.dumps(body).encode('utf-8')
     mf = _encode_common_message(mt, payload)
     req = b''
-    req = _append_string_field(req, 1, str(m.get('group_id', '')))
-    req += _encode_length_delimited(2, mf)
+    req = _append_string_field(req, 2, str(m.get('group_id', '')))
+    req += _encode_length_delimited(3, mf)
     d = _encode_duration_from_ms(_to_int(m.get('timeout_ms')))
     if d:
-        req += _encode_length_delimited(3, d)
-    req = _append_varint_field(req, 4, _to_int(m.get('min_responses')))
+        req += _encode_length_delimited(4, d)
+    req = _append_varint_field(req, 5, _to_int(m.get('min_responses')))
     return req
 
 
@@ -722,23 +734,163 @@ def encode_barrier_shard_group_request(request: Dict[str, Any]) -> bytes:
     Encode BarrierShardGroupRequest proto.
 
     BarrierShardGroupRequest {
-        string group_id = 1;
-        string barrier_id = 2;
-        uint64 round = 3;
-        Duration timeout = 4;
-        uint32 min_acks = 5;
+        string request_id = 1;
+        string group_id = 2;
+        string barrier_id = 3;
+        uint64 round = 4;
+        Duration timeout = 5;
+        uint32 min_acks = 6;
     }
     """
     m = request
     req = b''
-    req = _append_string_field(req, 1, str(m.get('group_id', '')))
-    req = _append_string_field(req, 2, str(m.get('barrier_id', '')))
-    req = _append_varint_field(req, 3, _to_int(m.get('round')))
+    req = _append_string_field(req, 2, str(m.get('group_id', '')))
+    req = _append_string_field(req, 3, str(m.get('barrier_id', '')))
+    req = _append_varint_field(req, 4, _to_int(m.get('round')))
     d = _encode_duration_from_ms(_to_int(m.get('timeout_ms')))
     if d:
-        req += _encode_length_delimited(4, d)
-    req = _append_varint_field(req, 5, _to_int(m.get('min_acks')))
+        req += _encode_length_delimited(5, d)
+    req = _append_varint_field(req, 6, _to_int(m.get('min_acks')))
     return req
+
+
+def encode_bulk_update_shard_group_request(request: Dict[str, Any]) -> bytes:
+    """
+    Encode BulkUpdateShardGroupRequest proto.
+
+    BulkUpdateShardGroupRequest {
+        string request_id = 1;
+        string group_id = 2;
+        map<string, Message> updates = 3;  // partition_key -> message
+        ConsistencyLevel consistency_level = 4;
+        Duration timeout = 5;
+        bool wait_for_responses = 6;
+    }
+
+    Input dict shape:
+        {
+            "group_id": str,
+            "updates": [{"key": str, "payload": dict}],  # list OR dict keyed by partition_key
+            "timeout_ms": int,
+            "wait_for_responses": bool,   # default True
+            "consistency_level": int,     # default 0 (eventual)
+        }
+    """
+    m = request
+    req = b''
+    req = _append_string_field(req, 1, str(m.get('request_id', '')))
+    req = _append_string_field(req, 2, str(m.get('group_id', '')))
+
+    updates = m.get('updates', [])
+    if isinstance(updates, dict):
+        items = [{"key": k, "payload": v} for k, v in updates.items()]
+    else:
+        items = list(updates)
+
+    for entry in items:
+        partition_key = str(entry.get('key', ''))
+        payload_dict = entry.get('payload', {})
+        if not isinstance(payload_dict, dict):
+            payload_dict = {}
+        msg_type = str(payload_dict.get('op', ''))
+        payload_bytes = json.dumps(payload_dict).encode('utf-8')
+        msg_bytes = _encode_common_message(msg_type, payload_bytes)
+        map_entry = b''
+        map_entry = _append_string_field(map_entry, 1, partition_key)
+        map_entry += _encode_length_delimited(2, msg_bytes)
+        req += _encode_length_delimited(3, map_entry)
+
+    req = _append_varint_field(req, 4, _to_int(m.get('consistency_level', 0)))
+    d = _encode_duration_from_ms(_to_int(m.get('timeout_ms', 5000)))
+    if d:
+        req += _encode_length_delimited(5, d)
+    wait = m.get('wait_for_responses', True)
+    if wait:
+        req = _append_varint_field(req, 6, 1)
+    return req
+
+
+def decode_bulk_update_shard_group_response(data: bytes) -> Dict[str, Any]:
+    """
+    Decode BulkUpdateShardGroupResponse proto.
+
+    BulkUpdateShardGroupResponse {
+        string request_id = 1;
+        uint32 updates_sent = 2;
+        uint32 updates_succeeded = 3;
+        uint32 updates_failed = 4;
+        repeated ShardUpdateStats shard_stats = 5;
+        repeated string errors = 6;
+    }
+    """
+    out: Dict[str, Any] = {
+        'request_id': '',
+        'updates_sent': 0,
+        'updates_succeeded': 0,
+        'updates_failed': 0,
+        'shard_stats': [],
+        'errors': [],
+    }
+    if not data:
+        return out
+    pos = 0
+    while pos < len(data):
+        tag_val, n = _decode_varint(data, pos)
+        pos += n
+        fn = tag_val >> 3
+        wt = tag_val & 7
+        if fn == 1 and wt == 2:
+            chunk, pos = _read_length_delimited(data, pos)
+            out['request_id'] = chunk.decode('utf-8', errors='replace')
+        elif fn == 2 and wt == 0:
+            v, n = _decode_varint(data, pos)
+            pos += n
+            out['updates_sent'] = v
+        elif fn == 3 and wt == 0:
+            v, n = _decode_varint(data, pos)
+            pos += n
+            out['updates_succeeded'] = v
+        elif fn == 4 and wt == 0:
+            v, n = _decode_varint(data, pos)
+            pos += n
+            out['updates_failed'] = v
+        elif fn == 5 and wt == 2:
+            chunk, pos = _read_length_delimited(data, pos)
+            out['shard_stats'].append(_parse_shard_update_stats(chunk))
+        elif fn == 6 and wt == 2:
+            chunk, pos = _read_length_delimited(data, pos)
+            out['errors'].append(chunk.decode('utf-8', errors='replace'))
+        else:
+            pos = _skip_field(data, pos, wt)
+    return out
+
+
+def _parse_shard_update_stats(data: bytes) -> Dict[str, Any]:
+    """Parse ShardUpdateStats proto: shard_id=1, actor_id=2, sent=3, succeeded=4, failed=5."""
+    out: Dict[str, Any] = {'shard_id': 0, 'shard_actor_id': '', 'updates_sent': 0,
+                            'updates_succeeded': 0, 'updates_failed': 0}
+    if not data:
+        return out
+    pos = 0
+    while pos < len(data):
+        tag_val, n = _decode_varint(data, pos)
+        pos += n
+        fn = tag_val >> 3
+        wt = tag_val & 7
+        if fn == 1 and wt == 0:
+            v, n = _decode_varint(data, pos); pos += n; out['shard_id'] = v
+        elif fn == 2 and wt == 2:
+            chunk, pos = _read_length_delimited(data, pos)
+            out['shard_actor_id'] = chunk.decode('utf-8', errors='replace')
+        elif fn == 3 and wt == 0:
+            v, n = _decode_varint(data, pos); pos += n; out['updates_sent'] = v
+        elif fn == 4 and wt == 0:
+            v, n = _decode_varint(data, pos); pos += n; out['updates_succeeded'] = v
+        elif fn == 5 and wt == 0:
+            v, n = _decode_varint(data, pos); pos += n; out['updates_failed'] = v
+        else:
+            pos = _skip_field(data, pos, wt)
+    return out
 
 
 def encode_application_metrics(metrics: Dict[str, Any]) -> bytes:
@@ -967,7 +1119,18 @@ def _parse_scatter_gather_stats(data: Optional[bytes]) -> Dict[str, Any]:
 
 
 def _parse_shard_query_response(data: bytes) -> Dict[str, Any]:
-    """Decode a ShardQueryResponse proto message."""
+    """Decode a ShardQueryResponse proto message.
+
+    ShardQueryResponse {
+        string request_id = 1;
+        uint32 shard_id = 2;
+        string shard_actor_id = 3;
+        Message response = 4;
+        Duration latency = 5;
+        bool success = 6;
+        string error = 7;
+    }
+    """
     out: Dict[str, Any] = {}
     pos = 0
     while pos < len(data):
@@ -975,27 +1138,27 @@ def _parse_shard_query_response(data: bytes) -> Dict[str, Any]:
         pos += n
         fn = tag_val >> 3
         wt = tag_val & 7
-        if fn == 1 and wt == 0:
+        if fn == 2 and wt == 0:
             val, m = _decode_varint(data, pos)
             pos += m
             out['shard_id'] = val
-        elif fn == 2 and wt == 2:
+        elif fn == 3 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             out['shard_actor_id'] = chunk.decode('utf-8', errors='replace')
-        elif fn == 3 and wt == 2:
+        elif fn == 4 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             _, pl = _parse_common_message(chunk)
             p = _payload_to_any(pl)
             out['payload'] = p
             out['response'] = p
-        elif fn == 4 and wt == 2:
+        elif fn == 5 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             out['latency_ms'] = _parse_duration_ms(chunk)
-        elif fn == 5 and wt == 0:
+        elif fn == 6 and wt == 0:
             val, m = _decode_varint(data, pos)
             pos += m
             out['success'] = val != 0
-        elif fn == 6 and wt == 2:
+        elif fn == 7 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             out['error'] = chunk.decode('utf-8', errors='replace')
         else:
@@ -1065,7 +1228,7 @@ def decode_create_shard_group_response(data: bytes) -> Dict[str, Any]:
     """
     Decode CreateShardGroupResponse proto.
 
-    CreateShardGroupResponse { ShardGroup group = 1; }
+    CreateShardGroupResponse { string request_id = 1; ShardGroup group = 2; }
     Returns a dict with shard_actor_ids, group_id, shard_count, etc.
     """
     if not data:
@@ -1076,7 +1239,7 @@ def decode_create_shard_group_response(data: bytes) -> Dict[str, Any]:
         pos += n
         fn = tag_val >> 3
         wt = tag_val & 7
-        if fn == 1 and wt == 2:
+        if fn == 2 and wt == 2:
             chunk, _ = _read_length_delimited(data, pos)
             return _parse_shard_group(chunk)
         pos = _skip_field(data, pos, wt)
@@ -1088,9 +1251,10 @@ def decode_scatter_gather_response(data: bytes) -> Dict[str, Any]:
     Decode ScatterGatherResponse proto.
 
     ScatterGatherResponse {
-        Message result = 1;
-        repeated ShardQueryResponse shard_responses = 2;
-        ScatterGatherStats stats = 3;
+        string request_id = 1;
+        Message result = 2;
+        repeated ShardQueryResponse shard_responses = 3;
+        ScatterGatherStats stats = 4;
     }
     """
     out: Dict[str, Any] = {'shard_responses': []}
@@ -1104,14 +1268,14 @@ def decode_scatter_gather_response(data: bytes) -> Dict[str, Any]:
         pos += n
         fn = tag_val >> 3
         wt = tag_val & 7
-        if fn == 1 and wt == 2:
+        if fn == 2 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             _, pl = _parse_common_message(chunk)
             out['result'] = _payload_to_any(pl)
-        elif fn == 2 and wt == 2:
+        elif fn == 3 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             shards.append(_parse_shard_query_response(chunk))
-        elif fn == 3 and wt == 2:
+        elif fn == 4 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             out['stats'] = _parse_scatter_gather_stats(chunk)
         else:
@@ -1124,8 +1288,8 @@ def decode_scatter_gather_response(data: bytes) -> Dict[str, Any]:
 
 def _decode_shards_and_stats_response(data: bytes, result_field: bool = False) -> Dict[str, Any]:
     """
-    Shared decoder for broadcast/barrier (shards=field1, stats=field2)
-    and reduce/all-reduce (result=field1, shards=field2, stats=field3).
+    Shared decoder for broadcast/barrier (request_id=1, shards=2, stats=3)
+    and reduce/all-reduce (request_id=1, result=2, shards=3, stats=4).
     """
     out: Dict[str, Any] = {}
     shards = []
@@ -1139,14 +1303,14 @@ def _decode_shards_and_stats_response(data: bytes, result_field: bool = False) -
         pos += n
         fn = tag_val >> 3
         wt = tag_val & 7
-        if result_field and fn == 1 and wt == 2:
+        if result_field and fn == 2 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             _, pl = _parse_common_message(chunk)
             out['result'] = _payload_to_any(pl)
-        elif fn == (2 if result_field else 1) and wt == 2:
+        elif fn == (3 if result_field else 2) and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             shards.append(_parse_shard_query_response(chunk))
-        elif fn == (3 if result_field else 2) and wt == 2:
+        elif fn == (4 if result_field else 3) and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             out['stats'] = _parse_scatter_gather_stats(chunk)
         else:
@@ -1158,22 +1322,22 @@ def _decode_shards_and_stats_response(data: bytes, result_field: bool = False) -
 
 
 def decode_broadcast_shard_group_response(data: bytes) -> Dict[str, Any]:
-    """Decode BroadcastShardGroupResponse proto (shards=field1, stats=field2)."""
+    """Decode BroadcastShardGroupResponse proto (request_id=1, shards=2, stats=3)."""
     return _decode_shards_and_stats_response(data, result_field=False)
 
 
 def decode_barrier_shard_group_response(data: bytes) -> Dict[str, Any]:
-    """Decode BarrierShardGroupResponse proto (shards=field1, stats=field2)."""
+    """Decode BarrierShardGroupResponse proto (request_id=1, shards=2, stats=3)."""
     return _decode_shards_and_stats_response(data, result_field=False)
 
 
 def decode_reduce_shard_group_response(data: bytes) -> Dict[str, Any]:
-    """Decode ReduceShardGroupResponse proto (result=field1, shards=field2, stats=field3)."""
+    """Decode ReduceShardGroupResponse proto (request_id=1, result=2, shards=3, stats=4)."""
     return _decode_shards_and_stats_response(data, result_field=True)
 
 
 def decode_all_reduce_shard_group_response(data: bytes) -> Dict[str, Any]:
-    """Decode AllReduceShardGroupResponse proto (result=field1, shards=field2, stats=field3)."""
+    """Decode AllReduceShardGroupResponse proto (request_id=1, result=2, shards=3, stats=4)."""
     return _decode_shards_and_stats_response(data, result_field=True)
 
 
@@ -1182,8 +1346,9 @@ def decode_map_shard_group_response(data: bytes) -> Dict[str, Any]:
     Decode MapShardGroupResponse proto.
 
     MapShardGroupResponse {
-        repeated ShardQueryResponse shard_results = 1;
-        ScatterGatherStats stats = 2;
+        string request_id = 1;
+        repeated ShardQueryResponse shard_results = 2;
+        ScatterGatherStats stats = 3;
     }
     """
     out: Dict[str, Any] = {}
@@ -1198,10 +1363,10 @@ def decode_map_shard_group_response(data: bytes) -> Dict[str, Any]:
         pos += n
         fn = tag_val >> 3
         wt = tag_val & 7
-        if fn == 1 and wt == 2:
+        if fn == 2 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             shards.append(_parse_shard_query_response(chunk))
-        elif fn == 2 and wt == 2:
+        elif fn == 3 and wt == 2:
             chunk, pos = _read_length_delimited(data, pos)
             out['stats'] = _parse_scatter_gather_stats(chunk)
         else:

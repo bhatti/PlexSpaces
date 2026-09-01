@@ -287,6 +287,20 @@ pub trait ActorService: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err("unlink_actor is not implemented".into())
     }
+
+    /// Remove all shard groups whose shard actors belong to the given namespace.
+    ///
+    /// Called during application undeploy to prevent stale group registrations
+    /// from blocking re-deployment. Shard actor IDs embed the namespace in their
+    /// canonical form (`{name}//{type}::{namespace}@{node}`), so we match on that.
+    /// Shard actors are stopped best-effort — they may already be down.
+    async fn purge_shard_groups_for_namespace(
+        &self,
+        _ctx: &RequestContext,
+        _namespace: &str,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(0)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

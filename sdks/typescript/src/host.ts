@@ -16,10 +16,12 @@ import {
 import { decodeHttpFetchResponseWire, encodeHttpFetchRequestWire } from './wire/http-fetch-proto-wire.js';
 import {
   decodeApplicationMetrics,
+  decodeBulkUpdateShardGroupResponse,
   decodeCreateShardGroupResponse,
   decodeGetApplicationStatusResponse,
   decodeScatterGatherResponse,
   encodeApplicationMetrics,
+  encodeBulkUpdateShardGroupRequest,
   encodeCreateShardGroupRequest,
   encodeScatterGatherRequest,
 } from './wire/shard-group-proto-wire.js';
@@ -894,11 +896,14 @@ export class Host {
   }
 
   bulkUpdateShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostBulkUpdateShardGroup, JSON.stringify(request)) as string;
+    const reqBytes = encodeBulkUpdateShardGroupRequest(request);
+    const result = safeCall(hostBulkUpdateShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { updates_sent: 0, updates_succeeded: 0, updates_failed: 0, errors: [] };
+    return decodeBulkUpdateShardGroupResponse(bytes);
   }
 
   mapShardGroup(request: Record<string, unknown>): Record<string, unknown> {

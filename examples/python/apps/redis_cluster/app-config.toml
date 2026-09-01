@@ -1,0 +1,46 @@
+# Redis Cluster Application Configuration
+#
+# Deploys a RedisCoordinator that creates and manages master/replica shard groups.
+# StorageActor and ConnectionActor are spawned dynamically by the coordinator.
+
+tenant_id = "redis-tenant"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# The coordinator manages the shard groups.
+# Call the "setup" handler after deploy to create master/replica shard groups.
+[[supervisor.children]]
+name = "redis-coordinator"
+tenant_id = "redis-tenant"
+actor_type = "RedisCoordinator"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = []
+args = { num_shards = 3 }
+
+[[supervisor.children]]
+name = "redis-benchmark"
+tenant_id = "redis-tenant"
+actor_type = "BenchmarkActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = []
+args = {}
+
+# StorageActor is spawned dynamically by create_shard_group; this entry registers
+# it in the BehaviorRegistry so the actor factory can create shard instances.
+[[supervisor.children]]
+name = "storage-actor-template"
+tenant_id = "redis-tenant"
+actor_type = "StorageActor"
+restart = "temporary"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenServer"
+facets = []
+args = {}

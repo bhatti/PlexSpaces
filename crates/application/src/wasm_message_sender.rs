@@ -23,7 +23,8 @@ use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
     BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
     BulkUpdateShardGroupRequest, BulkUpdateShardGroupResponse, CreateShardGroupRequest,
-    CreateShardGroupResponse, ReduceShardGroupRequest, ReduceShardGroupResponse,
+    CreateShardGroupResponse, MapShardGroupRequest, MapShardGroupResponse,
+    ReduceShardGroupRequest, ReduceShardGroupResponse,
     ScatterGatherRequest, ScatterGatherResponse, SpawnActorsRequest, SpawnActorsResponse,
 };
 use plexspaces_proto::application::v1::{
@@ -606,6 +607,17 @@ impl MessageSender for ActorServiceMessageSender {
             .bulk_update_shard_group(ctx, req)
             .await
             .map_err(|e| format!("BulkUpdateShardGroup failed: {}", e))
+    }
+
+    async fn map_shard_group(
+        &self,
+        ctx: &plexspaces_actor::RequestContext,
+        req: MapShardGroupRequest,
+    ) -> Result<MapShardGroupResponse, String> {
+        self.actor_service
+            .map_shard_group(ctx, req)
+            .await
+            .map_err(|e| format!("MapShardGroup failed: {}", e))
     }
 
     async fn scatter_gather(

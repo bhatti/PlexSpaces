@@ -5,6 +5,7 @@
 // Supports both WASM (ServiceLocator) and gRPC (optional feature)
 
 use anyhow::{Context, Result};
+use plexspaces_actor::RequestContextExt as _;
 use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
     BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
@@ -250,6 +251,7 @@ pub trait ShardGroupClientTrait: Send + Sync {
 pub struct ShardGroupClientLocal {
     actor_service: Arc<dyn plexspaces_actor::ActorService>,
     service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
+    operation_ctx: Option<plexspaces_actor::RequestContext>,
 }
 
 impl ShardGroupClientLocal {
@@ -262,7 +264,24 @@ impl ShardGroupClientLocal {
         Ok(Self {
             actor_service,
             service_locator,
+            operation_ctx: None,
         })
+    }
+
+    /// Override the request context used for all shard operations (broadcast, scatter_gather, etc.).
+    /// Required when actors were created with a non-empty tenant/namespace.
+    pub fn with_namespace(mut self, tenant: impl Into<String>, namespace: impl Into<String>) -> Self {
+        self.operation_ctx = Some(
+            plexspaces_actor::RequestContext::new_without_auth(tenant.into(), namespace.into())
+                .with_admin(true),
+        );
+        self
+    }
+
+    fn get_operation_ctx(&self) -> plexspaces_actor::RequestContext {
+        self.operation_ctx
+            .clone()
+            .unwrap_or_else(|| plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new()).with_admin(true))
     }
 }
 
@@ -276,10 +295,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         partition_strategy: PartitionStrategy,
         placement: Option<NodePlacement>,
     ) -> Result<plexspaces_proto::actor::v1::ShardGroup> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let req = create_shard_group_request(
             group_id,
@@ -306,10 +322,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         consistency_level: ConsistencyLevel,
         wait_for_responses: bool,
     ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let mut proto_updates = HashMap::new();
         for (key, value) in updates {
@@ -341,10 +354,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
     ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse> {
         let group_id_for_logging = group_id.clone();
 
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let message = make_call_message(serde_json::to_vec(&query)?);
 
@@ -426,10 +436,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         aggregation: ShardGroupAggregationStrategy,
         min_responses: u32,
     ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let message = make_call_message(serde_json::to_vec(&query)?);
 
@@ -455,10 +462,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         message: serde_json::Value,
         min_acks: u32,
     ) -> Result<BroadcastShardGroupResponse> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let msg = make_call_message(serde_json::to_vec(&message)?);
 
@@ -485,10 +489,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         target: Option<String>,
         min_responses: u32,
     ) -> Result<ReduceShardGroupResponse> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let msg = make_call_message(serde_json::to_vec(&query)?);
 
@@ -517,10 +518,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         target: Option<String>,
         min_responses: u32,
     ) -> Result<AllReduceShardGroupResponse> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let msg = make_call_message(serde_json::to_vec(&query)?);
 
@@ -548,10 +546,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         round: u64,
         min_acks: u32,
     ) -> Result<BarrierShardGroupResponse> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let req = BarrierShardGroupRequest {
             request_id: ulid::Ulid::new().to_string(),
@@ -573,10 +568,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         &mut self,
         requests: Vec<SpawnActorRequest>,
     ) -> Result<SpawnActorsResponse> {
-        let service_locator = self.service_locator.clone();
-        let ctx = service_locator
-            .request_context_for_system_operations()
-            .await;
+        let ctx = self.get_operation_ctx();
 
         let req = SpawnActorsRequest {
             request_id: ulid::Ulid::new().to_string(),

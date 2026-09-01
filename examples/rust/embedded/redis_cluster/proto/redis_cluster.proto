@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Contract specification for Redis Cluster example.
+// This file defines the message shapes used across actor boundaries.
+// PlexSpaces uses JSON for in-process message passing; this proto serves
+// as a contract document and can be used for gRPC serialisation when
+// extending the example to a network-exposed service.
+
+syntax = "proto3";
+package redis_cluster.v1;
+
+message RedisCommand {
+  string command_name = 1;
+  repeated string args = 2;
+  string client_id = 3;
+}
+
+message SetOptions {
+  bool nx = 1;         // Only set if Not eXists
+  bool xx = 2;         // Only set if eXists
+  optional int64 ex_seconds = 3;
+  optional int64 px_millis  = 4;
+}
+
+message StoredEntry {
+  string value = 1;
+  optional int64 expires_at_ms = 2;
+}
+
+message ReplicationEvent {
+  string command_name = 1;
+  repeated string args = 2;
+  int64 offset = 3;
+  string source_shard = 4;
+}
+
+message HandshakeRequest {
+  string step = 1;          // "ping" | "replconf" | "psync"
+  repeated string args = 2;
+}
+
+message HandshakeResponse {
+  string status = 1;        // "PONG" | "OK" | "FULLRESYNC <id> <offset>"
+  optional bytes rdb_data = 2;
+}
+
+message AckResponse {
+  string replica_id = 1;
+  int64 offset = 2;
+}
+
+message ShardInfo {
+  string shard_id = 1;
+  string actor_id = 2;
+  string node_id = 3;
+  string role = 4;
+}
+
+message ClusterTopology {
+  repeated ShardInfo masters  = 1;
+  repeated ShardInfo replicas = 2;
+}

@@ -418,4 +418,68 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
         )?;
         Ok(())
     }
+
+    async fn purge_shard_groups_for_namespace(
+        &self,
+        ctx: &RequestContext,
+        namespace: &str,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        // Canonical actor ID format: {name}//{type}::{namespace}@{node}
+        // Match shard groups whose first shard actor ID contains "::{namespace}@".
+        let needle = format!("::{namespace}@");
+
+        let group_ids_to_purge: Vec<String> = {
+            let groups = self.shard_groups.read().await;
+            groups
+                .iter()
+                .filter(|(_, group)| {
+                    group
+                        .shard_actor_ids
+                        .first()
+                        .map_or(false, |id| id.contains(&needle))
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+
+        if group_ids_to_purge.is_empty() {
+            return Ok(0);
+        }
+
+        let actor_factory = self.service_locator.get_actor_factory().await;
+        let task_router = self.service_locator.get_task_router().await;
+
+        for group_id in &group_ids_to_purge {
+            let shard_actor_ids = {
+                let groups = self.shard_groups.read().await;
+                groups
+                    .get(group_id.as_str())
+                    .map(|g| g.shard_actor_ids.clone())
+                    .unwrap_or_default()
+            };
+
+            // Stop shard actors best-effort; they may already be stopped on undeploy.
+            if let Some(ref factory) = actor_factory {
+                for shard_id in &shard_actor_ids {
+                    if let Ok(actor_id) = plexspaces_actor::ActorId::from_canonical(shard_id) {
+                        let _ = factory.stop_actor(ctx, &actor_id).await;
+                    }
+                }
+            }
+
+            self.shard_groups.write().await.remove(group_id.as_str());
+
+            if let Some(ref router) = task_router {
+                let _ = router.unregister_group(group_id).await;
+            }
+
+            tracing::info!(
+                group_id = %group_id,
+                namespace = %namespace,
+                "Purged shard group for namespace on undeploy"
+            );
+        }
+
+        Ok(group_ids_to_purge.len())
+    }
 }

@@ -2266,3 +2266,164 @@ async fn test_spawn_actors_instances_count_auto_id() {
         );
     }
 }
+
+// ========================================================================
+// purge_shard_groups_for_namespace Tests
+// ========================================================================
+
+/// Verify that purging by namespace removes only groups belonging to that namespace
+/// and leaves groups in other namespaces untouched.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_purge_shard_groups_for_namespace_removes_matching() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    // Create two groups: one in namespace "ns-alpha", one in "ns-beta".
+    // test_request_with_ns encodes the namespace into gRPC metadata so the shard actor
+    // IDs get "::{ns}@" embedded in their canonical form.
+    let req_alpha = test_request_with_ns(
+        new_create_shard_group_request("group-alpha", "counter", 2, HashMap::new()),
+        "ns-alpha",
+    );
+    ActorServiceTrait::create_shard_group(&*service, req_alpha)
+        .await
+        .expect("create group-alpha");
+
+    let req_beta = test_request_with_ns(
+        new_create_shard_group_request("group-beta", "counter", 2, HashMap::new()),
+        "ns-beta",
+    );
+    ActorServiceTrait::create_shard_group(&*service, req_beta)
+        .await
+        .expect("create group-beta");
+
+    // Both groups should exist.
+    let list_before = ActorServiceTrait::list_shard_groups(
+        &*service,
+        test_request(plexspaces_proto::actor::v1::ListShardGroupsRequest {
+            request_id: Ulid::new().to_string(),
+            page: Some(plexspaces_proto::common::v1::PageRequest {
+                request_id: Ulid::new().to_string(),
+                offset: 0,
+                limit: 100,
+                filter: String::new(),
+                order_by: String::new(),
+            }),
+            ..Default::default()
+        }),
+    )
+    .await
+    .expect("list before purge")
+    .into_inner();
+    assert_eq!(list_before.groups.len(), 2, "should have 2 groups before purge");
+
+    // Purge only ns-alpha via UFCS to avoid ambiguity with gRPC ActorService trait.
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "ns-alpha".to_string());
+    let purged =
+        plexspaces_actor::actor_context::ActorService::purge_shard_groups_for_namespace(
+            &*service, &ctx, "ns-alpha",
+        )
+        .await
+        .expect("purge ns-alpha");
+    assert_eq!(purged, 1, "exactly one group should be purged");
+
+    // ns-alpha group is gone; ns-beta group survives.
+    let list_after = ActorServiceTrait::list_shard_groups(
+        &*service,
+        test_request(plexspaces_proto::actor::v1::ListShardGroupsRequest {
+            request_id: Ulid::new().to_string(),
+            page: Some(plexspaces_proto::common::v1::PageRequest {
+                request_id: Ulid::new().to_string(),
+                offset: 0,
+                limit: 100,
+                filter: String::new(),
+                order_by: String::new(),
+            }),
+            ..Default::default()
+        }),
+    )
+    .await
+    .expect("list after purge")
+    .into_inner();
+    assert_eq!(list_after.groups.len(), 1, "only 1 group should remain");
+    let remaining = &list_after.groups[0];
+    let remaining_id = remaining.config.as_ref().map(|c| c.group_id.as_str()).unwrap_or("");
+    assert_eq!(remaining_id, "group-beta", "group-beta should survive");
+}
+
+/// Verify that purging an unknown namespace is a no-op (returns 0, no error).
+#[tokio::test(flavor = "multi_thread")]
+async fn test_purge_shard_groups_for_namespace_noop_on_unknown() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let req = test_request(new_create_shard_group_request("my-group", "counter", 2, HashMap::new()));
+    ActorServiceTrait::create_shard_group(&*service, req)
+        .await
+        .expect("create my-group");
+
+    let ctx = RequestContext::new_without_auth("tenant".to_string(), "unknown-ns".to_string());
+    let purged =
+        plexspaces_actor::actor_context::ActorService::purge_shard_groups_for_namespace(
+            &*service, &ctx, "unknown-ns",
+        )
+        .await
+        .expect("purge unknown-ns should succeed");
+    assert_eq!(purged, 0, "no groups should be purged for unknown namespace");
+
+    // The original group should still be present.
+    let list = ActorServiceTrait::list_shard_groups(
+        &*service,
+        test_request(plexspaces_proto::actor::v1::ListShardGroupsRequest {
+            request_id: Ulid::new().to_string(),
+            page: Some(plexspaces_proto::common::v1::PageRequest {
+                request_id: Ulid::new().to_string(),
+                offset: 0,
+                limit: 100,
+                filter: String::new(),
+                order_by: String::new(),
+            }),
+            ..Default::default()
+        }),
+    )
+    .await
+    .expect("list")
+    .into_inner();
+    assert_eq!(list.groups.len(), 1, "group should still be present");
+}
+
+/// Verify that after purging a namespace, create_shard_group with the same group_id succeeds
+/// (no "already exists" error), confirming re-deploy works correctly.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_purge_allows_redeploy_of_same_group() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    // First deploy.
+    let req1 = test_request_with_ns(
+        new_create_shard_group_request("redeploy-group", "counter", 2, HashMap::new()),
+        "deploy-ns",
+    );
+    ActorServiceTrait::create_shard_group(&*service, req1)
+        .await
+        .expect("first deploy");
+
+    // Simulate undeploy: purge the namespace.
+    let ctx = RequestContext::new_without_auth("tenant".to_string(), "deploy-ns".to_string());
+    let purged =
+        plexspaces_actor::actor_context::ActorService::purge_shard_groups_for_namespace(
+            &*service, &ctx, "deploy-ns",
+        )
+        .await
+        .expect("purge on undeploy");
+    assert_eq!(purged, 1);
+
+    // Second deploy with the same group_id must succeed.
+    let req2 = test_request_with_ns(
+        new_create_shard_group_request("redeploy-group", "counter", 2, HashMap::new()),
+        "deploy-ns",
+    );
+    let result = ActorServiceTrait::create_shard_group(&*service, req2).await;
+    assert!(
+        result.is_ok(),
+        "re-creating after purge must succeed, got: {:?}",
+        result.err()
+    );
+}

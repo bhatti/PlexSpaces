@@ -1399,11 +1399,189 @@ func hostDecodeBarrierShardGroupResponse(raw string) (map[string]any, error) {
 }
 
 func hostWireBulkUpdateShardGroupRequest(request any) (string, error) {
-	return "", fmt.Errorf("bulk_update_shard_group: not supported in TinyGo WASM (manual wire not implemented)")
+	m, ok := mapAsStringAny(request)
+	if !ok {
+		return "", fmt.Errorf("bulk_update_shard_group: expected map[string]any")
+	}
+	var req []byte
+	req = wasmAppendString(req, 1, strVal(m["request_id"]))
+	req = wasmAppendString(req, 2, strVal(m["group_id"]))
+
+	// updates: list of {key, payload} OR map[string]any
+	updates := m["updates"]
+	var items []map[string]any
+	switch u := updates.(type) {
+	case []any:
+		for _, item := range u {
+			if entry, ok2 := item.(map[string]any); ok2 {
+				items = append(items, entry)
+			}
+		}
+	case map[string]any:
+		for k, v := range u {
+			entry := map[string]any{"key": k, "payload": v}
+			items = append(items, entry)
+		}
+	}
+	for _, entry := range items {
+		partitionKey := strVal(entry["key"])
+		payloadDict, _ := entry["payload"].(map[string]any)
+		if payloadDict == nil {
+			payloadDict = map[string]any{}
+		}
+		msgType := strVal(payloadDict["op"])
+		payloadBytes, _ := json.Marshal(payloadDict)
+		msgBytes := wasmEncodeCommonMessage(msgType, payloadBytes)
+		var mapEntry []byte
+		mapEntry = wasmAppendString(mapEntry, 1, partitionKey)
+		mapEntry = appendLengthDelimited(mapEntry, 2, msgBytes)
+		req = appendLengthDelimited(req, 3, mapEntry)
+	}
+	req = wasmAppendUInt32(req, 4, u32Val(m["consistency_level"]))
+	if d := wasmEncodeDurationFromMs(u64Val(m["timeout_ms"])); len(d) > 0 {
+		req = appendLengthDelimited(req, 5, d)
+	}
+	waitForResponses, _ := m["wait_for_responses"].(bool)
+	if waitForResponses {
+		req = wasmAppendBool(req, 6, true)
+	}
+	return string(req), nil
 }
 
 func hostDecodeBulkUpdateShardGroupResponse(raw string) (map[string]any, error) {
-	return nil, fmt.Errorf("bulk_update_shard_group: protobuf decode not available in TinyGo WASM")
+	data := []byte(raw)
+	out := map[string]any{
+		"updates_sent":      uint32(0),
+		"updates_succeeded": uint32(0),
+		"updates_failed":    uint32(0),
+		"errors":            []any{},
+	}
+	var shardStats []any
+	var errors []any
+	pos := 0
+	for pos < len(data) {
+		tag, n, err := readVarint(data, pos)
+		if err != nil {
+			return out, nil
+		}
+		pos += n
+		fn := int(tag >> 3)
+		wt := tag & 7
+		switch {
+		case fn == 1 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			out["request_id"] = string(sl)
+			pos = np
+		case fn == 2 && wt == 0:
+			v, n2, err := readVarint(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			out["updates_sent"] = uint32(v)
+			pos += n2
+		case fn == 3 && wt == 0:
+			v, n2, err := readVarint(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			out["updates_succeeded"] = uint32(v)
+			pos += n2
+		case fn == 4 && wt == 0:
+			v, n2, err := readVarint(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			out["updates_failed"] = uint32(v)
+			pos += n2
+		case fn == 5 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			shardStats = append(shardStats, wasmParseShardUpdateStats(sl))
+			pos = np
+		case fn == 6 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			errors = append(errors, string(sl))
+			pos = np
+		default:
+			pos, err = skipField(data, pos, wt)
+			if err != nil {
+				return out, nil
+			}
+		}
+	}
+	if shardStats != nil {
+		out["shard_stats"] = shardStats
+	}
+	if errors != nil {
+		out["errors"] = errors
+	}
+	return out, nil
+}
+
+func wasmParseShardUpdateStats(data []byte) map[string]any {
+	out := map[string]any{}
+	pos := 0
+	for pos < len(data) {
+		tag, n, err := readVarint(data, pos)
+		if err != nil {
+			return out
+		}
+		pos += n
+		fn := int(tag >> 3)
+		wt := tag & 7
+		switch {
+		case fn == 1 && wt == 0:
+			v, n2, err := readVarint(data, pos)
+			if err != nil {
+				return out
+			}
+			out["shard_id"] = uint32(v)
+			pos += n2
+		case fn == 2 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out
+			}
+			out["shard_actor_id"] = string(sl)
+			pos = np
+		case fn == 3 && wt == 0:
+			v, n2, err := readVarint(data, pos)
+			if err != nil {
+				return out
+			}
+			out["updates_sent"] = uint32(v)
+			pos += n2
+		case fn == 4 && wt == 0:
+			v, n2, err := readVarint(data, pos)
+			if err != nil {
+				return out
+			}
+			out["updates_succeeded"] = uint32(v)
+			pos += n2
+		case fn == 5 && wt == 0:
+			v, n2, err := readVarint(data, pos)
+			if err != nil {
+				return out
+			}
+			out["updates_failed"] = uint32(v)
+			pos += n2
+		default:
+			var e error
+			pos, e = skipField(data, pos, wt)
+			if e != nil {
+				return out
+			}
+		}
+	}
+	return out
 }
 
 func hostWireMapShardGroupRequest(request any) (string, error) {

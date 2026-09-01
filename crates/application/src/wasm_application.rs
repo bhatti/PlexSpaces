@@ -2370,6 +2370,25 @@ impl Application for WasmApplication {
                 0
             };
 
+        // Purge shard groups for this namespace so re-deployment starts with a clean slate.
+        // Shard actor IDs embed "::{namespace}@" in their canonical form, so we match on that.
+        let purged_shard_groups =
+            if let Some(actor_service) = service_locator.get_actor_service().await {
+                actor_service
+                    .purge_shard_groups_for_namespace(&ctx, &namespace)
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(
+                            namespace = %namespace,
+                            error = %e,
+                            "Failed to purge shard groups on undeploy (non-fatal)"
+                        );
+                        0
+                    })
+            } else {
+                0
+            };
+
         tracing::info!(
             application = %self.name,
             namespace = %namespace,
@@ -2378,6 +2397,7 @@ impl Application for WasmApplication {
             removed_virtual_types = virtual_cleanup.actor_types.len(),
             purged_records = purged_records,
             removed_registrations = removed_registrations,
+            purged_shard_groups = purged_shard_groups,
             "Application undeploy cleanup completed"
         );
 

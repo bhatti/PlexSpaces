@@ -42,6 +42,7 @@ from .proto_wire import (
     encode_all_reduce_shard_group_request,
     encode_map_shard_group_request,
     encode_barrier_shard_group_request,
+    encode_bulk_update_shard_group_request,
     encode_application_metrics,
     decode_create_shard_group_response,
     decode_scatter_gather_response,
@@ -50,6 +51,7 @@ from .proto_wire import (
     decode_all_reduce_shard_group_response,
     decode_map_shard_group_response,
     decode_barrier_shard_group_response,
+    decode_bulk_update_shard_group_response,
     decode_application_metrics_response,
     decode_application_get_status_response,
     decode_http_fetch_response,
@@ -1973,18 +1975,13 @@ class Host:
         )
 
     def bulk_update_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Bulk update a shard group."""
-        h = _get_host_shard()
-        fn = getattr(h, "bulk_update_shard_group", None) or getattr(h, "bulk-update-shard-group", None)
-        if fn is None:
-            raise RuntimeError("bulk_update_shard_group not available")
-        if _host_shard_is_wit:
-            raise RuntimeError("bulk_update_shard_group: proto wire not implemented for Python WASM")
-        raw = fn(json.dumps(request))
-        result = _from_payload_bytes(raw)
-        if isinstance(result, str) and result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
+        """Bulk update a shard group — routes N key-value updates to their shards in one call."""
+        return self._call_shard_fn(
+            "bulk_update_shard_group",
+            encode_bulk_update_shard_group_request,
+            decode_bulk_update_shard_group_response,
+            request,
+        )
 
     def map_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Map across shards."""

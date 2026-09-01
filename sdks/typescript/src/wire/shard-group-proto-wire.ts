@@ -702,6 +702,153 @@ function encodeUint64MapEntry(key: string, value: number): Uint8Array {
   return entry;
 }
 
+// ---------------------------------------------------------------------------
+// BulkUpdateShardGroupRequest encoder
+//
+// BulkUpdateShardGroupRequest {
+//   string request_id = 1;
+//   string group_id = 2;
+//   map<string, Message> updates = 3;  // partition_key -> message
+//   ConsistencyLevel consistency_level = 4;
+//   Duration timeout = 5;
+//   bool wait_for_responses = 6;
+// }
+// ---------------------------------------------------------------------------
+export function encodeBulkUpdateShardGroupRequest(req: Record<string, unknown>): Uint8Array {
+  let buf: Uint8Array = new Uint8Array(0);
+
+  buf = appendString(buf, 1, (req.request_id as string) ?? '');
+  buf = appendString(buf, 2, (req.group_id as string) ?? '');
+
+  const rawUpdates = req.updates;
+  let items: Array<{ key: string; payload: Record<string, unknown> }>;
+  if (Array.isArray(rawUpdates)) {
+    items = rawUpdates as Array<{ key: string; payload: Record<string, unknown> }>;
+  } else if (rawUpdates && typeof rawUpdates === 'object') {
+    items = Object.entries(rawUpdates as Record<string, unknown>).map(([k, v]) => ({
+      key: k,
+      payload: v as Record<string, unknown>,
+    }));
+  } else {
+    items = [];
+  }
+
+  for (const entry of items) {
+    const partitionKey = String(entry.key ?? '');
+    const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : {};
+    const msgBytes = encodeMessage(payload as Record<string, unknown>);
+    let mapEntry: Uint8Array = new Uint8Array(0);
+    mapEntry = appendString(mapEntry, 1, partitionKey);
+    mapEntry = appendLengthDelimited(mapEntry, 2, msgBytes);
+    buf = appendLengthDelimited(buf, 3, mapEntry);
+  }
+
+  const consistencyLevel = Number(req.consistency_level ?? 0) >>> 0;
+  if (consistencyLevel !== 0) buf = appendUint32(buf, 4, consistencyLevel);
+
+  const timeoutMs = Number(req.timeout_ms ?? 5000);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0) buf = appendLengthDelimited(buf, 5, durBytes);
+  }
+
+  const waitForResponses = req.wait_for_responses !== false; // default true
+  if (waitForResponses) {
+    buf = appendUint32(buf, 6, 1);
+  }
+
+  return buf;
+}
+
+// ---------------------------------------------------------------------------
+// BulkUpdateShardGroupResponse decoder
+//
+// BulkUpdateShardGroupResponse {
+//   string request_id = 1;
+//   uint32 updates_sent = 2;
+//   uint32 updates_succeeded = 3;
+//   uint32 updates_failed = 4;
+//   repeated ShardUpdateStats shard_stats = 5;
+//   repeated string errors = 6;
+// }
+// ---------------------------------------------------------------------------
+export function decodeBulkUpdateShardGroupResponse(data: Uint8Array): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    request_id: '',
+    updates_sent: 0,
+    updates_succeeded: 0,
+    updates_failed: 0,
+    shard_stats: [] as Record<string, unknown>[],
+    errors: [] as string[],
+  };
+  if (!data || data.length === 0) return result;
+
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tagVal, n: tagN } = readVarint(data, pos);
+    pos += tagN;
+    const fieldNum = Number(tagVal >> BigInt(3));
+    const wireType = Number(tagVal & BigInt(7));
+
+    if (fieldNum === 1 && wireType === 2) {
+      const { value, nextPos } = readString(data, pos);
+      result.request_id = value;
+      pos = nextPos;
+    } else if (fieldNum === 2 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_sent = value;
+      pos = nextPos;
+    } else if (fieldNum === 3 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_succeeded = value;
+      pos = nextPos;
+    } else if (fieldNum === 4 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_failed = value;
+      pos = nextPos;
+    } else if (fieldNum === 5 && wireType === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      (result.shard_stats as Record<string, unknown>[]).push(decodeShardUpdateStats(slice));
+      pos = nextPos;
+    } else if (fieldNum === 6 && wireType === 2) {
+      const { value, nextPos } = readString(data, pos);
+      (result.errors as string[]).push(value);
+      pos = nextPos;
+    } else {
+      pos = skipField(data, pos, wireType);
+    }
+  }
+  return result;
+}
+
+function decodeShardUpdateStats(data: Uint8Array): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    shard_id: 0, shard_actor_id: '', updates_sent: 0, updates_succeeded: 0, updates_failed: 0,
+  };
+  if (!data || data.length === 0) return result;
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tagVal, n: tagN } = readVarint(data, pos);
+    pos += tagN;
+    const fieldNum = Number(tagVal >> BigInt(3));
+    const wireType = Number(tagVal & BigInt(7));
+    if (fieldNum === 1 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos); result.shard_id = value; pos = nextPos;
+    } else if (fieldNum === 2 && wireType === 2) {
+      const { value, nextPos } = readString(data, pos); result.shard_actor_id = value; pos = nextPos;
+    } else if (fieldNum === 3 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos); result.updates_sent = value; pos = nextPos;
+    } else if (fieldNum === 4 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos); result.updates_succeeded = value; pos = nextPos;
+    } else if (fieldNum === 5 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos); result.updates_failed = value; pos = nextPos;
+    } else {
+      pos = skipField(data, pos, wireType);
+    }
+  }
+  return result;
+}
+
 export function encodeApplicationMetrics(metrics: Record<string, unknown>): Uint8Array {
   let buf: Uint8Array = new Uint8Array(0);
 

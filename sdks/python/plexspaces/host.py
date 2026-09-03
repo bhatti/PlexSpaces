@@ -2205,6 +2205,52 @@ class Host:
         payload_json = json.dumps(payload) if payload is not None else "{}"
         return h.send_after(delay_ms, msg_type, _to_payload_bytes(payload_json))
 
+    # ========================================================================
+    # TupleSpace (low-level — called by _TupleSpaceHelper)
+    # ========================================================================
+
+    def ts_write(self, tuple_json: str) -> str:
+        h = _get_host_ts()
+        if _host_ts_is_wit:
+            tuple_list = json.loads(tuple_json)
+            wire = encode_write_request(tuple_list)
+            h.ts_write(bytes(wire))
+            return ""
+        return h.ts_write(tuple_json)
+
+    def ts_read(self, pattern_json: str) -> str:
+        h = _get_host_ts()
+        if _host_ts_is_wit:
+            pattern = json.loads(pattern_json)
+            wire = encode_read_request(pattern, take=False, max_results=1)
+            raw = h.ts_read(bytes(wire))
+            result_bytes = bytes(raw) if raw else b""
+            first = decode_read_response_first(result_bytes)
+            return json.dumps(first) if first else ""
+        return h.ts_read(pattern_json)
+
+    def ts_take(self, pattern_json: str) -> str:
+        h = _get_host_ts()
+        if _host_ts_is_wit:
+            pattern = json.loads(pattern_json)
+            wire = encode_read_request(pattern, take=True, max_results=1)
+            raw = h.ts_take(bytes(wire))
+            result_bytes = bytes(raw) if raw else b""
+            first = decode_read_response_first(result_bytes)
+            return json.dumps(first) if first else ""
+        return h.ts_take(pattern_json)
+
+    def ts_read_all(self, pattern_json: str) -> str:
+        h = _get_host_ts()
+        if _host_ts_is_wit:
+            pattern = json.loads(pattern_json)
+            wire = encode_read_request(pattern, take=False, max_results=100)
+            raw = h.ts_read_all(bytes(wire))
+            result_bytes = bytes(raw) if raw else b""
+            tuples = decode_read_response_all(result_bytes)
+            return json.dumps(tuples)
+        return h.ts_read_all(pattern_json)
+
 def _http_fetch(
     link_name: str,
     method: str,

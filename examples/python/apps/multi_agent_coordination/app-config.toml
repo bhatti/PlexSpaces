@@ -1,0 +1,107 @@
+name = "py-multi-agent-coordination"
+version = "1.0.0"
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "coordinator"
+actor_type = "multi_agent_coordination_wasm"
+role = "coordinator"
+restart = "permanent"
+shutdown_timeout_seconds = 60
+behavior_kind = "Workflow"
+args = { role = "coordinator" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "research"
+actor_type = "multi_agent_coordination_wasm"
+role = "research"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "research" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } }
+]
+
+[[supervisor.children]]
+name = "analysis"
+actor_type = "multi_agent_coordination_wasm"
+role = "analysis"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "analysis" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } }
+]
+
+[[supervisor.children]]
+name = "verifier"
+actor_type = "multi_agent_coordination_wasm"
+role = "verifier"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "verifier" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } }
+]
+
+[[supervisor.children]]
+name = "synthesizer"
+actor_type = "multi_agent_coordination_wasm"
+role = "synthesizer"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "synthesizer" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } }
+]
+
+[[supervisor.children]]
+name = "benchmark"
+actor_type = "multi_agent_coordination_wasm"
+role = "benchmark"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "benchmark" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } }
+]
+
+[[supervisor.children]]
+name = "audit"
+actor_type = "multi_agent_coordination_wasm"
+role = "audit"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenEvent"
+args = { role = "audit" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "coordination_fsm"
+actor_type = "multi_agent_coordination_wasm"
+role = "coordination_fsm"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenFSM"
+args = { role = "coordination_fsm" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]

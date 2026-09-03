@@ -20,7 +20,8 @@ export {
   query_handler,
   getActorDefinition,
 } from "./decorators.js";
-export { Host, ProcessGroups, TupleSpace, host, pgFirst, pgFirstOrThrow, ServiceHttpClient, ActorRef, getActorRef } from "./host.js";
+export { Host, ProcessGroups, TupleSpace, Channel, host, pgFirst, pgFirstOrThrow, ServiceHttpClient, ActorRef, getActorRef } from "./host.js";
+export type { ChannelMessage } from "./host.js";
 export { ActorRouter } from "./router.js";
 export {
   defaultRetryConfig,

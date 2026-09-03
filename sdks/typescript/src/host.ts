@@ -96,6 +96,21 @@ import {
 import { httpFetch as hostHttpFetch } from 'plexspaces:actor/host-http@0.1.0';
 
 import {
+  channelSend as hostChannelSend,
+  channelSendWithOptions as hostChannelSendWithOptions,
+  channelReceive as hostChannelReceive,
+  channelPublish as hostChannelPublish,
+  channelSubscribe as hostChannelSubscribe,
+  channelUnsubscribe as hostChannelUnsubscribe,
+  channelAck as hostChannelAck,
+  channelNack as hostChannelNack,
+  channelCreate as hostChannelCreate,
+  channelDelete as hostChannelDelete,
+  channelDepth as hostChannelDepth,
+} from 'plexspaces:actor/channels@0.1.0';
+import type { ChannelMessage as WitChannelMessage } from 'plexspaces:actor/channels@0.1.0';
+
+import {
   register as hostRegistryRegister,
   unregister as hostRegistryUnregister,
   lookup as hostRegistryLookup,
@@ -602,6 +617,166 @@ export function getActorRef(actorType: string, name: string, namespace: string):
     return new ActorRef(actorType, name, namespace);
 }
 
+/**
+ * Message received from a channel, with payload decoded to a JS value.
+ */
+export interface ChannelMessage {
+  id: string;
+  msgType: string;
+  payload: unknown;
+  timestamp: number;
+  deliveryCount: number;
+  headers: Record<string, string>;
+}
+
+/**
+ * Channel host functions for queue and pub/sub messaging patterns.
+ *
+ * Channels unify queue (one consumer) and pub/sub (all subscribers) under
+ * a single API. The provider (InMemory, Redis, Kafka, etc.) is a runtime concern.
+ *
+ * Parity with Python `host.channel` and Go `host.Ch()`.
+ */
+export class Channel {
+  /** Send a message to a channel (queue semantics). Returns message ID. */
+  send(channelName: string, msgType: string, payload?: unknown): string {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== undefined ? JSON.stringify(payload) : '{}');
+    const result = safeCall(hostChannelSend, '', channelName, msgType, payloadBytes) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return result;
+  }
+
+  /** Send with delay, TTL, and custom headers. Returns message ID. */
+  sendWithOptions(
+    channelName: string,
+    msgType: string,
+    payload?: unknown,
+    delayMs: number = 0,
+    ttlMs: number = 0,
+    headers?: Record<string, string>,
+  ): string {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== undefined ? JSON.stringify(payload) : '{}');
+    const headersJson = JSON.stringify(headers ?? {});
+    const result = safeCall(
+      hostChannelSendWithOptions, '', channelName, msgType, payloadBytes,
+      BigInt(delayMs), BigInt(ttlMs), headersJson,
+    ) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return result;
+  }
+
+  /** Receive one message from a channel. Returns null on timeout/empty. */
+  receive(channelName: string, timeoutMs: number = 0): ChannelMessage | null {
+    const raw = safeCall(hostChannelReceive, '', channelName, BigInt(timeoutMs));
+    if (!raw || raw === '' || raw === undefined) return null;
+    if (typeof raw === 'string') {
+      if (raw.startsWith('ERROR:')) throw new Error(raw);
+      try {
+        return JSON.parse(raw) as ChannelMessage;
+      } catch {
+        return null;
+      }
+    }
+    const msg = raw as WitChannelMessage;
+    if (!msg || !msg.id) return null;
+    let decodedPayload: unknown;
+    try {
+      const payloadStr = decodeWitPayloadUtf8(msg.payload);
+      decodedPayload = JSON.parse(payloadStr);
+    } catch {
+      decodedPayload = msg.payload;
+    }
+    const hdrs: Record<string, string> = {};
+    if (Array.isArray(msg.headers)) {
+      for (const [k, v] of msg.headers) { hdrs[k] = v; }
+    }
+    return {
+      id: msg.id,
+      msgType: msg.msgType,
+      payload: decodedPayload,
+      timestamp: typeof msg.timestamp === 'bigint' ? Number(msg.timestamp) : Number(msg.timestamp ?? 0),
+      deliveryCount: msg.deliveryCount,
+      headers: hdrs,
+    };
+  }
+
+  /** Publish a message to a channel (pub/sub — all subscribers receive). Returns message ID. */
+  publish(channelName: string, msgType: string, payload?: unknown): string {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== undefined ? JSON.stringify(payload) : '{}');
+    const result = safeCall(hostChannelPublish, '', channelName, msgType, payloadBytes) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return result;
+  }
+
+  /** Subscribe to a channel (pub/sub). Returns subscription ID. */
+  subscribe(channelName: string, filter: string = ''): string {
+    const result = safeCall(hostChannelSubscribe, '', channelName, filter) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return result;
+  }
+
+  /** Cancel a subscription by ID. */
+  unsubscribe(subscriptionId: string): void {
+    const result = safeCall(hostChannelUnsubscribe, subscriptionId);
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /** Acknowledge successful processing (prevents redelivery). */
+  ack(channelName: string, messageId: string): void {
+    const result = safeCall(hostChannelAck, '', channelName, messageId);
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /** Negative-acknowledge a message. requeue=true retries; false sends to dead-letter. */
+  nack(channelName: string, messageId: string, requeue: boolean = true): void {
+    const result = safeCall(hostChannelNack, '', channelName, messageId, requeue);
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /** Create a channel if it does not exist. maxSize=0 means unbounded. */
+  create(channelName: string, maxSize: number = 0, messageTtlMs: number = 0): void {
+    const result = safeCall(hostChannelCreate, '', channelName, maxSize, BigInt(messageTtlMs));
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /** Delete a channel and all pending messages. */
+  delete(channelName: string): void {
+    const result = safeCall(hostChannelDelete, '', channelName);
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /** Return the number of pending (unacked) messages in a channel. */
+  depth(channelName: string): number {
+    const result = safeCall(hostChannelDepth, '', channelName);
+    if (typeof result === 'bigint') return Number(result);
+    if (typeof result === 'number') return result;
+    if (typeof result === 'string') {
+      if (result.startsWith('ERROR:')) throw new Error(result);
+      const n = parseInt(result, 10);
+      return isNaN(n) ? 0 : n;
+    }
+    return 0;
+  }
+}
+
 export class Host {
   readonly processGroups = new ProcessGroups();
   /** Tuple space: list-in, list-out. Use null in patterns for wildcards. */
@@ -616,6 +791,8 @@ export class Host {
   readonly locks: LockClient = new LockClient();
   /** Blob storage client: host.blob.upload(), host.blob.download() etc. */
   readonly blob: BlobClient = new BlobClient();
+  /** Channel client for queue and pub/sub messaging. */
+  readonly channel: Channel = new Channel();
 
   /**
    * Create an ergonomic HTTP client for a named service link.

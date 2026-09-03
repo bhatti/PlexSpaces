@@ -98,7 +98,10 @@ def _skip_field(data: bytes, pos: int, wire_type: int) -> int:
 def _encode_tuple_field(value: Any, allow_wildcard: bool = False) -> bytes:
     """Encode a single value as a TupleField protobuf message body."""
     if value is None:
-        # null field (field 6, bool=true)
+        if allow_wildcard:
+            # wildcard field (field 7, bool=true) — matches any value in patterns
+            return b'\x38' + _encode_varint(1)  # tag=7<<3|0=56=0x38
+        # null field (field 6, bool=true) — actual null value in writes
         return b'\x30' + _encode_varint(1)  # tag=6<<3|0=48=0x30
 
     if allow_wildcard and value == "*":
@@ -149,11 +152,11 @@ def encode_write_request(tuple_values: list) -> bytes:
     """
     Encode a list of values as a tuplespace WriteRequest protobuf.
 
-    WriteRequest { repeated Tuple tuples = 1; }
+    WriteRequest { string request_id = 1; repeated Tuple tuples = 2; }
     Tuple { repeated TupleField fields = 2; }
     """
     tuple_body = _encode_tuple_fields(tuple_values, allow_wildcard=False)
-    return _encode_length_delimited(1, tuple_body)  # WriteRequest.tuples = field 1
+    return _encode_length_delimited(2, tuple_body)  # WriteRequest.tuples = field 2
 
 
 def encode_read_request(
@@ -165,18 +168,21 @@ def encode_read_request(
     Encode a pattern as a tuplespace ReadRequest protobuf.
 
     ReadRequest {
-        Tuple template = 1;
-        bool take = 4;
-        int32 max_results = 5;
+        string request_id = 1;
+        Tuple template = 2;
+        Duration timeout = 3;
+        bool blocking = 4;
+        bool take = 5;
+        int32 max_results = 6;
     }
 
     Pattern values: use None or "*" for wildcards.
     """
     template_body = _encode_tuple_fields(pattern, allow_wildcard=True)
-    out = _encode_length_delimited(1, template_body)  # ReadRequest.template = field 1
+    out = _encode_length_delimited(2, template_body)  # ReadRequest.template = field 2
     if take:
-        out += b'\x20\x01'  # field 4 (take) = true: tag=4<<3|0=32=0x20, value=1
-    out += b'\x28' + _encode_varint(max_results)  # field 5 (max_results): tag=5<<3|0=40=0x28
+        out += b'\x28\x01'  # field 5 (take) = true: tag=5<<3|0=40=0x28, value=1
+    out += b'\x30' + _encode_varint(max_results)  # field 6 (max_results): tag=6<<3|0=48=0x30
     return out
 
 
@@ -247,7 +253,7 @@ def decode_read_response(data: bytes) -> List[list]:
     """
     Decode a ReadResponse protobuf into a list of tuples.
 
-    ReadResponse { repeated Tuple tuples = 1; }
+    ReadResponse { string request_id = 1; repeated Tuple tuples = 2; }
     """
     if not data:
         return []
@@ -258,7 +264,7 @@ def decode_read_response(data: bytes) -> List[list]:
         pos += n
         field_num = tag_val >> 3
         wire_type = tag_val & 7
-        if field_num == 1 and wire_type == 2:  # ReadResponse.tuples
+        if field_num == 2 and wire_type == 2:  # ReadResponse.tuples
             length, n = _decode_varint(data, pos)
             pos += n
             sub = data[pos:pos + length]

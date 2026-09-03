@@ -1111,5 +1111,6 @@ impl KeyValueStoreErrorCode {
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 include!("plexspaces.keyvalue.v1.tonic.rs");
 // @@protoc_insertion_point(module)

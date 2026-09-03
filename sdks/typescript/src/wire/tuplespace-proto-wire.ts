@@ -79,20 +79,20 @@ function encodeTupleFields(tuple: unknown[], allowWildcardStar: boolean): WireU8
   return out;
 }
 
-/** Build WriteRequest protobuf bytes (field 1: tuple with repeated TupleField). */
+/** Build WriteRequest protobuf bytes (field 2: tuple with repeated TupleField). */
 export function encodeWriteRequest(tuple: unknown[]): Uint8Array {
   const tupleBody = encodeTupleFields(tuple, false);
-  return appendLengthDelimited(new Uint8Array(0), 1, tupleBody);
+  return appendLengthDelimited(new Uint8Array(0), 2, tupleBody);
 }
 
 /** Build ReadRequest protobuf bytes. */
 export function encodeReadRequest(pattern: unknown[], take: boolean, maxResults: number): Uint8Array {
   const templateBody = encodeTupleFields(pattern, true);
-  let out = appendLengthDelimited(new Uint8Array(0), 1, templateBody);
+  let out = appendLengthDelimited(new Uint8Array(0), 2, templateBody);
   if (take) {
-    out = concatBytes(out, new Uint8Array([0x20, 0x01]));
+    out = concatBytes(out, new Uint8Array([0x28, 0x01]));
   }
-  out = concatBytes(out, new Uint8Array([0x28]));
+  out = concatBytes(out, new Uint8Array([0x30]));
   out = appendVarint(out, maxResults >>> 0);
   return out;
 }
@@ -158,7 +158,7 @@ export function parseReadResponseTuples(data: Uint8Array): unknown[][] {
     pos += tn;
     const fn = Number(tag >> 3n);
     const wt = Number(tag & 7n);
-    if (fn === 1 && wt === 2) {
+    if (fn === 2 && wt === 2) {
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
       tuples.push(parseTupleMsg(slice));

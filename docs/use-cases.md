@@ -61,6 +61,7 @@ Production AI agent systems with stateful, fault-tolerant, and multi-tenant exec
 - **Agentic RAG Pipelines**: Retrieve → Generate → Validate → Retry loops as durable workflows, with sharded indexing and guardrail validation
 - **MCP Tool Calling**: Actors as Model Context Protocol (MCP) tool servers — tool discovery (`tools/list`), validated execution (`tools/call`), JSON-RPC 2.0 gateway with tenant isolation
 - **Multi-Agent A2A Collaboration**: Orchestrator decomposes tasks, discovers specialist agents by capability, delegates via message passing, coordinates results via TupleSpace
+- **Multi-Agent Coordination Patterns**: Ten coordination primitives — blackboard (TupleSpace Linda in/rd/out), scatter-gather, generator-verifier, pipeline, pub-sub (process groups), consensus/voting, dynamic task delegation, veto protocol, two-phase commit/barrier, capability discovery. Inspired by the METR/HuggingFace incident where ~1,200 agents self-organized via shared state
 - **LLM Orchestration**: Prompt chaining, routing (classify → dispatch), reflection loops (generate → judge → refine), LLM-as-Judge quality gates, and Evol-Instruct prompt mutation
 - **Parallel Inference**: Shard-group scatter-gather, elastic pool checkout/checkin, MPI collectives (broadcast, reduce, allreduce, barrier) for distributed model serving and training. Strong scaling benchmarks find the optimal shard count for a fixed workload; weak scaling benchmarks verify that adding capacity handles proportionally larger problems (ideal `Eff% ≈ 100%` at all shard counts)
 - **Resource-Aware Inference**: Label-based model routing (GPU/memory tier), per-tenant budget enforcement, cost-aware tier selection with GenFSM budget state machine
@@ -83,8 +84,9 @@ Production AI agent systems with stateful, fault-tolerant, and multi-tenant exec
 - [a2a_multi_agent](../examples/go/apps/a2a_multi_agent/README.md) — multi-agent A2A collaboration (Go)
 - [resource_aware_inference](../examples/go/apps/resource_aware_inference/README.md) — cost-aware model routing (Go)
 - [llm_workflow_orchestrator](../examples/typescript/apps/llm_workflow_orchestrator/README.md) — prompt chaining, routing, reflection, LLM-as-Judge (TypeScript)
+- [multi_agent_coordination](../examples/typescript/apps/multi_agent_coordination/README.md) — ten coordination patterns (blackboard, scatter-gather, generator-verifier, pipeline, pub-sub, voting, task delegation, veto, barrier, capability discovery) inspired by METR/HuggingFace incident (TypeScript + [Python](../examples/python/apps/multi_agent_coordination/README.md))
 
-See also: [AI Agents at Scale: 20 Production Patterns with PlexSpaces](../blog/ai-agents-at-scale-with-plexspaces.md)
+See also: [AI Agents at Scale: 20 Production Patterns with PlexSpaces](../blog/ai-agents-at-scale-with-plexspaces.md), [When 700 AI Agents Self-Organized: Coordination Patterns for Multi-Agent Systems](../archived_docs/blog-multi-agent-coordination.md)
 
 ## Agent Harness and Eval Infrastructure
 

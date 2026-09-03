@@ -588,7 +588,7 @@ Linda-style coordination for decoupled communication:
 
 **Backends**: SQLite with `:memory:` (testing), Redis (production), PostgreSQL (transactional)
 
-See [Detailed Design - TupleSpace](detailed-design.md#tuplespace) for comprehensive documentation.
+See [Detailed Design - TupleSpace](detailed-design.md#tuplespace) for comprehensive documentation. For ten real-world coordination patterns using TupleSpace (blackboard, voting, veto, task delegation, barrier, capability discovery), see the [multi_agent_coordination example](../examples/typescript/apps/multi_agent_coordination/README.md) and [companion blog](../archived_docs/blog-multi-agent-coordination.md).
 
 ### Channels
 

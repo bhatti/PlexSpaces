@@ -90,7 +90,7 @@ func encodeWriteRequest(tuple []any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return appendLengthDelimited(nil, 1, tupleBody), nil
+	return appendLengthDelimited(nil, 2, tupleBody), nil
 }
 
 func encodeReadRequest(pattern []any, take bool, maxResults int32) ([]byte, error) {
@@ -100,12 +100,12 @@ func encodeReadRequest(pattern []any, take bool, maxResults int32) ([]byte, erro
 		return nil, err
 	}
 	var out []byte
-	out = appendLengthDelimited(out, 1, templateBody)
+	out = appendLengthDelimited(out, 2, templateBody)
 	if take {
-		out = append(out, 0x20) // field 4 take = true
+		out = append(out, 0x28) // field 5 take = true
 		out = appendVarint(out, 1)
 	}
-	out = append(out, 0x28) // field 5 max_results
+	out = append(out, 0x30) // field 6 max_results
 	out = appendVarint(out, uint64(uint32(maxResults)))
 	return out, nil
 }
@@ -273,7 +273,7 @@ func parseReadResponseTuples(data []byte) ([][]any, error) {
 		pos += n
 		fn := tag >> 3
 		wt := tag & 7
-		if fn == 1 && wt == 2 {
+		if fn == 2 && wt == 2 {
 			ln, m, err := readVarint(data, pos)
 			if err != nil {
 				return nil, err

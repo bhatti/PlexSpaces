@@ -80,7 +80,7 @@ func TestDecodeReadResponseRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readResp := appendLengthDelimited(nil, 1, innerTuple)
+	readResp := appendLengthDelimited(nil, 2, innerTuple)
 	parsed, err := parseReadResponseTuples(readResp)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestDecodeReadResponseFirstTupleHelper(t *testing.T) {
 	tuple := []any{"a", "b", "c"}
 	writeBytes, _ := encodeWriteRequest(tuple)
 	inner, _ := firstLengthDelimitedPayload(writeBytes)
-	readResp := appendLengthDelimited(nil, 1, inner)
+	readResp := appendLengthDelimited(nil, 2, inner)
 	got, ok := decodeReadResponseFirstTuple(string(readResp))
 	if !ok || len(got) != 3 {
 		t.Fatalf("ok=%v got=%v", ok, got)

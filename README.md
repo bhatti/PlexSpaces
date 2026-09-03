@@ -359,6 +359,9 @@ In-depth articles about PlexSpaces design, patterns, and real-world use cases:
 - [Building Mini OpenClaw: Secure AI Agents with Actors, WASM, and Supervision](https://shahbhat.medium.com/building-mini-openclaw-secure-ai-agents-with-actors-wasm-and-supervision-b8d6ea314628) — Secure, sandboxed AI agents using WASM isolation and supervision trees
 - [Building a Self-Improving AI Agent with Durable Actors: MiniHermes](https://shahbhat.medium.com/building-a-self-improving-ai-agent-with-durable-actors-minihermes-614ee292c7eb) — Durable actors enabling self-improving AI agents with persistent state
 - [Building an Agent Harness and Eval Pipeline with Durable Actors](https://shahbhat.medium.com/building-an-agent-harness-and-eval-pipeline-with-durable-actors-d9cd8264370d) — Reliable AI evaluation pipelines using durable execution and actor workflows
+- [Write a Redis Clone with Virtual Actors](https://shahbhat.medium.com/write-a-redis-clone-with-virtual-actors-f3d72d5875fb)
+- [Migrating Off Cloudflare Durable Objects: Build Your Own Portable FAAS](https://shahbhat.medium.com/migrating-off-cloudflare-durable-objects-build-your-own-portable-faas-df9dfb8fa8f2)
+
 
 ## Comparison with Other Frameworks
 

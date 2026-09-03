@@ -1871,6 +1871,8 @@ See `scripts/BLOB_TESTING_GUIDE.md` for detailed testing instructions.
 
 PlexSpaces TupleSpace is inspired by Linda memory model. WASM actors using the actor-world WIT call **`ts-write`** / **`ts-read`** / **`ts-take`** / **`ts-read-all`** with protobuf wire bytes using the shared `plexspaces.tuplespace.v1.WriteRequest` and `ReadRequest` models. The runtime decodes those bytes once at the host boundary and delegates to the same TupleSpace backend used by native code. See [WASM Deployment: TupleSpace (ts_write)](wasm-deployment.md#tuplespace-ts_write-for-wasm).
 
+For a comprehensive showcase of TupleSpace as a multi-agent coordination backbone (blackboard, task delegation, voting, veto protocol, barrier, and capability discovery), see the [multi_agent_coordination examples](../examples/typescript/apps/multi_agent_coordination/README.md) (TypeScript and Python) and companion blog post [When 700 AI Agents Self-Organized](../archived_docs/blog-multi-agent-coordination.md).
+
 ### Linda Operations
 
 #### Write

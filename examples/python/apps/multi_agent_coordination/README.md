@@ -79,7 +79,6 @@ All 15 test steps verify the 10 coordination patterns end-to-end.
 
 ## References
 
-- [Blog: When 700 AI Agents Self-Organized](../../../archived_docs/blog-multi-agent-coordination.md)
 - [PlexSpaces Architecture](../../../docs/architecture.md)
 - [Getting Started](../../../docs/getting-started.md)
 - [METR Incident Report](https://metr.org/hugging-face-incident-report-aug-2026.pdf)

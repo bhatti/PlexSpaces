@@ -174,7 +174,6 @@ Named suites: `smoke` (1 scenario), `standard` (5), `full` (10).
 
 ## References
 
-- [Blog: The Other Half of Your AI Agent](../../../../docs/blog-agent-harness.md)
 - [Architecture](../../../../docs/architecture.md)
 - [Go minipi](../../../go/apps/minipi/) — reference implementation (1.5M WASM)
 - [TypeScript minipi](../../../typescript/apps/minipi/) — TypeScript port

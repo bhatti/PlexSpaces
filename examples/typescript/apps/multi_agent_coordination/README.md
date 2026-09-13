@@ -114,7 +114,6 @@ capability_discovery       10       1.2       1.0       1.8     833
 
 ## References
 
-- [Blog: When 700 AI Agents Self-Organized](../../archived_docs/blog-multi-agent-coordination.md)
 - [METR Incident Report](https://metr.org/hugging-face-incident-report-aug-2026.pdf)
 - [PlexSpaces Architecture](../../../../docs/architecture.md)
 - [PlexSpaces Getting Started](../../../../docs/getting-started.md)

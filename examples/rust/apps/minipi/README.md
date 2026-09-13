@@ -79,7 +79,6 @@ Step 15: DashboardActor
 
 ## References
 
-- [Blog: The Other Half of Your AI Agent](../../../../docs/blog-agent-harness.md)
 - [Architecture](../../../../docs/architecture.md)
 - [Getting Started](../../../../docs/getting-started.md)
 - [Go minipi](../../../go/apps/minipi/) — reference implementation

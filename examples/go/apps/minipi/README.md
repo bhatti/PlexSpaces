@@ -113,7 +113,6 @@ Step 15: DashboardActor
 
 ## References
 
-- [Blog: The Other Half of Your AI Agent](../../../../docs/blog-agent-harness.md)
 - [Architecture](../../../../docs/architecture.md)
 - [Getting Started](../../../../docs/getting-started.md)
 - [Python minipi](../../../python/apps/minipi/) — Python SDK port

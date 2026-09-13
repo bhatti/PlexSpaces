@@ -387,5 +387,4 @@ error → idle
 - [Getting Started](../../../../docs/getting-started.md)
 - [A2A Multi-Agent Example](../a2a_multi_agent/README.md) — primary pattern reference
 - [Agentic RAG Pipeline](../agentic_rag_pipeline/README.md) — circuit breaker, GenEvent, GenFSM patterns
-- [MiniClaw Blog Post](../../../../archived_docs/miniclaw-secure-ai-agents-with-actors.md)
 - [All Examples](../../../README.md)

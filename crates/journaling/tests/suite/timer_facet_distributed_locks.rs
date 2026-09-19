@@ -128,7 +128,7 @@ mod distributed_lock_tests {
 
     /// Helper to setup a timer facet with all required services
     async fn setup_facet(facet: TimerFacet, actor_id: &str) -> (TimerFacet, Arc<Mailbox>) {
-        let mailbox = Arc::new(
+        let (mailbox_inner, _rx) =
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id(actor_id, "node-1"),
@@ -137,8 +137,8 @@ mod distributed_lock_tests {
                 None,
             )
             .await
-            .expect("Failed to create mailbox"),
-        );
+            .expect("Failed to create mailbox");
+        let mailbox = Arc::new(mailbox_inner);
 
         let mut facet_mut = facet;
         facet_mut
@@ -152,7 +152,7 @@ mod distributed_lock_tests {
     #[tokio::test]
     async fn test_timer_registration_with_locks() {
         // Test that timers can be registered with lock manager
-        let mailbox = Arc::new(
+        let (mailbox_inner, _rx) =
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
@@ -161,8 +161,8 @@ mod distributed_lock_tests {
                 None,
             )
             .await
-            .expect("Failed to create mailbox"),
-        );
+            .expect("Failed to create mailbox");
+        let mailbox = Arc::new(mailbox_inner);
         let lock_manager: Arc<dyn LockManager + Send + Sync> =
             Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         let facet =
@@ -190,7 +190,7 @@ mod distributed_lock_tests {
     #[tokio::test]
     async fn test_timer_registration_without_locks() {
         // Test that timers can be registered without lock manager
-        let mailbox = Arc::new(
+        let (mailbox_inner, _rx) =
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
@@ -199,8 +199,8 @@ mod distributed_lock_tests {
                 None,
             )
             .await
-            .expect("Failed to create mailbox"),
-        );
+            .expect("Failed to create mailbox");
+        let mailbox = Arc::new(mailbox_inner);
         let facet = create_timer_facet_without_locks(mailbox.clone()).await;
         let (mut facet_mut, _mailbox) = setup_facet(facet, "test-actor").await;
 
@@ -235,7 +235,7 @@ mod distributed_lock_tests {
             Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
 
         // Node 1: Register timer with lock
-        let mailbox1 = Arc::new(
+        let (mailbox1_inner, _rx) =
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor-1", "node-1"),
@@ -244,8 +244,8 @@ mod distributed_lock_tests {
                 None,
             )
             .await
-            .expect("Failed to create mailbox"),
-        );
+            .expect("Failed to create mailbox");
+        let mailbox1 = Arc::new(mailbox1_inner);
         let facet1 = create_timer_facet_with_locks(
             lock_manager.clone(),
             "node-1".to_string(),
@@ -255,7 +255,7 @@ mod distributed_lock_tests {
         let (mut facet1_mut, _mailbox1) = setup_facet(facet1, "test-actor-1").await;
 
         // Node 2: Try to register timer with same actor_id (same lock key)
-        let mailbox2 = Arc::new(
+        let (mailbox2_inner, _rx) =
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor-1", "node-2"),
@@ -264,8 +264,8 @@ mod distributed_lock_tests {
                 None,
             )
             .await
-            .expect("Failed to create mailbox"),
-        );
+            .expect("Failed to create mailbox");
+        let mailbox2 = Arc::new(mailbox2_inner);
         let facet2 = create_timer_facet_with_locks(
             lock_manager.clone(),
             "node-2".to_string(),
@@ -304,7 +304,7 @@ mod distributed_lock_tests {
     #[tokio::test]
     async fn test_timer_cleanup_on_detach() {
         // Test that all timers are properly cleaned up on detach
-        let mailbox = Arc::new(
+        let (mailbox_inner, _rx) =
             Mailbox::new(
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
@@ -313,8 +313,8 @@ mod distributed_lock_tests {
                 None,
             )
             .await
-            .expect("Failed to create mailbox"),
-        );
+            .expect("Failed to create mailbox");
+        let mailbox = Arc::new(mailbox_inner);
         let lock_manager: Arc<dyn LockManager + Send + Sync> =
             Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         let facet =

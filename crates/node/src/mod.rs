@@ -1541,18 +1541,17 @@ impl Node {
                 };
                 tokio::time::sleep(tokio::time::Duration::from_millis(heartbeat_interval + jitter_ms)).await;
 
-                // Fire heartbeat as a separate task so the sysinfo spawn_blocking call (which
-                // can take hundreds of ms on macOS) does not delay the next heartbeat cycle.
-                let n = node_for_heartbeat.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = n.send_heartbeat_with_capacity().await {
-                        tracing::warn!(
-                            node_id = %n.id.as_str(),
-                            error = %e,
-                            "Failed to send heartbeat"
-                        );
-                    }
-                });
+                // Inline heartbeat — no inner spawn needed.  send_heartbeat_with_capacity()
+                // uses spawn_blocking for sysinfo, which runs on the blocking thread pool and
+                // does not stall Tokio worker threads while awaited.  Eliminating the inner
+                // spawn saves one task allocation + Arc clone + scheduler round-trip per tick.
+                if let Err(e) = node_for_heartbeat.send_heartbeat_with_capacity().await {
+                    tracing::warn!(
+                        node_id = %node_for_heartbeat.id.as_str(),
+                        error = %e,
+                        "Failed to send heartbeat"
+                    );
+                }
             }
         });
 
@@ -2001,6 +2000,16 @@ impl Node {
             .register_metrics_service_access(Arc::new(metrics_service.clone()))
             .await;
 
+        // Create TracingControlService: runtime per-actor tracing toggle (JMX-equivalent).
+        // Default: all tracing disabled — zero span overhead until explicitly enabled via
+        // POST /api/v1/admin/tracing/enable or the gRPC TracingControlService RPC.
+        use plexspaces_proto::admin::v1::tracing_control_service_server::TracingControlServiceServer;
+        use plexspaces_services::tracing_control_service::TracingControlServiceImpl;
+        let tracing_control_service = Arc::new(TracingControlServiceImpl::new());
+        self.service_locator
+            .register_tracing_gate(tracing_control_service.clone())
+            .await;
+
         // Start connection health monitoring and stale connection cleanup
         // Connection health monitoring is handled by gRPC client pool
 
@@ -2198,7 +2207,12 @@ impl Node {
                 NodeServiceServer::new(NodeServiceHandler(node_service.clone()))
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
-            }));
+            }))
+            .grpc_service(tonic_web::enable(
+                TracingControlServiceServer::from_arc(tracing_control_service.clone())
+                    .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+                    .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
+            ));
 
         // Add dashboard service if feature enabled
         #[cfg(feature = "dashboard")]
@@ -2429,6 +2443,18 @@ impl Node {
 
         // Construct WS registry and pending asks for WebSocket thin-client support.
         let ws_registry = Arc::new(crate::ws_registry::WsRegistry::new());
+
+        // Start stale-session reaper: 3× heartbeat interval as the staleness threshold.
+        let hb_ms = if self.config.heartbeat_interval_ms > 0 {
+            self.config.heartbeat_interval_ms
+        } else {
+            10_000
+        };
+        crate::ws_registry::WsRegistry::spawn_reaper(
+            ws_registry.clone(),
+            std::time::Duration::from_millis(hb_ms * 3),
+        );
+
         let pending_asks = std::sync::Arc::new(crate::ws_transport_client::PendingAsks::new());
         let ws_node_registry = self.service_locator.get_node_registry().await;
         let ws_state = crate::http_routes::WsRouteState {
@@ -2439,6 +2465,9 @@ impl Node {
             node_registry: ws_node_registry,
             auth_disabled,
             jwt_key_pair: jwt_key_pair.clone(),
+            sysinfo_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+                crate::http_routes::ws_routes::CachedSysinfo::new(),
+            )),
         };
 
         // Register WS transport clients in ServiceLocator for outbound WS routing.
@@ -2492,6 +2521,7 @@ impl Node {
             auth_route_state,
             ws_state,
             static_registry,
+            Some(tracing_control_service.clone()),
         );
 
         #[cfg(feature = "dashboard")]

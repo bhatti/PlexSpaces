@@ -31,7 +31,7 @@ fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: Strin
 async fn test_message_id_deduplication() {
     // Test: Duplicate message IDs should be skipped
     let config = mailbox_config_default();
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -69,7 +69,7 @@ async fn test_message_id_deduplication() {
 async fn test_idempotency_key_deduplication() {
     // Test: Messages with same idempotency key should be deduplicated
     let config = mailbox_config_default();
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -91,13 +91,13 @@ async fn test_idempotency_key_deduplication() {
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Try to dequeue - should only get one message
-    let received1 = mailbox
+    let received1 = receiver
         .dequeue_with_timeout(Some(Duration::from_millis(100)))
         .await;
     assert!(received1.is_some());
 
     // Second dequeue should timeout (message2 was deduplicated)
-    let received2 = mailbox
+    let received2 = receiver
         .dequeue_with_timeout(Some(Duration::from_millis(100)))
         .await;
     // Note: This might not work as expected if messages are processed asynchronously
@@ -108,7 +108,7 @@ async fn test_idempotency_key_deduplication() {
 async fn test_idempotency_key_different_keys() {
     // Test: Different idempotency keys should not be deduplicated
     let config = mailbox_config_default();
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -123,12 +123,12 @@ async fn test_idempotency_key_different_keys() {
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Both should be dequeuable
-    let received1 = mailbox
+    let received1 = receiver
         .dequeue_with_timeout(Some(Duration::from_millis(100)))
         .await;
     assert!(received1.is_some());
 
-    let received2 = mailbox
+    let received2 = receiver
         .dequeue_with_timeout(Some(Duration::from_millis(100)))
         .await;
     assert!(received2.is_some());
@@ -139,7 +139,7 @@ async fn test_lru_cache_eviction() {
     // Test: LRU cache should evict old entries when full
     let mut config = mailbox_config_default();
     // Note: message dedup cache size is now controlled via IdempotencyConfig, not MailboxConfig.
-    let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 

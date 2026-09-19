@@ -569,11 +569,11 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let counter_id = genserver_actor_id("counter", &local_node_id, "default");
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
-    let mailbox_counter = Arc::new(
+    let (mailbox_counter_inner, mut mailbox_counter_receiver) =
         Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let mailbox_counter = Arc::new(mailbox_counter_inner);
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
         "test".to_string(),    // tenant_id
@@ -601,13 +601,12 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
         .await;
 
     // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
-    let mailbox_counter_clone = mailbox_counter.clone();
     let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.to_string();
     let reply_ctx = ctx.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
-        while let Some(msg) = mailbox_counter_clone.dequeue().await {
+        while let Some(msg) = mailbox_counter_receiver.dequeue().await {
             if let Ok(request) = serde_json::from_slice::<CounterMessage>(&msg.payload) {
                 let reply = match request {
                     CounterMessage::Get => CounterMessage::Value(counter_actor.value),
@@ -720,11 +719,11 @@ async fn test_chained_asks_multi_node() {
     let counter_id = genserver_actor_id("counter", &local_node_id, "default");
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
-    let mailbox_counter = Arc::new(
+    let (mailbox_counter_inner, mut mailbox_counter_receiver) =
         Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let mailbox_counter = Arc::new(mailbox_counter_inner);
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
         "test".to_string(),    // tenant_id
@@ -752,13 +751,12 @@ async fn test_chained_asks_multi_node() {
         .await;
 
     // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
-    let mailbox_counter_clone = mailbox_counter.clone();
     let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.to_string();
     let reply_ctx = ctx.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
-        while let Some(msg) = mailbox_counter_clone.dequeue().await {
+        while let Some(msg) = mailbox_counter_receiver.dequeue().await {
             if let Ok(request) = serde_json::from_slice::<CounterMessage>(&msg.payload) {
                 let reply = match request {
                     CounterMessage::Get => CounterMessage::Value(counter_actor.value),
@@ -869,11 +867,11 @@ async fn test_concurrent_asks_multi_node() {
     let counter_id = genserver_actor_id("counter", &local_node_id, "default");
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
-    let mailbox_counter = Arc::new(
+    let (mailbox_counter_inner, mut mailbox_counter_receiver) =
         Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let mailbox_counter = Arc::new(mailbox_counter_inner);
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
         "test".to_string(),    // tenant_id
@@ -901,13 +899,12 @@ async fn test_concurrent_asks_multi_node() {
         .await;
 
     // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
-    let mailbox_counter_clone = mailbox_counter.clone();
     let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.to_string();
     let reply_ctx = ctx.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
-        while let Some(msg) = mailbox_counter_clone.dequeue().await {
+        while let Some(msg) = mailbox_counter_receiver.dequeue().await {
             if let Ok(request) = serde_json::from_slice::<CounterMessage>(&msg.payload) {
                 let reply = match request {
                     CounterMessage::Get => CounterMessage::Value(counter_actor.value),

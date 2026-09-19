@@ -237,28 +237,183 @@ fn mailbox_config_backpressure(config: &MailboxConfig) -> BackpressureStrategy {
 }
 
 
-/// Mailbox implementation using channel-based messaging
+// ── MailboxCtrl ──────────────────────────────────────────────────────────────
+//
+// Exists as a named sub-field so the actor loop can borrow `ctrl` and `data`
+// simultaneously without conflicting on `&mut MailboxReceiver`.  Rust allows
+// simultaneous mutable borrows of disjoint struct fields; this sub-struct
+// layout makes those fields disjoint at the type level.
+
+/// Control-message half of [`MailboxReceiver`].
+///
+/// Carries system signals (EXIT, DOWN, SHUTDOWN) on an unbounded channel so
+/// they are never subject to backpressure.  Prioritised over the data channel
+/// in the actor loop's `tokio::select!` so lifecycle events are handled promptly.
+///
+/// This type is `pub` so the actor crate can access it via
+/// `mailbox_receiver.ctrl` for the flattened actor select loop.
+/// It is an implementation detail — do not use it outside the actor framework.
+pub struct MailboxCtrl {
+    rx: mpsc::UnboundedReceiver<ProtoMessage>,
+    /// Shared with sender side; decremented on every successful receive.
+    ctrl_size: Arc<AtomicUsize>,
+}
+
+impl MailboxCtrl {
+    /// Non-blocking drain.  Returns `Some` if a ctrl message is ready, `None` otherwise.
+    pub fn try_recv(&mut self) -> Option<ProtoMessage> {
+        match self.rx.try_recv() {
+            Ok(msg) => {
+                self.ctrl_size.fetch_sub(1, AtomicOrdering::Relaxed);
+                Some(msg)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Async receive.  Awaits the next ctrl message; returns `None` only if the
+    /// channel is closed (actor stopping).
+    pub async fn recv(&mut self) -> Option<ProtoMessage> {
+        let msg = self.rx.recv().await?;
+        self.ctrl_size.fetch_sub(1, AtomicOrdering::Relaxed);
+        Some(msg)
+    }
+}
+
+// ── MailboxData ───────────────────────────────────────────────────────────────
+
+/// Data-message half of [`MailboxReceiver`].
+///
+/// # Fast path (in-memory FIFO/LIFO actors — the common case)
+///
+/// `bounded` holds an `mpsc::Receiver<ProtoMessage>`.  The sender calls
+/// `try_send()` directly; `recv()` is a direct channel poll with no background
+/// task and no intermediate buffer.
+///
+/// # Non-fast path (priority-ordered in-memory actors, all durable backends)
+///
+/// `unbounded` holds an `mpsc::UnboundedReceiver<ProtoMessage>` fed by a
+/// background processor task:
+/// - **Priority actors**: drains `internal_queue` (BinaryHeap) → `local_sender`.
+///   The InMemoryChannel is not used for delivery; priority reordering happens
+///   entirely in the BinaryHeap before forwarding to the mpsc channel.
+/// - **Durable actors** (SQLite / Redis / Kafka / SQS / NATS): one background
+///   task flushes `internal_queue` → `channel.send()` (persistence), while a
+///   second pump task calls `channel.try_receive()` and forwards to `local_sender`.
+///   This Notify-based pump replaces the previous `yield_now()` busy-wait loop,
+///   eliminating CPU spin when the actor mailbox is idle.
+///
+/// The actor loop always calls `data.recv()` regardless of path.  Which receiver
+/// is active is an implementation detail hidden behind this struct.
+///
+/// This type is `pub` so the actor crate can access it via
+/// `mailbox_receiver.data` for the flattened actor select loop.
+/// It is an implementation detail — do not use it outside the actor framework.
+pub struct MailboxData {
+    /// Fast-path: bounded mpsc, present only when `use_fast_path` was true at
+    /// construction (in-memory FIFO/LIFO with non-DropOldest backpressure).
+    bounded: Option<mpsc::Receiver<ProtoMessage>>,
+    /// Non-fast-path: unbounded mpsc fed by background processor.
+    /// Present for priority in-memory actors and all durable backends.
+    unbounded: Option<mpsc::UnboundedReceiver<ProtoMessage>>,
+    /// Shared depth counter; decremented on every successful receive.
+    data_queue_size: Arc<AtomicUsize>,
+}
+
+impl MailboxData {
+    /// Non-blocking drain.  Returns `Some` if a data message is ready, `None` otherwise.
+    pub fn try_recv(&mut self) -> Option<ProtoMessage> {
+        let result = if let Some(rx) = &mut self.bounded {
+            rx.try_recv().ok()
+        } else if let Some(rx) = &mut self.unbounded {
+            rx.try_recv().ok()
+        } else {
+            None
+        };
+        if result.is_some() {
+            self.data_queue_size.fetch_sub(1, AtomicOrdering::Relaxed);
+        }
+        result
+    }
+
+    /// Async receive.  Awaits the next data message; returns `None` only if the
+    /// channel is closed (actor stopping).
+    ///
+    pub async fn recv(&mut self) -> Option<ProtoMessage> {
+        if let Some(rx) = &mut self.bounded {
+            let msg = rx.recv().await?;
+            self.data_queue_size.fetch_sub(1, AtomicOrdering::Relaxed);
+            return Some(msg);
+        }
+        if let Some(rx) = &mut self.unbounded {
+            let msg = rx.recv().await?;
+            self.data_queue_size.fetch_sub(1, AtomicOrdering::Relaxed);
+            return Some(msg);
+        }
+        unreachable!("MailboxData constructed without bounded or unbounded receiver")
+    }
+}
+
+// ── MailboxReceiver ───────────────────────────────────────────────────────────
+
+/// Consumer half of the mailbox — owned exclusively by the actor message loop.
+///
+/// `MailboxReceiver` is `!Clone` and `!Sync`, enforcing single-consumer at compile time.
+/// This eliminates the `tokio::sync::Mutex` wrappers that were previously needed to
+/// make the receivers `Sync` inside `Arc<Mailbox>`.
+///
+/// ## Layout rationale
+///
+/// `ctrl` and `data` are named sub-fields rather than flat fields.  This lets the
+/// actor loop borrow them simultaneously via disjoint field borrows — Rust allows
+/// `&mut self.ctrl` and `&mut self.data` at the same time because they are distinct
+/// fields.  The actor loop uses this to drive a single flat `tokio::select!` with
+/// three arms (shutdown · ctrl · data), eliminating the previously nested selects.
+///
+/// Created by [`Mailbox::new()`] and returned alongside the sender-side `Mailbox`.
+pub struct MailboxReceiver {
+    /// Control-message receiver (system signals: EXIT, DOWN, SHUTDOWN).
+    pub ctrl: MailboxCtrl,
+    /// Data-message receiver (application messages).
+    pub data: MailboxData,
+    /// Kept for `ack_message()` on durable backends; `None` for in-memory paths.
+    channel: Option<Arc<dyn Channel>>,
+    /// Shutdown flag for durable backends (shared with sender side).
+    shutdown_flag: Arc<AtomicBool>,
+    /// Mailbox ID for logging/metrics.
+    mailbox_id: String,
+    /// Whether the backend is in-memory (used by `is_in_memory()`).
+    is_in_memory: bool,
+}
+
+/// Mailbox implementation using channel-based messaging (sender side).
 ///
 /// ## Architecture
 ///
-/// ### Fast path (in-memory FIFO/LIFO actors — the common case)
+/// `Mailbox::new()` returns `(Mailbox, MailboxReceiver)`.
+/// - **`Mailbox`** (this struct): holds senders, config, enqueue logic. `Clone`-safe behind `Arc`.
+/// - **`MailboxReceiver`**: holds receivers, dequeue logic. Owned by one actor task.
+///
+/// ### Fast path (in-memory FIFO/LIFO — the common case)
 /// A single bounded `mpsc::channel` is the sole data path:
-/// `enqueue()` → `data_tx.send()` directly; `dequeue()` → `data_rx.recv()`.
-/// No background task, no intermediate VecDeque, no InMemoryChannel allocation.
+/// `enqueue()` → `data_tx.send()` directly; `receiver.data.recv()` → `data_rx.recv()`.
+/// No background task, no intermediate VecDeque, no Channel backend allocation.
 ///
 /// ### Priority path (in-memory priority-ordered actors)
-/// An `internal_queue` (BinaryHeap) + background processor task + `local_receiver`
-/// are used so messages can be sorted before delivery.
+/// `internal_queue` (BinaryHeap) + `start_priority_processor` task + `local_sender/receiver`.
+/// Messages are sorted by priority before forwarding to the actor via unbounded mpsc.
+/// No Channel backend — previously an InMemoryChannel was allocated but never read; removed.
 ///
 /// ### Durable path (SQLite / Redis / Kafka / SQS / NATS)
-/// `Arc<dyn Channel>` + `internal_queue` + background processor are used as before.
-/// `dequeue()` falls back to `channel.receive()` when `data_rx` and `local_receiver`
-/// are both absent.
+/// `Arc<dyn Channel>` + `internal_queue` + two background tasks:
+/// - `start_durable_enqueue_processor`: drains `internal_queue` → `channel.send()` (persistence)
+/// - `start_durable_pump`: reads `channel.try_receive()` → `local_sender` (Notify-based wake,
+///   replacing the previous `yield_now()` busy-wait loop)
 pub struct Mailbox {
     /// Configuration
     config: MailboxConfig,
-    /// Channel backend — `None` for in-memory FIFO/LIFO (fast path).
-    /// `Some` for priority-ordered in-memory and all durable backends.
+    /// Channel backend — `None` for all in-memory paths (fast path and priority).
+    /// `Some` only for durable backends (SQLite, Redis, Kafka, SQS, NATS).
     channel: Option<Arc<dyn Channel>>,
     /// Channel name (used for message routing)
     channel_name: String,
@@ -268,20 +423,16 @@ pub struct Mailbox {
     mailbox_id: String,
     /// Internal queue for priority ordering — `None` on the fast path (FIFO/LIFO in-memory).
     internal_queue: Option<Arc<RwLock<MessageStorage>>>,
-    /// Background task handle — `None` on the fast path.
-    processor_handle: Option<Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>>,
+    /// Background task handles — `None` on the fast path.
+    /// Durable backends may run two tasks (enqueue processor + pump); all are
+    /// tracked here so `graceful_shutdown` can cancel every one.
+    processor_handles: Option<Arc<RwLock<Vec<tokio::task::JoinHandle<()>>>>>,
     /// Notify for background processor — `None` on the fast path.
     notify: Option<Arc<Notify>>,
-    /// Local receiver for priority-ordered in-memory and durable paths.
-    local_receiver: Option<Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<ProtoMessage>>>>>,
-
     // ── Fast-path data channel (in-memory FIFO/LIFO only) ────────────────────
     /// Sender half of the bounded data channel used on the fast path.
     /// `None` when the priority queue or a durable backend is in use.
     data_tx: Option<mpsc::Sender<ProtoMessage>>,
-    /// Receiver half of the bounded data channel.
-    /// `Arc` so the `'static` dequeue future can share it without borrowing `self`.
-    data_rx: Arc<tokio::sync::Mutex<Option<mpsc::Receiver<ProtoMessage>>>>,
 
     // ── Stats ─────────────────────────────────────────────────────────────────
     /// Current data-queue depth.  `Arc` so the background processor can decrement
@@ -312,10 +463,8 @@ pub struct Mailbox {
     // ── Control-message fast lane ─────────────────────────────────────────────
     /// Sender half of the unbounded ctrl channel.
     ctrl_sender: mpsc::UnboundedSender<ProtoMessage>,
-    /// Receiver half — behind a Mutex so the async `dequeue` future can poll it.
-    ctrl_receiver: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<ProtoMessage>>>,
     /// Number of messages currently in the ctrl channel.
-    /// `Arc` so the `'static` dequeue future can share it without borrowing `self`.
+    /// `Arc` so the receiver side can share it.
     ctrl_size: Arc<AtomicUsize>,
 }
 
@@ -371,7 +520,9 @@ impl Mailbox {
     /// * `idempotency_store` - Node-wide dedup store; `None` for temporary senders
     ///
     /// ## Returns
-    /// `Ok(Mailbox)` on success, `Err(MailboxError)` if channel backend is unavailable
+    /// `Ok((Mailbox, MailboxReceiver))` on success, `Err(MailboxError)` if channel backend is unavailable.
+    /// The `Mailbox` (sender side) is `Send + Sync` and can be shared via `Arc`.
+    /// The `MailboxReceiver` (consumer side) is `!Clone` and must be owned by the actor task.
     ///
     /// ## Errors
     /// - `MailboxError::InvalidConfig`: Invalid channel backend or configuration
@@ -382,7 +533,7 @@ impl Mailbox {
         tenant_id: String,
         namespace: String,
         idempotency_store: Option<Arc<dyn IdempotencyStore>>,
-    ) -> Result<Self, MailboxError> {
+    ) -> Result<(Self, MailboxReceiver), MailboxError> {
         // Determine channel backend (default to IN_MEMORY if not specified)
         let channel_provider = if config.channel_provider != 0 {
             ChannelProvider::try_from(config.channel_provider).map_err(|_| {
@@ -408,10 +559,22 @@ impl Mailbox {
         // mpsc channel, no background task.
         let use_fast_path = is_in_memory && !is_priority && !is_lifo && !is_drop_oldest;
 
-        let (channel, channel_name) = if use_fast_path {
+        // Channel backend:
+        // - Fast path and all in-memory paths (priority, LIFO, etc.): no Channel needed.
+        //   Fast path delivers via direct bounded mpsc; in-memory non-fast paths deliver
+        //   via local_sender/local_receiver fed by a background priority processor.
+        //   Previously, in-memory non-fast paths also allocated an InMemoryChannel that was
+        //   written to but never read — that dead allocation is now removed.
+        // - Durable paths (SQLite/Redis/Kafka/SQS/NATS): Channel is the persistent store.
+        //   A durable enqueue processor writes internal_queue → channel.send(); a separate
+        //   durable pump task reads channel.try_receive() → local_sender (Notify-based,
+        //   replacing the previous yield_now() busy-wait).
+        let (channel, channel_name) = if use_fast_path || is_in_memory {
+            // No Channel needed: fast path uses direct mpsc; in-memory non-fast paths
+            // use the internal_queue + local_sender pipeline without a Channel backend.
             (None, format!("mailbox:{}", mailbox_id))
         } else {
-            // Build a Channel backend (InMemoryChannel for priority, or durable backend).
+            // Durable backend only.
             let mut channel_config = config
                 .channel_config
                 .clone()
@@ -440,9 +603,11 @@ impl Mailbox {
             (None, None)
         };
 
-        // Priority / durable path: local_receiver fed by background processor.
-        let (local_sender, local_receiver) = if !use_fast_path && is_in_memory {
-            // priority in-memory
+        // Non-fast-path: local_sender/local_receiver for ALL non-fast paths.
+        // Previously only created for priority in-memory; now also created for durable
+        // backends so the actor loop can always read from an mpsc channel rather than
+        // polling channel.receive() directly.
+        let (local_sender, local_receiver_rx) = if !use_fast_path {
             let (s, r) = mpsc::unbounded_channel::<ProtoMessage>();
             (Some(s), Some(r))
         } else {
@@ -473,6 +638,25 @@ impl Mailbox {
         };
         let data_queue_size = Arc::new(AtomicUsize::new(0));
 
+        let shutdown_flag = Arc::new(AtomicBool::new(false));
+        let ctrl_size = Arc::new(AtomicUsize::new(0));
+
+        let receiver = MailboxReceiver {
+            ctrl: MailboxCtrl {
+                rx: ctrl_receiver,
+                ctrl_size: ctrl_size.clone(),
+            },
+            data: MailboxData {
+                bounded: data_rx,
+                unbounded: local_receiver_rx,
+                data_queue_size: data_queue_size.clone(),
+            },
+            channel: channel.clone(),
+            shutdown_flag: shutdown_flag.clone(),
+            mailbox_id: mailbox_id.clone(),
+            is_in_memory,
+        };
+
         let mailbox = Mailbox {
             config: config.clone(),
             channel,
@@ -480,17 +664,13 @@ impl Mailbox {
             channel_provider: channel_provider_value,
             mailbox_id: mailbox_id.clone(),
             internal_queue,
-            processor_handle: if !use_fast_path {
-                Some(Arc::new(RwLock::new(None)))
+            processor_handles: if !use_fast_path {
+                Some(Arc::new(RwLock::new(Vec::new())))
             } else {
                 None
             },
             notify: notify.clone(),
-            local_receiver: local_receiver.map(|r| {
-                Arc::new(tokio::sync::Mutex::new(Some(r)))
-            }),
             data_tx,
-            data_rx: Arc::new(tokio::sync::Mutex::new(data_rx)),
             data_queue_size: data_queue_size.clone(),
             total_enqueued:  AtomicU64::new(0),
             total_dequeued:  AtomicU64::new(0),
@@ -500,29 +680,40 @@ impl Mailbox {
             idempotency_store,
             max_capacity: max_cap,
             retry_after_ms: mailbox_config_retry_after_ms(&config) as u64,
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            shutdown_flag,
             in_progress_count: AtomicUsize::new(0),
             shutdown_notify: Arc::new(Notify::new()),
             ctrl_sender,
-            ctrl_receiver: Arc::new(tokio::sync::Mutex::new(ctrl_receiver)),
-            ctrl_size: Arc::new(AtomicUsize::new(0)),
+            ctrl_size,
         };
 
         // Start background processor only when needed (priority or durable path).
         if !use_fast_path {
-            if let Some(sender) = local_sender {
-                mailbox.start_processor_with_local_sender(sender, data_queue_size, notify.unwrap());
+            let ls = local_sender.expect("local_sender always Some for non-fast paths");
+            let n = notify.unwrap();
+            if is_in_memory {
+                // Priority in-memory: sort BinaryHeap → local_sender.
+                // No Channel backend, no durable pump needed.
+                // data_queue_size decremented by MailboxData::recv() on actor consume.
+                mailbox.start_priority_processor(ls, n);
             } else {
-                mailbox.start_processor(notify.unwrap());
+                // Durable path: two tasks:
+                // (1) drain internal_queue → channel.send() for persistence
+                // (2) pump channel.try_receive() → local_sender (Notify-based, replaces busy-wait)
+                // data_queue_size decremented by MailboxData::recv() on actor consume.
+                mailbox.start_durable_enqueue_processor(n.clone());
+                mailbox.start_durable_pump(ls, n);
             }
         }
 
-        Ok(mailbox)
+        Ok((mailbox, receiver))
     }
 
     /// Background processor for durable backends (SQLite, Redis, Kafka, SQS, NATS).
-    /// Drains `internal_queue` into `channel.send()` as messages arrive.
-    fn start_processor(&self, notify: Arc<Notify>) {
+    /// Drains `internal_queue` into `channel.send()` for persistence.
+    /// A companion `start_durable_pump()` task reads from the channel and forwards
+    /// to `local_sender` so the actor loop reads from a plain mpsc rather than polling.
+    fn start_durable_enqueue_processor(&self, notify: Arc<Notify>) {
         let internal_queue = self.internal_queue.as_ref()
             .expect("start_processor called without internal_queue")
             .clone();
@@ -530,9 +721,8 @@ impl Mailbox {
             .expect("start_processor called without channel")
             .clone();
         let channel_name = self.channel_name.clone();
-        let data_queue_size = self.data_queue_size.clone();
-        let processor_handle = self.processor_handle.as_ref()
-            .expect("start_processor called without processor_handle")
+        let processor_handles = self.processor_handles.as_ref()
+            .expect("start_processor called without processor_handles")
             .clone();
 
         let handle = tokio::spawn(async move {
@@ -561,7 +751,8 @@ impl Mailbox {
                     }
                 }
 
-                let sent = messages_to_send.len();
+                // data_queue_size is decremented by MailboxData::recv() when the actor
+                // consumes the message — do NOT decrement here (would double-count).
                 for msg in messages_to_send {
                     let mut channel_msg = msg;
                     channel_msg.channel = channel_name.clone();
@@ -571,34 +762,33 @@ impl Mailbox {
                         Err(e) => tracing::warn!("Mailbox processor send error: {}", e),
                     }
                 }
-                if sent > 0 {
-                    data_queue_size.fetch_sub(sent, AtomicOrdering::Relaxed);
-                }
             }
         });
 
-        let ph = processor_handle.clone();
-        tokio::spawn(async move { *ph.write().await = Some(handle); });
+        let ph = processor_handles.clone();
+        tokio::spawn(async move { ph.write().await.push(handle); });
     }
 
     /// Background processor for priority-ordered in-memory mailboxes.
-    /// Sorts messages in `internal_queue` then delivers via `local_sender`.
-    fn start_processor_with_local_sender(
+    ///
+    /// Drains `internal_queue` (a BinaryHeap sorted by priority) and forwards
+    /// each message to `local_sender` so the actor loop always reads from a plain
+    /// mpsc channel regardless of ordering strategy.
+    ///
+    /// No `Channel` backend is involved — previously `channel.send()` was called
+    /// here but the channel was never read, making it a dead write.  That code is
+    /// removed; the InMemoryChannel allocation for in-memory priority mailboxes is
+    /// also removed in `Mailbox::new()`.
+    fn start_priority_processor(
         &self,
         local_sender: mpsc::UnboundedSender<ProtoMessage>,
-        data_queue_size: Arc<AtomicUsize>,
         notify: Arc<Notify>,
     ) {
         let internal_queue = self.internal_queue.as_ref()
-            .expect("start_processor_with_local_sender called without internal_queue")
+            .expect("start_priority_processor called without internal_queue")
             .clone();
-        let channel = self.channel.as_ref()
-            .expect("start_processor_with_local_sender called without channel")
-            .clone();
-        let channel_name = self.channel_name.clone();
-        let notify_for_waiters = notify.clone();
-        let processor_handle = self.processor_handle.as_ref()
-            .expect("start_processor_with_local_sender called without processor_handle")
+        let processor_handles = self.processor_handles.as_ref()
+            .expect("start_priority_processor called without processor_handles")
             .clone();
 
         let handle = tokio::spawn(async move {
@@ -627,33 +817,77 @@ impl Mailbox {
                     }
                 }
 
-                let mut num_sent = 0usize;
+                // data_queue_size is decremented by MailboxData::recv() when the actor
+                // consumes the message — do NOT decrement here (would double-count).
                 for msg in messages_to_send {
-                    let msg_id = msg.id.clone();
-                    let mut channel_msg = msg.clone();
-                    channel_msg.channel = channel_name.clone();
-                    let ch_result = channel.send(channel_msg).await;
-                    let local_result = local_sender.send(msg);
-                    match (ch_result, local_result) {
-                        (Ok(_), Ok(())) => num_sent += 1,
-                        (Err(ChannelError::ChannelClosed(_)), _) | (_, Err(_)) => {
-                            tracing::warn!(message_id = %msg_id, "Mailbox processor: receiver closed, stopping");
-                            return;
-                        }
-                        (Err(e), _) => {
-                            tracing::warn!(message_id = %msg_id, error = %e, "Mailbox processor: channel error");
-                        }
+                    if local_sender.send(msg).is_err() {
+                        // Actor stopped; exit processor.
+                        return;
                     }
-                }
-                if num_sent > 0 {
-                    data_queue_size.fetch_sub(num_sent, AtomicOrdering::Relaxed);
-                    notify_for_waiters.notify_waiters();
                 }
             }
         });
 
-        let ph = processor_handle.clone();
-        tokio::spawn(async move { *ph.write().await = Some(handle); });
+        let ph = processor_handles.clone();
+        tokio::spawn(async move { ph.write().await.push(handle); });
+    }
+
+    /// Background pump for durable backends.
+    ///
+    /// Reads from the `Channel` backend (SQLite, Redis, Kafka, etc.) using
+    /// `try_receive()` and forwards each message to `local_sender` so the actor
+    /// loop reads from a plain mpsc channel rather than polling the channel directly.
+    ///
+    /// Wake-up strategy:
+    /// - After forwarding messages: loop immediately (more may be available).
+    /// - When `try_receive()` returns empty: wait for `notify.notified()` (fired by
+    ///   `enqueue()` when a message is added).  Tokio `Notify` stores one permit, so
+    ///   a notification that fires between `try_receive()` and `notified()` is not lost.
+    ///
+    /// This replaces the previous `yield_now()` busy-wait loop, eliminating CPU spin
+    /// when the actor mailbox is idle.
+    fn start_durable_pump(
+        &self,
+        local_sender: mpsc::UnboundedSender<ProtoMessage>,
+        notify: Arc<Notify>,
+    ) {
+        let channel = self.channel.as_ref()
+            .expect("start_durable_pump called without channel")
+            .clone();
+        let processor_handles = self.processor_handles.as_ref()
+            .expect("start_durable_pump called without processor_handles")
+            .clone();
+
+        let handle = tokio::spawn(async move {
+            loop {
+                match channel.try_receive(32).await {
+                    Ok(messages) if !messages.is_empty() => {
+                        for msg in messages {
+                            if local_sender.send(msg).is_err() {
+                                return; // Actor stopped.
+                            }
+                        }
+                        // data_queue_size is decremented by MailboxData::recv() when the
+                        // actor consumes from local_sender — do NOT decrement here.
+                        // Don't sleep — more messages may be queued.
+                    }
+                    Ok(_) => {
+                        // Channel empty: sleep until enqueue() fires notify_one().
+                        // Tokio Notify stores one permit, so a notify_one() that
+                        // fires between try_receive() and notified() is not lost.
+                        notify.notified().await;
+                    }
+                    Err(ChannelError::ChannelClosed(_)) => return,
+                    Err(e) => {
+                        tracing::warn!("Durable pump receive error: {}", e);
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                }
+            }
+        });
+
+        let ph = processor_handles.clone();
+        tokio::spawn(async move { ph.write().await.push(handle); });
     }
 
     /// Enqueue a message.
@@ -835,188 +1069,9 @@ impl Mailbox {
         self.enqueue(message).await
     }
 
-    /// Dequeue a message with optional timeout.
-    pub fn dequeue_with_timeout(
-        &self,
-        timeout: Option<std::time::Duration>,
-    ) -> impl std::future::Future<Output = Option<ProtoMessage>> + 'static {
-        let channel = self.channel.clone();
-        let local_receiver = self.local_receiver.clone();
-        let data_rx = self.data_rx.clone();
-        let mailbox_id = self.mailbox_id.clone();
-        let shutdown_flag = self.shutdown_flag.clone();
-        let ctrl_receiver = self.ctrl_receiver.clone();
-        let ctrl_size = self.ctrl_size.clone();
-        let data_queue_size = self.data_queue_size.clone();
-        let is_in_memory = self.is_in_memory();
-        // true when this mailbox uses the fast path (no channel, no local_receiver)
-        let use_fast_path = self.data_tx.is_some();
-
-        async move {
-            // ── Ctrl fast lane (non-blocking check first) ─────────────────────
-            if ctrl_size.load(AtomicOrdering::Acquire) > 0 {
-                if let Ok(msg) = ctrl_receiver.lock().await.try_recv() {
-                    ctrl_size.fetch_sub(1, AtomicOrdering::Relaxed);
-                    metrics::counter!("plexspaces_mailbox_ctrl_dequeued_total",
-                        "mailbox_id" => mailbox_id.clone(),
-                        "message_type" => msg.message_type.clone()
-                    ).increment(1);
-                    return Some(msg);
-                }
-            }
-            // ──────────────────────────────────────────────────────────────────
-
-            // ── Fast path: bounded mpsc data channel ──────────────────────────
-            if use_fast_path {
-                let mut rx_guard = data_rx.lock().await;
-                let Some(rx) = rx_guard.as_mut() else { return None; };
-                let mut ctrl_guard = ctrl_receiver.lock().await;
-                let result = match timeout {
-                    Some(dur) => {
-                        match tokio::time::timeout(dur, async {
-                            tokio::select! {
-                                biased;
-                                ctrl_msg = ctrl_guard.recv() => ctrl_msg.map(|m| (m, true)),
-                                data_msg = rx.recv() => data_msg.map(|m| (m, false)),
-                            }
-                        }).await {
-                            Ok(r) => r,
-                            Err(_) => return None,
-                        }
-                    }
-                    None => tokio::select! {
-                        biased;
-                        ctrl_msg = ctrl_guard.recv() => ctrl_msg.map(|m| (m, true)),
-                        data_msg = rx.recv() => data_msg.map(|m| (m, false)),
-                    },
-                };
-                drop(ctrl_guard);
-                if let Some((msg, is_ctrl)) = result {
-                    if is_ctrl {
-                        ctrl_size.fetch_sub(1, AtomicOrdering::Relaxed);
-                        metrics::counter!("plexspaces_mailbox_ctrl_dequeued_total",
-                            "mailbox_id" => mailbox_id.clone(),
-                            "message_type" => msg.message_type.clone()
-                        ).increment(1);
-                    } else {
-                        data_queue_size.fetch_sub(1, AtomicOrdering::Relaxed);
-                    }
-                    return Some(msg);
-                }
-                return None;
-            }
-            // ──────────────────────────────────────────────────────────────────
-
-            // ── Priority path: local_receiver fed by background processor ─────
-            if let Some(lr) = &local_receiver {
-                let mut receiver_opt = lr.lock().await;
-                if let Some(receiver) = receiver_opt.as_mut() {
-                    let mut ctrl_guard = ctrl_receiver.lock().await;
-                    let result = match timeout {
-                        Some(dur) => {
-                            match tokio::time::timeout(dur, async {
-                                tokio::select! {
-                                    biased;
-                                    ctrl_msg = ctrl_guard.recv() => ctrl_msg.map(|m| (m, true)),
-                                    data_msg = receiver.recv() => data_msg.map(|m| (m, false)),
-                                }
-                            }).await {
-                                Ok(r) => r,
-                                Err(_) => return None,
-                            }
-                        }
-                        None => tokio::select! {
-                            biased;
-                            ctrl_msg = ctrl_guard.recv() => ctrl_msg.map(|m| (m, true)),
-                            data_msg = receiver.recv() => data_msg.map(|m| (m, false)),
-                        },
-                    };
-                    drop(ctrl_guard);
-                    if let Some((msg, is_ctrl)) = result {
-                        if is_ctrl {
-                            ctrl_size.fetch_sub(1, AtomicOrdering::Relaxed);
-                            metrics::counter!("plexspaces_mailbox_ctrl_dequeued_total",
-                                "mailbox_id" => mailbox_id.clone(),
-                                "message_type" => msg.message_type.clone()
-                            ).increment(1);
-                        } else {
-                            data_queue_size.fetch_sub(1, AtomicOrdering::Relaxed);
-                        }
-                        return Some(msg);
-                    }
-                    return None;
-                }
-            }
-            // ──────────────────────────────────────────────────────────────────
-
-            // ── Durable path: poll the channel backend ─────────────────────────
-            let channel = match channel {
-                Some(ch) => ch,
-                None => return None,
-            };
-
-            match timeout {
-                None => loop {
-                    if !is_in_memory && shutdown_flag.load(AtomicOrdering::Acquire) {
-                        return None;
-                    }
-                    match channel.receive(1).await {
-                        Ok(messages) => {
-                            if let Some(msg) = messages.into_iter().next() {
-                                return Some(msg);
-                            }
-                        }
-                        Err(ChannelError::ChannelClosed(_)) => return None,
-                        Err(e) => {
-                            tracing::warn!("Channel receive error: {}", e);
-                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                        }
-                    }
-                    tokio::task::yield_now().await;
-                },
-                Some(duration) => {
-                    if !is_in_memory && shutdown_flag.load(AtomicOrdering::Acquire) {
-                        return None;
-                    }
-                    let start = std::time::Instant::now();
-                    loop {
-                        if start.elapsed() >= duration {
-                            return None;
-                        }
-                        match channel.try_receive(1).await {
-                            Ok(messages) => {
-                                if let Some(msg) = messages.into_iter().next() {
-                                    return Some(msg);
-                                }
-                            }
-                            Err(ChannelError::ChannelClosed(_)) => return None,
-                            Err(_) => tokio::task::yield_now().await,
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Dequeue a message (indefinite timeout)
-    ///
-    /// Returns a future that yields messages from the channel.
-    /// Waits indefinitely for a message to arrive.
-    /// This is a convenience method that calls `dequeue_with_timeout(None)`.
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// tokio::select! {
-    ///     Some(message) = mailbox.dequeue() => {
-    ///         // Process message
-    ///     }
-    ///     _ = shutdown_rx.recv() => {
-    ///         break;
-    ///     }
-    /// }
-    /// ```
-    pub fn dequeue(&self) -> impl std::future::Future<Output = Option<ProtoMessage>> {
-        self.dequeue_with_timeout(None)
+    /// Get a reference to the ctrl_sender (for sending control messages like EXIT/DOWN).
+    pub fn ctrl_sender(&self) -> &mpsc::UnboundedSender<ProtoMessage> {
+        &self.ctrl_sender
     }
 
     /// Acknowledge message processing (durable backends only; no-op on fast path).
@@ -1179,6 +1234,97 @@ impl Mailbox {
     }
 }
 
+// ── MailboxReceiver implementation ───────────────────────────────────────────
+
+impl MailboxReceiver {
+    /// Non-blocking ctrl drain.  Returns `Some` if a ctrl message is available.
+    ///
+    /// Delegates to `MailboxCtrl::try_recv()` which also decrements the counter.
+    pub fn try_recv_ctrl(&mut self) -> Option<ProtoMessage> {
+        self.ctrl.try_recv()
+    }
+
+    /// Whether the backend is in-memory.
+    pub fn is_in_memory(&self) -> bool {
+        self.is_in_memory
+    }
+
+    /// Check if the durable backend shutdown flag is set.
+    pub fn is_shutdown(&self) -> bool {
+        self.shutdown_flag.load(AtomicOrdering::Acquire)
+    }
+
+    /// Get the mailbox ID (for logging/metrics).
+    pub fn mailbox_id(&self) -> &str {
+        &self.mailbox_id
+    }
+
+    /// Dequeue a message with optional timeout.
+    ///
+    /// Uses the `ctrl` and `data` sub-fields directly.  The actor loop calls
+    /// this method, or — for the flattened 3-arm select — accesses `receiver.ctrl`
+    /// and `receiver.data` directly as disjoint borrows inside `tokio::select!`.
+    pub async fn dequeue_with_timeout(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Option<ProtoMessage> {
+        // Fast ctrl check (non-blocking) — returns immediately if a system signal
+        // is already queued, avoiding the select machinery overhead.
+        if let Some(msg) = self.ctrl.try_recv() {
+            metrics::counter!("plexspaces_mailbox_ctrl_dequeued_total",
+                "mailbox_id" => self.mailbox_id.clone(),
+                "message_type" => msg.message_type.clone()
+            ).increment(1);
+            return Some(msg);
+        }
+
+        // ── Select between ctrl and data ──────────────────────────────────
+        // Using disjoint field borrows: `ctrl` and `data` are separate fields so
+        // Rust allows `&mut self.ctrl` and `&mut self.data` simultaneously.
+        let ctrl = &mut self.ctrl;
+        let data = &mut self.data;
+        let mailbox_id = &self.mailbox_id;
+
+        let result: Option<(ProtoMessage, bool)> = match timeout {
+            None => tokio::select! {
+                biased;
+                ctrl_msg = ctrl.recv() => ctrl_msg.map(|m| (m, true)),
+                data_msg = data.recv() => data_msg.map(|m| (m, false)),
+            },
+            Some(dur) => {
+                match tokio::time::timeout(dur, async {
+                    tokio::select! {
+                        biased;
+                        ctrl_msg = ctrl.recv() => ctrl_msg.map(|m| (m, true)),
+                        data_msg = data.recv() => data_msg.map(|m| (m, false)),
+                    }
+                }).await {
+                    Ok(r) => r,
+                    Err(_) => return None, // timeout
+                }
+            }
+        };
+
+        if let Some((msg, is_ctrl)) = result {
+            if is_ctrl {
+                // Counter was already decremented inside MailboxCtrl::recv().
+                metrics::counter!("plexspaces_mailbox_ctrl_dequeued_total",
+                    "mailbox_id" => mailbox_id.clone(),
+                    "message_type" => msg.message_type.clone()
+                ).increment(1);
+            }
+            // data_queue_size counter decremented inside MailboxData::recv().
+            return Some(msg);
+        }
+        None
+    }
+
+    /// Dequeue a message (indefinite timeout).
+    pub async fn dequeue(&mut self) -> Option<ProtoMessage> {
+        self.dequeue_with_timeout(None).await
+    }
+}
+
 /// Mailbox statistics for observability (public API)
 #[derive(Debug, Clone)]
 pub struct MailboxObservabilityStats {
@@ -1215,14 +1361,14 @@ mod tests {
     use plexspaces_proto::common::v1::Message;
 
     /// Helper to create a test mailbox with InMemory backend
-    async fn create_test_mailbox(config: MailboxConfig) -> Mailbox {
+    async fn create_test_mailbox(config: MailboxConfig) -> (Mailbox, MailboxReceiver) {
         Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
             .await
             .unwrap()
     }
 
     /// Helper to create a test mailbox with default config
-    async fn create_default_mailbox() -> Mailbox {
+    async fn create_default_mailbox() -> (Mailbox, MailboxReceiver) {
         create_test_mailbox(mailbox_config_default()).await
     }
 
@@ -1268,7 +1414,7 @@ mod tests {
     async fn test_fifo_mailbox() {
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         // Enqueue messages
         mailbox
@@ -1281,10 +1427,10 @@ mod tests {
             .unwrap();
 
         // Dequeue in FIFO order
-        let msg1 = mailbox.dequeue().await.unwrap();
+        let msg1 = receiver.dequeue().await.unwrap();
         assert_eq!(msg1.payload, b"first");
 
-        let msg2 = mailbox.dequeue().await.unwrap();
+        let msg2 = receiver.dequeue().await.unwrap();
         assert_eq!(msg2.payload, b"second");
     }
 
@@ -1292,7 +1438,7 @@ mod tests {
     async fn test_lifo_mailbox() {
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingLifo as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         mailbox
             .enqueue(new_message(b"first".to_vec()))
@@ -1304,10 +1450,10 @@ mod tests {
             .unwrap();
 
         // Dequeue in LIFO order
-        let msg1 = mailbox.dequeue().await.unwrap();
+        let msg1 = receiver.dequeue().await.unwrap();
         assert_eq!(msg1.payload, b"second");
 
-        let msg2 = mailbox.dequeue().await.unwrap();
+        let msg2 = receiver.dequeue().await.unwrap();
         assert_eq!(msg2.payload, b"first");
     }
 
@@ -1320,7 +1466,7 @@ mod tests {
     async fn test_priority_mailbox_enqueue() {
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingPriority as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         mailbox
             .enqueue(with_priority(
@@ -1377,38 +1523,28 @@ mod tests {
     /// Test 3: Verify background processor moves messages from internal queue to channel
     #[tokio::test]
     async fn test_priority_mailbox_processor() {
+        // Verifies the background priority processor forwards messages to the actor.
+        // size() reflects un-consumed messages (decremented on actor receive, not on
+        // processor forward), so we do not poll size() here — just dequeue directly.
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingPriority as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
-        // Enqueue one message
         mailbox
-            .enqueue(with_priority(
-                new_message(b"test".to_vec()),
-                MessagePriority::Normal,
-            ))
+            .enqueue(with_priority(new_message(b"test".to_vec()), MessagePriority::Normal))
             .await
             .unwrap();
 
-        // Wait for processor to move message to channel
-        // Poll until internal queue is empty
-        let mut attempts = 0;
-        while mailbox.size() > 0 && attempts < 100 {
-            tokio::task::yield_now().await;
-            attempts += 1;
-        }
+        // dequeue() awaits the processor naturally — no spin-wait needed.
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            receiver.dequeue(),
+        ).await
+        .expect("dequeue timed out — priority processor did not forward message")
+        .expect("channel closed unexpectedly");
 
-        // Message should be in channel now (size() tracks internal queue, not channel)
-        assert_eq!(
-            mailbox.size(),
-            0,
-            "Internal queue should be empty after processor runs"
-        );
-
-        // Message should be available for dequeue
-        let msg = mailbox.dequeue().await;
-        assert!(msg.is_some(), "Message should be available in channel");
-        assert_eq!(msg.unwrap().payload, b"test");
+        assert_eq!(msg.payload, b"test");
+        assert_eq!(mailbox.size(), 0, "size() should be 0 after message consumed");
     }
 
     /// Test 4: Verify priority ordering with two messages
@@ -1416,7 +1552,7 @@ mod tests {
     async fn test_priority_mailbox_two_messages() {
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingPriority as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         // Enqueue low priority first, then high priority
         mailbox
@@ -1442,10 +1578,10 @@ mod tests {
         }
 
         // High priority should come first
-        let msg1 = mailbox.dequeue().await.unwrap();
+        let msg1 = receiver.dequeue().await.unwrap();
         assert_eq!(msg1.payload, b"high", "High priority should come first");
 
-        let msg2 = mailbox.dequeue().await.unwrap();
+        let msg2 = receiver.dequeue().await.unwrap();
         assert_eq!(msg2.payload, b"low", "Low priority should come second");
     }
 
@@ -1454,7 +1590,7 @@ mod tests {
     async fn test_priority_mailbox_signal() {
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingPriority as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         // Enqueue low priority, then signal (Highest)
         mailbox
@@ -1477,13 +1613,13 @@ mod tests {
         }
 
         // Signal (Highest) should come first
-        let msg1 = mailbox.dequeue().await.unwrap();
+        let msg1 = receiver.dequeue().await.unwrap();
         assert_eq!(
             msg1.payload, b"signal",
             "Signal (Highest priority) should come first"
         );
 
-        let msg2 = mailbox.dequeue().await.unwrap();
+        let msg2 = receiver.dequeue().await.unwrap();
         assert_eq!(msg2.payload, b"low", "Low priority should come second");
     }
 
@@ -1492,7 +1628,7 @@ mod tests {
     async fn test_priority_mailbox() {
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingPriority as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         // Enqueue in random order
         mailbox
@@ -1529,19 +1665,19 @@ mod tests {
         }
 
         // Dequeue in priority order: signal (Highest=5) > high (4) > normal (3) > low (2)
-        let msg1 = mailbox.dequeue().await.unwrap();
+        let msg1 = receiver.dequeue().await.unwrap();
         assert_eq!(
             msg1.payload, b"signal",
             "Signal (Highest=5) should come first"
         );
 
-        let msg2 = mailbox.dequeue().await.unwrap();
+        let msg2 = receiver.dequeue().await.unwrap();
         assert_eq!(msg2.payload, b"high", "High (4) should come second");
 
-        let msg3 = mailbox.dequeue().await.unwrap();
+        let msg3 = receiver.dequeue().await.unwrap();
         assert_eq!(msg3.payload, b"normal", "Normal (3) should come third");
 
-        let msg4 = mailbox.dequeue().await.unwrap();
+        let msg4 = receiver.dequeue().await.unwrap();
         assert_eq!(msg4.payload, b"low", "Low (2) should come last");
     }
 
@@ -1550,7 +1686,7 @@ mod tests {
         let mut config = mailbox_config_default();
         config.capacity = 2;
         config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         mailbox
             .enqueue(new_message(b"first".to_vec()))
@@ -1567,7 +1703,7 @@ mod tests {
 
         assert_eq!(mailbox.size(), 2);
 
-        let msg1 = mailbox.dequeue().await.unwrap();
+        let msg1 = receiver.dequeue().await.unwrap();
         assert_eq!(msg1.payload, b"second"); // "first" was dropped
     }
 
@@ -1868,7 +2004,7 @@ mod tests {
         let mut config = mailbox_config_default();
         config.capacity = 2;
         config.backpressure_strategy = BackpressureStrategy::DropNewest as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         mailbox
             .enqueue(new_message(b"first".to_vec()))
@@ -1892,13 +2028,13 @@ mod tests {
         tokio::task::yield_now().await;
 
         // First two messages should still be there
-        let msg1 = mailbox
+        let msg1 = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
             .await
             .unwrap();
         assert_eq!(msg1.payload, b"first");
 
-        let msg2 = mailbox
+        let msg2 = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
             .await
             .unwrap();
@@ -1906,7 +2042,7 @@ mod tests {
 
         // No third message
         assert_eq!(
-            mailbox
+            receiver
                 .dequeue_with_timeout(Some(std::time::Duration::from_millis(10)))
                 .await,
             None
@@ -1919,7 +2055,7 @@ mod tests {
         let mut config = mailbox_config_default();
         config.capacity = 2;
         config.backpressure_strategy = BackpressureStrategy::Error as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         mailbox
             .enqueue(new_message(b"first".to_vec()))
@@ -1945,7 +2081,7 @@ mod tests {
         let mut config = mailbox_config_default();
         config.capacity = 2;
         config.backpressure_strategy = BackpressureStrategy::Block as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         mailbox
             .enqueue(new_message(b"first".to_vec()))
@@ -1973,7 +2109,7 @@ mod tests {
 
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingRandom as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         // Enqueue multiple messages
         for i in 0..10 {
@@ -1995,7 +2131,7 @@ mod tests {
         // Dequeue all messages (use timeout to avoid hanging)
         let mut dequeued = Vec::new();
         for _ in 0..10 {
-            if let Some(msg) = mailbox
+            if let Some(msg) = receiver
                 .dequeue_with_timeout(Some(Duration::from_millis(100)))
                 .await
             {
@@ -2026,23 +2162,23 @@ mod tests {
     /// Test send() method (alias for enqueue)
     #[tokio::test]
     async fn test_mailbox_send_alias() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         mailbox.send(new_message(b"test".to_vec())).await.unwrap();
 
         assert_eq!(mailbox.size(), 1);
 
-        let msg = mailbox.dequeue().await.unwrap();
+        let msg = receiver.dequeue().await.unwrap();
         assert_eq!(msg.payload, b"test");
     }
 
     /// Test dequeue() on empty mailbox waits indefinitely (returns None only when channel is closed)
     #[tokio::test]
     async fn test_mailbox_dequeue_empty() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         // Dequeue from empty mailbox with timeout should return None after timeout
-        let result = mailbox
+        let result = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_millis(10)))
             .await;
         assert_eq!(result, None, "Should timeout and return None");
@@ -2051,11 +2187,11 @@ mod tests {
     /// Test dequeue_with_timeout() with timeout
     #[tokio::test]
     async fn test_mailbox_dequeue_with_timeout() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         // Test timeout on empty mailbox
         let start = std::time::Instant::now();
-        let result = mailbox
+        let result = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_millis(50)))
             .await;
         let elapsed = start.elapsed();
@@ -2071,7 +2207,7 @@ mod tests {
         );
 
         // Test message arrives before timeout
-        let mailbox2 = create_default_mailbox().await;
+        let (mailbox2, mut receiver2) = create_default_mailbox().await;
         mailbox2
             .enqueue(new_message(b"test".to_vec()))
             .await
@@ -2081,7 +2217,7 @@ mod tests {
         tokio::task::yield_now().await;
 
         let start = std::time::Instant::now();
-        let result = mailbox2
+        let result = receiver2
             .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
             .await;
         let elapsed = start.elapsed();
@@ -2192,7 +2328,7 @@ mod tests {
         let mut config = mailbox_config_default();
         config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
 
-        let mailbox = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None)
+        let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
 
@@ -2203,7 +2339,7 @@ mod tests {
         // Yield to give processor task a chance to run
         tokio::task::yield_now().await;
 
-        let received = mailbox
+        let received = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
             .await;
         assert!(received.is_some());
@@ -2242,7 +2378,7 @@ mod tests {
 
         config.channel_config = Some(channel_config);
 
-        let mailbox = Mailbox::new(config, "test-mailbox-sqlite".to_string(), String::new(), String::new(), None)
+        let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox-sqlite".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
 
@@ -2253,7 +2389,7 @@ mod tests {
         // Yield to give processor task a chance to run
         tokio::task::yield_now().await;
 
-        let received = mailbox
+        let received = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
             .await;
         assert!(received.is_some());
@@ -2281,7 +2417,7 @@ mod tests {
         let config = mailbox_config_default();
         // channel_provider is 0 (unspecified), should default to InMemory
 
-        let mailbox = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None)
+        let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
 
@@ -2291,7 +2427,7 @@ mod tests {
 
         tokio::task::yield_now().await;
 
-        let received = mailbox
+        let received = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
             .await;
         assert!(received.is_some());
@@ -2314,7 +2450,7 @@ mod tests {
 
         config.channel_config = Some(channel_config);
 
-        let mailbox = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None)
+        let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
 
@@ -2324,7 +2460,7 @@ mod tests {
 
         tokio::task::yield_now().await;
 
-        let received = mailbox
+        let received = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
             .await;
         assert!(received.is_some());
@@ -2387,7 +2523,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
+            let (mailbox, mut receiver) = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
 
@@ -2436,7 +2572,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
+            let (mailbox, mut receiver) = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
 
@@ -2453,7 +2589,7 @@ mod tests {
 
             tokio::task::yield_now().await;
 
-            let received = mailbox
+            let received = receiver
                 .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
                 .await;
             assert!(received.is_some());
@@ -2521,7 +2657,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
+            let (mailbox, mut receiver) = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
 
@@ -2575,7 +2711,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
+            let (mailbox, mut receiver) = Mailbox::new(config, "recovery-mailbox".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
 
@@ -2592,7 +2728,7 @@ mod tests {
 
             tokio::task::yield_now().await;
 
-            let received = mailbox
+            let received = receiver
                 .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
                 .await;
             assert!(received.is_some());
@@ -2602,7 +2738,7 @@ mod tests {
     /// Test mailbox graceful shutdown with metrics
     #[tokio::test]
     async fn test_mailbox_graceful_shutdown() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         // Send some messages
         mailbox
@@ -2662,7 +2798,7 @@ mod tests {
 
         config.channel_config = Some(channel_config);
 
-        let mailbox = Mailbox::new(config, "multi-mailbox".to_string(), String::new(), String::new(), None)
+        let (mailbox, mut receiver) = Mailbox::new(config, "multi-mailbox".to_string(), String::new(), String::new(), None)
             .await
             .unwrap();
 
@@ -2682,7 +2818,7 @@ mod tests {
         // Receive some messages
         let mut received_count = 0;
         for _ in 0..5 {
-            if let Some(_) = mailbox
+            if let Some(_) = receiver
                 .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
                 .await
             {
@@ -2697,7 +2833,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ctrl_message_bypasses_data_queue() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         // Enqueue several data messages first
         for i in 0..5 {
@@ -2710,7 +2846,7 @@ mod tests {
         mailbox.enqueue(ctrl.clone()).await.unwrap();
 
         // The ctrl message must be returned first, regardless of insertion order
-        let first = tokio::time::timeout(std::time::Duration::from_millis(500), mailbox.dequeue())
+        let first = tokio::time::timeout(std::time::Duration::from_millis(500), receiver.dequeue())
             .await
             .expect("timed out")
             .expect("no message");
@@ -2723,7 +2859,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ctrl_size_tracking() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         assert_eq!(mailbox.ctrl_size(), 0);
 
@@ -2738,13 +2874,13 @@ mod tests {
         assert_eq!(mailbox.ctrl_size(), 2);
 
         // Dequeue one ctrl message
-        tokio::time::timeout(std::time::Duration::from_millis(200), mailbox.dequeue())
+        tokio::time::timeout(std::time::Duration::from_millis(200), receiver.dequeue())
             .await
             .unwrap();
         assert_eq!(mailbox.ctrl_size(), 1);
 
         // Dequeue the second
-        tokio::time::timeout(std::time::Duration::from_millis(200), mailbox.dequeue())
+        tokio::time::timeout(std::time::Duration::from_millis(200), receiver.dequeue())
             .await
             .unwrap();
         assert_eq!(mailbox.ctrl_size(), 0);
@@ -2752,7 +2888,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_stats_includes_ctrl_queue_size() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         mailbox
             .enqueue(with_message_type(new_message(vec![]), "call"))
@@ -2786,7 +2922,7 @@ mod tests {
                 .into(),
             ..mailbox_config_default()
         };
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         // Fill the data queue to capacity
         mailbox
@@ -2810,7 +2946,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_ctrl_types_ordered() {
-        let mailbox = create_default_mailbox().await;
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         // Interleave ctrl and data messages
         mailbox
@@ -2835,11 +2971,11 @@ mod tests {
             .unwrap();
 
         // First two dequeues must be ctrl messages
-        let m1 = tokio::time::timeout(std::time::Duration::from_millis(300), mailbox.dequeue())
+        let m1 = tokio::time::timeout(std::time::Duration::from_millis(300), receiver.dequeue())
             .await
             .unwrap()
             .unwrap();
-        let m2 = tokio::time::timeout(std::time::Duration::from_millis(300), mailbox.dequeue())
+        let m2 = tokio::time::timeout(std::time::Duration::from_millis(300), receiver.dequeue())
             .await
             .unwrap()
             .unwrap();
@@ -2867,12 +3003,11 @@ mod tests {
         // Verifies the tokio::select! path: a ctrl message that arrives while
         // dequeue_with_timeout is blocking on the data queue must be returned on
         // the same call, not deferred to the next one.
-        let mailbox = Arc::new(create_default_mailbox().await);
-        let mailbox2 = mailbox.clone();
+        let (mailbox, mut receiver) = create_default_mailbox().await;
 
         // Start dequeue before any messages exist — this will block.
         let dequeue = tokio::spawn(async move {
-            mailbox2
+            receiver
                 .dequeue_with_timeout(Some(std::time::Duration::from_millis(500)))
                 .await
         });
@@ -2905,7 +3040,7 @@ mod tests {
         // data_tx is Some, channel (Channel trait backend) is None.
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, mut receiver) = create_test_mailbox(config).await;
 
         assert!(
             mailbox.data_tx.is_some(),
@@ -2919,37 +3054,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_priority_uses_channel_not_fast_path() {
-        // Priority mailboxes route through the Channel backend + internal heap,
-        // NOT the direct mpsc fast path.
+        // Priority mailboxes sort via BinaryHeap + local_sender/receiver; no Channel backend.
+        // Previously a dead InMemoryChannel was allocated but never read — now removed.
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingPriority as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, _receiver) = create_test_mailbox(config).await;
 
         assert!(
-            mailbox.channel.is_some(),
-            "Priority mailbox must use the Channel backend"
+            mailbox.channel.is_none(),
+            "Priority in-memory mailbox must not allocate a Channel backend (all delivery is via local_sender)"
         );
         assert!(
             mailbox.data_tx.is_none(),
-            "Priority mailbox must not have data_tx (fast path is for FIFO/LIFO only)"
+            "Priority mailbox must not have data_tx (fast path is for FIFO only)"
         );
     }
 
     #[tokio::test]
     async fn test_lifo_uses_fast_path_channel() {
-        // LIFO in-memory mailboxes use the same direct mpsc fast path as FIFO:
-        // data_tx is Some, channel backend is None.
+        // LIFO in-memory mailboxes route through internal_queue + local_sender; no Channel backend.
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingLifo as i32;
-        let mailbox = create_test_mailbox(config).await;
+        let (mailbox, _receiver) = create_test_mailbox(config).await;
 
         assert!(
             mailbox.data_tx.is_none(),
             "LIFO mailbox must not have data_tx (LIFO uses internal queue, not fast path)"
         );
         assert!(
-            mailbox.channel.is_some(),
-            "LIFO mailbox must have a Channel backend for internal queue processing"
+            mailbox.channel.is_none(),
+            "LIFO in-memory mailbox must not allocate a Channel backend"
         );
     }
 }

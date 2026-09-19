@@ -76,7 +76,23 @@ This crate is a standalone binary used by:
 - Operators: For system administration
 - CI/CD: For automated deployments
 
+## Runtime Tuning Environment Variables
+
+Set these before starting the node to override Tokio thread pool defaults:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLEXSPACES_WORKER_THREADS` | `num_cpus` | Number of Tokio async worker threads |
+| `PLEXSPACES_MAX_BLOCKING_THREADS` | `512` | `spawn_blocking` thread pool size |
+
+```bash
+PLEXSPACES_WORKER_THREADS=8 PLEXSPACES_MAX_BLOCKING_THREADS=64 plexspaces start
+```
+
+Unset or non-numeric values are silently ignored (Tokio defaults apply).
+
 ## References
 
 - Implementation: `crates/cli/src/`
 - Binary: `plexspaces` (installed via `cargo install`)
+- [Architecture — Performance Tuning](../../docs/architecture.md#performance-tuning)

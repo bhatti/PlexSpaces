@@ -29,7 +29,7 @@ wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 async-trait = { workspace = true }
 
 # gRPC

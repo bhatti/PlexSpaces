@@ -33,6 +33,7 @@ plexspaces-db = { path = "../../db" }
 plexspaces-http-client = { workspace = true }
 plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 sysinfo = "0.30"
+dashmap = "5"
 
 # Blob service dependencies
 bytes = "1.5"

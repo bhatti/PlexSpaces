@@ -21,7 +21,7 @@
 //! Provides a builder pattern for creating mailboxes with different channel backends.
 //! Simplifies selection of InMemory, Redis, Kafka, SQLite, or other backends.
 
-use crate::{mailbox_config_default, Mailbox, MailboxConfig, MailboxError};
+use crate::{mailbox_config_default, Mailbox, MailboxConfig, MailboxError, MailboxReceiver};
 use plexspaces_proto::channel::v1::{
     ChannelConfig, ChannelProvider, KafkaConfig, RedisConfig, SqliteConfig,
 };
@@ -235,7 +235,7 @@ impl MailboxBuilder {
     /// ## Errors
     /// - `MailboxError::InvalidConfig`: Invalid channel backend or configuration
     /// - `MailboxError::StorageError`: Channel backend initialization failed
-    pub async fn build(self, mailbox_id: String) -> Result<Mailbox, MailboxError> {
+    pub async fn build(self, mailbox_id: String) -> Result<(Mailbox, MailboxReceiver), MailboxError> {
         // Set channel backend in config if specified
         let mut config = self.config;
         if let Some(backend) = self.channel_provider {
@@ -287,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_builder_default() {
         let builder = MailboxBuilder::new();
-        let mailbox = builder.build("test-mailbox".to_string()).await.unwrap();
+        let _pair = builder.build("test-mailbox".to_string()).await.unwrap();
 
         // Should default to InMemory backend
         // Just verify it builds successfully
@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mailbox_builder_in_memory() {
-        let mailbox = MailboxBuilder::new()
+        let (mailbox, mut receiver) = MailboxBuilder::new()
             .with_in_memory()
             .with_capacity(5000)
             .build("test-mailbox".to_string())
@@ -309,7 +309,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        let received = mailbox
+        let received = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
             .await;
         assert!(received.is_some());
@@ -318,7 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mailbox_builder_with_capacity() {
-        let mailbox = MailboxBuilder::new()
+        let _pair = MailboxBuilder::new()
             .with_capacity(2000)
             .build("test-mailbox".to_string())
             .await
@@ -333,7 +333,7 @@ mod tests {
     async fn test_mailbox_builder_with_ordering() {
         use crate::OrderingStrategy;
 
-        let mailbox = MailboxBuilder::new()
+        let _pair = MailboxBuilder::new()
             .with_ordering(OrderingStrategy::OrderingPriority)
             .build("test-mailbox".to_string())
             .await
@@ -347,7 +347,7 @@ mod tests {
     async fn test_mailbox_builder_with_backpressure() {
         use crate::BackpressureStrategy;
 
-        let mailbox = MailboxBuilder::new()
+        let _pair = MailboxBuilder::new()
             .with_backpressure(BackpressureStrategy::DropOldest)
             .build("test-mailbox".to_string())
             .await
@@ -363,7 +363,7 @@ mod tests {
         // Use in-memory database to prevent concurrency issues
         let db_path_str = ":memory:".to_string();
 
-        let mailbox = MailboxBuilder::new()
+        let (mailbox, mut receiver) = MailboxBuilder::new()
             .with_sqlite(db_path_str)
             .build("test-mailbox-sqlite".to_string())
             .await
@@ -375,7 +375,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        let received = mailbox
+        let received = receiver
             .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
             .await;
         assert!(received.is_some());
@@ -402,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mailbox_builder_chaining() {
-        let mailbox = MailboxBuilder::new()
+        let _pair = MailboxBuilder::new()
             .with_in_memory()
             .with_capacity(3000)
             .with_ordering(crate::OrderingStrategy::OrderingFifo)
@@ -426,7 +426,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mailbox = MailboxBuilder::new()
+        let _pair = MailboxBuilder::new()
             .with_channel_config(custom_config)
             .build("test-mailbox".to_string())
             .await
@@ -439,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_builder_default_impl() {
         let builder = MailboxBuilder::default();
-        let mailbox = builder.build("test-mailbox".to_string()).await.unwrap();
+        let _pair = builder.build("test-mailbox".to_string()).await.unwrap();
 
         // Should work same as new()
         assert!(true);

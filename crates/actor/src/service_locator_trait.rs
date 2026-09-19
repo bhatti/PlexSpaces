@@ -183,6 +183,16 @@ pub trait ServiceLocator: plexspaces_service_traits::ServiceLocatorBase {
     ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
         None
     }
+
+    /// Runtime tracing gate — decides whether spans should be created for a given actor.
+    ///
+    /// Returns `None` (default) when no `TracingControlServiceImpl` is registered,
+    /// meaning all actor tracing is disabled (zero overhead, no panics).
+    async fn get_tracing_gate(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::TracingGate>> {
+        None
+    }
 }
 
 /// Write-side of ServiceLocator — used exclusively during node startup / test setup.

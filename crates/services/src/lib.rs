@@ -77,6 +77,7 @@ pub mod tuple_service;
 pub mod user_service;
 pub mod wasm_file_saver;
 pub mod workflow_service;
+pub mod tracing_control_service;
 
 // Re-export ProcessGroupServiceImpl for convenience
 pub use process_group_service::ProcessGroupServiceImpl;

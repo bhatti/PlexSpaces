@@ -150,11 +150,11 @@ mod tests {
         use plexspaces_mailbox::{Mailbox, MailboxConfig};
 
         // Create a mailbox for the reply channel
-        let mailbox = Arc::new(
+        let (mailbox_inner, _receiver) =
             Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
                 .await
-                .expect("Failed to create mailbox"),
-        );
+                .expect("Failed to create mailbox");
+        let mailbox = Arc::new(mailbox_inner);
 
         let node_id = "test-node".to_string();
         let service_locator: Arc<dyn crate::core::ServiceLocator> =

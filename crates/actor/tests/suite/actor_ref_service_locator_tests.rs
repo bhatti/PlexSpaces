@@ -313,13 +313,12 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
 async fn test_actor_ref_local_unchanged() {
     // Test: Local ActorRef should work the same (no ServiceLocator needed)
     use plexspaces_mailbox::mailbox_config_default;
-    let mailbox = Arc::new(
-        Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
-        )
-        .await
-        .unwrap(),
-    );
+    let (mailbox_inner, mut mailbox_receiver) = Mailbox::new(
+        mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+    )
+    .await
+    .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let actor_id = test_actor_id("test-actor", "test-node", "test");
@@ -361,7 +360,7 @@ async fn test_actor_ref_local_unchanged() {
     actor_ref.tell(&tell_ctx, message).await.unwrap();
 
     // Verify message was delivered
-    let received = mailbox.dequeue().await;
+    let received = mailbox_receiver.dequeue().await;
     assert!(received.is_some());
     assert_eq!(received.unwrap().payload, b"test");
 }

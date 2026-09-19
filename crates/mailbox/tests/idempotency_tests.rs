@@ -33,7 +33,7 @@ fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: Strin
 async fn test_idempotency_key_deduplication() {
     // Test: Messages with same idempotency key are deduplicated
     let store = Arc::new(InMemoryIdempotencyStore::new(1000, Duration::from_secs(60)));
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox".to_string(), "tenant".to_string(), "ns".to_string(), Some(store))
+    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox".to_string(), "tenant".to_string(), "ns".to_string(), Some(store))
         .await
         .unwrap();
 
@@ -44,7 +44,7 @@ async fn test_idempotency_key_deduplication() {
     mailbox.enqueue(msg1).await.unwrap();
 
     // Process first message to add idempotency key to cache
-    let msg1_dequeued = mailbox.dequeue().await.unwrap();
+    let msg1_dequeued = receiver.dequeue().await.unwrap();
     assert_eq!(msg1_dequeued.payload, b"first");
 
     // Send second message with same idempotency key (should be deduplicated)
@@ -53,14 +53,14 @@ async fn test_idempotency_key_deduplication() {
 
     // Second message should be deduplicated (mailbox should be empty)
     // Note: Idempotency deduplication happens on enqueue, so message is skipped
-    let result = tokio::time::timeout(Duration::from_millis(100), mailbox.dequeue()).await;
+    let result = tokio::time::timeout(Duration::from_millis(100), receiver.dequeue()).await;
     assert!(result.is_err()); // Timeout = no message (deduplicated)
 }
 
 #[tokio::test]
 async fn test_idempotency_key_different_keys() {
     // Test: Messages with different idempotency keys are not deduplicated
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-2".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox-2".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -72,17 +72,17 @@ async fn test_idempotency_key_different_keys() {
     mailbox.enqueue(msg2).await.unwrap();
 
     // Both messages should be in mailbox
-    let msg1 = mailbox.dequeue().await.unwrap();
+    let msg1 = receiver.dequeue().await.unwrap();
     assert_eq!(msg1.payload, b"first");
 
-    let msg2 = mailbox.dequeue().await.unwrap();
+    let msg2 = receiver.dequeue().await.unwrap();
     assert_eq!(msg2.payload, b"second");
 }
 
 #[tokio::test]
 async fn test_idempotency_key_without_key() {
     // Test: Messages without idempotency key are not deduplicated
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-3".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox-3".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -94,10 +94,10 @@ async fn test_idempotency_key_without_key() {
     mailbox.enqueue(msg2).await.unwrap();
 
     // Both messages should be in mailbox
-    let msg1 = mailbox.dequeue().await.unwrap();
+    let msg1 = receiver.dequeue().await.unwrap();
     assert_eq!(msg1.payload, b"first");
 
-    let msg2 = mailbox.dequeue().await.unwrap();
+    let msg2 = receiver.dequeue().await.unwrap();
     assert_eq!(msg2.payload, b"second");
 }
 
@@ -108,23 +108,23 @@ async fn test_idempotency_key_lru_eviction() {
     // Note: capacity_per_bucket is now controlled via IdempotencyConfig on the store,
     // not on MailboxConfig. This test verifies basic deduplication behavior.
 
-    let mailbox = Mailbox::new(config, "test-mailbox-4".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox-4".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
     // Fill cache with 2 entries
     let msg1 = create_test_message_with_idempotency(b"first".to_vec(), "key-1".to_string());
     mailbox.enqueue(msg1).await.unwrap();
-    let _ = mailbox.dequeue().await; // Process to add to cache
+    let _ = receiver.dequeue().await; // Process to add to cache
 
     let msg2 = create_test_message_with_idempotency(b"second".to_vec(), "key-2".to_string());
     mailbox.enqueue(msg2).await.unwrap();
-    let _ = mailbox.dequeue().await; // Process to add to cache
+    let _ = receiver.dequeue().await; // Process to add to cache
 
     // Add third entry (should evict first)
     let msg3 = create_test_message_with_idempotency(b"third".to_vec(), "key-3".to_string());
     mailbox.enqueue(msg3).await.unwrap();
-    let _ = mailbox.dequeue().await; // Process to add to cache
+    let _ = receiver.dequeue().await; // Process to add to cache
 
     // Now key-1 should be evicted, so we can send it again
     let msg1_again =
@@ -132,7 +132,7 @@ async fn test_idempotency_key_lru_eviction() {
     mailbox.enqueue(msg1_again).await.unwrap();
 
     // Should be able to dequeue (not deduplicated because evicted)
-    let msg = mailbox.dequeue().await.unwrap();
+    let msg = receiver.dequeue().await.unwrap();
     assert_eq!(msg.payload, b"first-again");
 }
 
@@ -145,7 +145,7 @@ async fn test_idempotency_key_expiration() {
         nanos: 100_000_000, // 100ms
     });
 
-    let mailbox = Mailbox::new(config, "test-mailbox-5".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox-5".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -154,7 +154,7 @@ async fn test_idempotency_key_expiration() {
     // Send first message
     let msg1 = create_test_message_with_idempotency(b"first".to_vec(), idempotency_key.clone());
     mailbox.enqueue(msg1).await.unwrap();
-    let _ = mailbox.dequeue().await; // Process
+    let _ = receiver.dequeue().await; // Process
 
     // Wait for expiration
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -164,6 +164,6 @@ async fn test_idempotency_key_expiration() {
     mailbox.enqueue(msg2).await.unwrap();
 
     // Should be able to dequeue (not deduplicated because expired)
-    let msg = mailbox.dequeue().await.unwrap();
+    let msg = receiver.dequeue().await.unwrap();
     assert_eq!(msg.payload, b"second");
 }

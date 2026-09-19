@@ -125,13 +125,13 @@ async fn test_actor_registration() {
 
     let node = NodeBuilder::new("test-node").build().await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_ref = ActorRef::local(
         test_runtime_actor_id("test-actor", "test-node"),
         "".to_string(),
@@ -189,13 +189,13 @@ async fn test_actor_unregistration() {
 
     let node = NodeBuilder::new("test-node").build().await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -280,13 +280,13 @@ async fn test_duplicate_actor_registration() {
 
     let node = NodeBuilder::new("test-node").build().await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -349,13 +349,13 @@ async fn test_route_message_local() {
 
     let node = node_arc.as_ref();
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, mut mailbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -401,7 +401,7 @@ async fn test_route_message_local() {
     // Verify message was delivered to the mailbox
     // ActorRef::tell() enqueues directly into the mailbox; routing metrics are
     // only updated when messages flow through Node::route_message() / routing.rs.
-    let msg = mailbox
+    let msg = mailbox_receiver
         .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(200)))
         .await;
     assert!(msg.is_some(), "message should be delivered to mailbox");
@@ -641,13 +641,13 @@ async fn test_spawn_actor_detects_panic() {
     // Establish monitoring link — supervisor just needs to be registered to receive __DOWN__.
     let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
     register_actor_for_test(node.as_ref(), &supervisor_id, {
-        Arc::new(
+        let (mbox, _receiver) =
             Mailbox::new(
                 mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None,
             )
             .await
-            .unwrap(),
-        )
+            .unwrap();
+        Arc::new(mbox)
     })
     .await;
     node.monitor(&spawn_ctx, &actor_id, &supervisor_id)
@@ -687,13 +687,13 @@ async fn test_tell_to_remote_node() {
     // The registration happens below via ObjectRegistry.register()
 
     // Register actor on node2
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let remote_actor_id = test_runtime_actor_id("test-actor", "node2");
     let actor_ref = ActorRef::remote(
         remote_actor_id.clone(),
@@ -829,13 +829,13 @@ async fn test_find_actor_via_tuplespace() {
     let node2 = NodeBuilder::new("node2").build().await;
 
     // Register actor on node2 (this writes to node2's TupleSpace)
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let remote_actor_id = test_runtime_actor_id("test-actor", "node2");
     let actor_ref = ActorRef::remote(
         remote_actor_id.clone(),
@@ -941,13 +941,13 @@ async fn test_monitor_local_actor() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // Register a local actor
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let monitored_actor_id = test_runtime_actor_id("monitored-actor", "test-node");
     let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
     let actor_ref = ActorRef::local(
@@ -984,13 +984,13 @@ async fn test_monitor_local_actor() {
         .await;
 
     // Register supervisor so it has a mailbox to receive __DOWN__ messages.
-    let sup_mailbox = Arc::new(
+    let (sup_mailbox_inner, mut sup_mailbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("sup-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let sup_mailbox = Arc::new(sup_mailbox_inner);
     register_actor_for_test(&node, &supervisor_id, sup_mailbox.clone()).await;
 
     // Monitor the actor
@@ -1014,7 +1014,7 @@ async fn test_monitor_local_actor() {
     // Supervisor's mailbox should receive __DOWN__ message.
     let mut down_msg: Option<Message> = None;
     for _ in 0..10 {
-        if let Some(msg) = sup_mailbox
+        if let Some(msg) = sup_mailbox_receiver
             .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
             .await
         {
@@ -1106,13 +1106,13 @@ async fn test_handle_actor_termination_multiple_monitors() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // Register a local actor
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let watched_actor_id = test_runtime_actor_id("watched-actor", "test-node");
     let actor_ref = ActorRef::local(
         watched_actor_id.clone(),
@@ -1152,27 +1152,27 @@ async fn test_handle_actor_termination_multiple_monitors() {
     let sup2_id = test_runtime_actor_id("sup2", "test-node");
     let sup3_id = test_runtime_actor_id("sup3", "test-node");
 
-    let sup1_mbox = Arc::new(
+    let (sup1_mbox_inner, mut sup1_mbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("sup1-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
-    let sup2_mbox = Arc::new(
+        .unwrap();
+    let sup1_mbox = Arc::new(sup1_mbox_inner);
+    let (sup2_mbox_inner, mut sup2_mbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("sup2-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
-    let sup3_mbox = Arc::new(
+        .unwrap();
+    let sup2_mbox = Arc::new(sup2_mbox_inner);
+    let (sup3_mbox_inner, mut sup3_mbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("sup3-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let sup3_mbox = Arc::new(sup3_mbox_inner);
     register_actor_for_test(&node, &sup1_id, sup1_mbox.clone()).await;
     register_actor_for_test(&node, &sup2_id, sup2_mbox.clone()).await;
     register_actor_for_test(&node, &sup3_id, sup3_mbox.clone()).await;
@@ -1194,14 +1194,14 @@ async fn test_handle_actor_termination_multiple_monitors() {
         .await;
 
     // All 3 supervisor mailboxes should receive __DOWN__ messages.
-    for (sup_mbox, sup_name) in [
-        (&sup1_mbox, "sup1"),
-        (&sup2_mbox, "sup2"),
-        (&sup3_mbox, "sup3"),
+    for (sup_rx, sup_name) in [
+        (&mut sup1_mbox_receiver, "sup1"),
+        (&mut sup2_mbox_receiver, "sup2"),
+        (&mut sup3_mbox_receiver, "sup3"),
     ] {
         let mut found = false;
         for _ in 0..10 {
-            if let Some(msg) = sup_mbox
+            if let Some(msg) = sup_rx
                 .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
                 .await
             {
@@ -1334,13 +1334,13 @@ async fn test_handle_lifecycle_event_terminated() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // Register actor and monitor it
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let monitored_actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         monitored_actor_id.clone(),
@@ -1406,13 +1406,13 @@ async fn test_handle_lifecycle_event_terminated() {
         .await;
 
     let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-    let sup_mbox = Arc::new(
+    let (sup_mbox_inner, mut sup_mbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let sup_mbox = Arc::new(sup_mbox_inner);
     register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
     node.monitor(&ctx, &monitored_actor_id, &supervisor_id)
         .await
@@ -1440,7 +1440,7 @@ async fn test_handle_lifecycle_event_terminated() {
     // Supervisor mailbox should receive __DOWN__ message.
     let mut down: Option<Message> = None;
     for _ in 0..10 {
-        if let Some(msg) = sup_mbox
+        if let Some(msg) = sup_mbox_receiver
             .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
             .await
         {
@@ -1462,13 +1462,13 @@ async fn test_handle_lifecycle_event_failed() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // Register actor and monitor it
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let monitored_actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         monitored_actor_id.clone(),
@@ -1534,13 +1534,13 @@ async fn test_handle_lifecycle_event_failed() {
         .await;
 
     let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-    let sup_mbox = Arc::new(
+    let (sup_mbox_inner, mut sup_mbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let sup_mbox = Arc::new(sup_mbox_inner);
     register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
     node.monitor(&ctx, &monitored_actor_id, &supervisor_id)
         .await
@@ -1567,7 +1567,7 @@ async fn test_handle_lifecycle_event_failed() {
     // Supervisor mailbox should receive __DOWN__ message.
     let mut down: Option<Message> = None;
     for _ in 0..10 {
-        if let Some(msg) = sup_mbox
+        if let Some(msg) = sup_mbox_receiver
             .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
             .await
         {
@@ -1620,13 +1620,13 @@ async fn test_stats_tracking() {
     assert_eq!(node_metrics.active_actors, 0);
 
     // Register an actor
-    let mailbox = Arc::new(
+    let (mailbox_inner, mut mailbox_receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -1678,7 +1678,7 @@ async fn test_stats_tracking() {
     // Verify delivery: ActorRef::tell() enqueues into the mailbox.
     // Routing counters (messages_routed, local_deliveries) are only updated
     // when messages flow through Node::route_message() / routing.rs — not here.
-    let delivered = mailbox
+    let delivered = mailbox_receiver
         .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(200)))
         .await;
     assert!(
@@ -1755,13 +1755,13 @@ async fn test_register_actor_with_config() {
     use std::sync::Arc;
     let node = NodeBuilder::new("test-node").build().await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -1850,13 +1850,13 @@ async fn test_register_actor_without_config() {
     use std::sync::Arc;
     let node = NodeBuilder::new("test-node").build().await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -1911,13 +1911,13 @@ async fn test_unregister_actor_removes_config() {
     use std::sync::Arc;
     let node = NodeBuilder::new("test-node").build().await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -2007,13 +2007,13 @@ async fn test_calculate_node_capacity_with_actors() {
     let node = NodeBuilder::new("test-node").build().await;
 
     // Register first actor with resources
-    let mailbox1 = Arc::new(
+    let (mailbox1_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-1-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox1 = Arc::new(mailbox1_inner);
     let actor1_id = test_runtime_actor_id("actor-1", "test-node");
     let actor1_ref = ActorRef::local(
         actor1_id,
@@ -2072,13 +2072,13 @@ async fn test_calculate_node_capacity_with_actors() {
     }
 
     // Register second actor with resources
-    let mailbox2 = Arc::new(
+    let (mailbox2_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-2-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox2 = Arc::new(mailbox2_inner);
     let actor2_id = test_runtime_actor_id("actor-2", "test-node");
     let actor2_ref = ActorRef::local(
         actor2_id,
@@ -2184,13 +2184,13 @@ async fn test_calculate_node_capacity_with_actor_without_resources() {
     let node = NodeBuilder::new("test-node").build().await;
 
     // Register actor without resource requirements
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             plexspaces_mailbox::mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("actor-1", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -2267,13 +2267,13 @@ async fn test_calculate_node_capacity_after_unregister() {
     let node = NodeBuilder::new("test-node").build().await;
 
     // Register actor with resources
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("actor-1", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,
@@ -2361,13 +2361,13 @@ async fn test_calculate_node_capacity_with_partial_resource_spec() {
     config.config_schema_version = 1;
 
     use std::sync::Arc;
-    let mailbox = Arc::new(
+    let (mailbox_inner, _receiver) =
         Mailbox::new(
             mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
         )
         .await
-        .unwrap(),
-    );
+        .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_runtime_actor_id("actor-1", "test-node");
     let actor_ref = ActorRef::local(
         actor_id,

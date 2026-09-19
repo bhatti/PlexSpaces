@@ -37,19 +37,19 @@ async fn node_request_context(node: &Node) -> plexspaces_actor::RequestContext {
 async fn register_supervisor(
     node: &Node,
     supervisor_id: &plexspaces_actor::ActorId,
-) -> Arc<Mailbox> {
-    let mailbox = Arc::new(
+) -> (Arc<Mailbox>, plexspaces_mailbox::MailboxReceiver) {
+    let (mailbox_inner, rx) =
         Mailbox::new(MailboxConfig::default(), supervisor_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     register_actor_with_message_sender(node, supervisor_id, mailbox.clone()).await;
-    mailbox
+    (mailbox, rx)
 }
 
 /// Wait up to `deadline` for a `__DOWN__` message to appear in `mailbox`.
 async fn wait_for_down(
-    mailbox: &Mailbox,
+    mailbox: &mut plexspaces_mailbox::MailboxReceiver,
     deadline: Duration,
 ) -> Option<plexspaces_proto::common::v1::Message> {
     let start = tokio::time::Instant::now();
@@ -83,11 +83,11 @@ async fn test_monitor_local_actor() {
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
     // Register worker so monitoring can proceed.
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
 
     let ctx = node_request_context(&node).await;
@@ -125,13 +125,13 @@ async fn test_local_actor_termination_down_message() {
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
     // Register both actors.
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
-    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
+    let (_supervisor_mailbox, mut supervisor_rx) = register_supervisor(&node, &supervisor_id).await;
 
     // Establish monitor.
     let ctx = node_request_context(&node).await;
@@ -146,7 +146,7 @@ async fn test_local_actor_termination_down_message() {
         .await;
 
     // Supervisor's mailbox should receive a __DOWN__ message.
-    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(500)).await;
+    let down = wait_for_down(&mut supervisor_rx, Duration::from_millis(500)).await;
     assert!(down.is_some(), "Supervisor must receive __DOWN__ message");
 
     let msg = down.unwrap();
@@ -171,14 +171,14 @@ async fn test_multiple_monitors_same_actor() {
     let sup1_id = test_runtime_actor_id("supervisor1", "node1");
     let sup2_id = test_runtime_actor_id("supervisor2", "node1");
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
-    let sup1_mailbox = register_supervisor(&node, &sup1_id).await;
-    let sup2_mailbox = register_supervisor(&node, &sup2_id).await;
+    let (_sup1_mailbox, mut sup1_rx) = register_supervisor(&node, &sup1_id).await;
+    let (_sup2_mailbox, mut sup2_rx) = register_supervisor(&node, &sup2_id).await;
 
     let ctx = node_request_context(&node).await;
     node.monitor(&ctx, &worker_id, &sup1_id).await.unwrap();
@@ -189,8 +189,8 @@ async fn test_multiple_monitors_same_actor() {
         .handle_actor_termination(&worker_id, ExitReason::Error("crash".to_string()))
         .await;
 
-    let down1 = wait_for_down(&sup1_mailbox, Duration::from_millis(500)).await;
-    let down2 = wait_for_down(&sup2_mailbox, Duration::from_millis(500)).await;
+    let down1 = wait_for_down(&mut sup1_rx, Duration::from_millis(500)).await;
+    let down2 = wait_for_down(&mut sup2_rx, Duration::from_millis(500)).await;
 
     assert!(down1.is_some(), "Supervisor 1 must receive __DOWN__");
     assert!(down2.is_some(), "Supervisor 2 must receive __DOWN__");
@@ -222,14 +222,14 @@ async fn test_monitor_ref_uniqueness() {
     let sup1_id = test_runtime_actor_id("supervisor1", "node1");
     let sup2_id = test_runtime_actor_id("supervisor2", "node1");
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
-    register_supervisor(&node, &sup1_id).await;
-    register_supervisor(&node, &sup2_id).await;
+    let _ = register_supervisor(&node, &sup1_id).await;
+    let _ = register_supervisor(&node, &sup2_id).await;
 
     let ctx = node_request_context(&node).await;
     let mon1 = node.monitor(&ctx, &worker_id, &sup1_id).await.unwrap();
@@ -246,13 +246,13 @@ async fn test_actor_crash_reason_propagation() {
     let worker_id = test_runtime_actor_id("worker", "node1");
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
-    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
+    let (_supervisor_mailbox, mut supervisor_rx) = register_supervisor(&node, &supervisor_id).await;
 
     let ctx = node_request_context(&node).await;
     node.monitor(&ctx, &worker_id, &supervisor_id)
@@ -265,7 +265,7 @@ async fn test_actor_crash_reason_propagation() {
         .handle_actor_termination(&worker_id, ExitReason::Error(crash_reason.to_string()))
         .await;
 
-    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(500)).await;
+    let down = wait_for_down(&mut supervisor_rx, Duration::from_millis(500)).await;
     assert!(down.is_some(), "Should receive __DOWN__");
 
     let reason = down
@@ -288,13 +288,13 @@ async fn test_demonitor_cancels_down_notification() {
     let worker_id = test_runtime_actor_id("worker", "node1");
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
-    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
+    let (_supervisor_mailbox, mut supervisor_rx) = register_supervisor(&node, &supervisor_id).await;
 
     // Establish and then immediately cancel the monitor.
     let ctx = node_request_context(&node).await;
@@ -314,7 +314,7 @@ async fn test_demonitor_cancels_down_notification() {
         .handle_actor_termination(&worker_id, ExitReason::Normal)
         .await;
 
-    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(200)).await;
+    let down = wait_for_down(&mut supervisor_rx, Duration::from_millis(200)).await;
     assert!(
         down.is_none(),
         "demonitor must prevent __DOWN__ delivery after cancellation"
@@ -329,13 +329,13 @@ async fn test_monitor_down_on_shutdown() {
     let worker_id = test_runtime_actor_id("worker", "node1");
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
-    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
+    let (_supervisor_mailbox, mut supervisor_rx) = register_supervisor(&node, &supervisor_id).await;
 
     let ctx = node_request_context(&node).await;
     node.monitor(&ctx, &worker_id, &supervisor_id)
@@ -348,7 +348,7 @@ async fn test_monitor_down_on_shutdown() {
         .handle_actor_termination(&worker_id, ExitReason::Shutdown)
         .await;
 
-    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(500)).await;
+    let down = wait_for_down(&mut supervisor_rx, Duration::from_millis(500)).await;
     assert!(
         down.is_some(),
         "__DOWN__ must be delivered even on Shutdown exit"
@@ -367,13 +367,13 @@ async fn test_demonitor_idempotent() {
     let worker_id = test_runtime_actor_id("worker", "node1");
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
-    register_supervisor(&node, &supervisor_id).await;
+    let _ = register_supervisor(&node, &supervisor_id).await;
 
     let ctx = node_request_context(&node).await;
     let monitor_ref = node

@@ -23,7 +23,7 @@ plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 plexspaces-workflow = { workspace = true, optional = true }
 
 # Async runtime
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 async-trait = { workspace = true }
 
 # HTTP server

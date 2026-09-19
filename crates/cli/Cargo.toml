@@ -14,7 +14,7 @@ plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 plexspaces-common = { path = "../common" }
 plexspaces-services = { path = "../services" }
 tonic = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

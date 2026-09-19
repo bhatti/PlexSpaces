@@ -15,12 +15,14 @@ use plexspaces_actor::{NodeConnectivity, ServiceLocator};
 use plexspaces_services::actor_service::ActorServiceImpl;
 use tokio::sync::RwLock;
 pub mod actor_routes;
+pub mod admin_routes;
 pub mod auth_routes;
 pub mod deploy_routes;
 pub mod node_routes;
 pub mod ws_routes;
 
 pub use actor_routes::actor_router;
+pub use admin_routes::admin_router;
 pub use auth_routes::{auth_router, AuthRouteState};
 pub use deploy_routes::deploy_router;
 pub use node_routes::node_router;
@@ -47,9 +49,10 @@ pub fn all_http_routes(
     auth_state: Option<AuthRouteState>,
     ws_state: WsRouteState,
     static_registry: StaticRegistry,
+    tracing_service: Option<Arc<plexspaces_services::tracing_control_service::TracingControlServiceImpl>>,
 ) -> Router {
     let tenant_repo = auth_state.as_ref().map(|s| s.tenant_repo.clone());
-    let base = actor_router(actor_service, auth_disabled, jwt_key_pair.clone())
+    let mut base = actor_router(actor_service, auth_disabled, jwt_key_pair.clone())
         .merge(node_router(
             service_locator.clone(),
             auth_disabled,
@@ -65,6 +68,10 @@ pub fn all_http_routes(
         ))
         .merge(ws_router(ws_state))
         .merge(static_apps_router(static_registry));
+
+    if let Some(svc) = tracing_service {
+        base = base.merge(admin_router(svc));
+    }
 
     if let Some(state) = auth_state {
         base.merge(auth_router(state))

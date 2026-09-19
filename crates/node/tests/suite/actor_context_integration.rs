@@ -83,13 +83,13 @@ async fn test_node_spawns_actor_with_full_context() {
     mailbox_config.capacity = 1000;
     let actor_name = "test-actor";
     let actor_id = ActorId::new(actor_name, "gen_server", "default", node.id().as_str()).unwrap();
-    let mailbox = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
     let actor = ActorInstance::new(
         actor_id.clone(),
         behavior,
-        mailbox,
+        mailbox_pair,
         "default".to_string(),
         "default".to_string(),
         None,
@@ -102,7 +102,7 @@ async fn test_node_spawns_actor_with_full_context() {
 
     // The actor ID is fixed by spawn_actor_arc to include the correct node ID
     // The actor is registered synchronously in spawn_actor_arc:
-    // 1. register_local is called which stores the mailbox in ActorRegistry (line 931, before start)
+    // 1. register_local is called which stores the mailbox_pair in ActorRegistry (line 931, before start)
     // 2. register_actor is called which stores the actor_ref and config (line 994)
     // Both should happen before spawn_actor returns
 
@@ -170,13 +170,13 @@ async fn test_actor_context_has_node_id() {
 
     let behavior = Box::new(ContextAwareBehavior::new());
     let actor_id = ActorId::new("test-actor-2", "gen_server", "default", "test-node-2").unwrap();
-    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
     let actor = ActorInstance::new(
         actor_id.clone(),
         behavior,
-        mailbox,
+        mailbox_pair,
         "default".to_string(),
         "default".to_string(),
         None,

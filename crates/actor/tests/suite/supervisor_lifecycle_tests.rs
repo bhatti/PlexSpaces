@@ -144,7 +144,7 @@ async fn test_start_child() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(
+                let mailbox_pair = Mailbox::new(
                     MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
@@ -152,7 +152,7 @@ async fn test_start_child() {
                 let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
-                    mailbox,
+                    mailbox_pair,
                     "tenant".to_string(),
                     "namespace".to_string(),
                 )
@@ -188,7 +188,7 @@ async fn test_delete_child() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(
+                let mailbox_pair = Mailbox::new(
                     MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
@@ -196,7 +196,7 @@ async fn test_delete_child() {
                 let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
-                    mailbox,
+                    mailbox_pair,
                     "tenant".to_string(),
                     "namespace".to_string(),
                 )
@@ -237,7 +237,7 @@ async fn test_which_children() {
             Arc::new(move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
-                    let mailbox = Mailbox::new(
+                    let mailbox_pair = Mailbox::new(
                         MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     )
                     .await
@@ -245,7 +245,7 @@ async fn test_which_children() {
                     let actor = actor_with_default_service_locator(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
-                        mailbox,
+                        mailbox_pair,
                         "tenant".to_string(),
                         "namespace".to_string(),
                     )
@@ -294,7 +294,7 @@ async fn test_count_children() {
             Arc::new(move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
-                    let mailbox = Mailbox::new(
+                    let mailbox_pair = Mailbox::new(
                         MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     )
                     .await
@@ -302,7 +302,7 @@ async fn test_count_children() {
                     let actor = actor_with_default_service_locator(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
-                        mailbox,
+                        mailbox_pair,
                         "tenant".to_string(),
                         "namespace".to_string(),
                     )
@@ -339,7 +339,7 @@ async fn test_get_childspec() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(
+                let mailbox_pair = Mailbox::new(
                     MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
@@ -347,7 +347,7 @@ async fn test_get_childspec() {
                 let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
-                    mailbox,
+                    mailbox_pair,
                     "tenant".to_string(),
                     "namespace".to_string(),
                 )
@@ -392,7 +392,7 @@ async fn test_restart_child() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    let mailbox = rt
+                    let mailbox_pair = rt
                         .block_on(Mailbox::new(
                             MailboxConfig::default(), format!("mailbox-{}", actor_id_for_thread.clone()), String::new(), String::new(), None,
                         ))
@@ -400,7 +400,7 @@ async fn test_restart_child() {
                     rt.block_on(actor_with_default_service_locator(
                         actor_id_for_thread.clone(),
                         Box::new(TestActor::new(actor_id_for_thread.clone())),
-                        mailbox,
+                        mailbox_pair,
                         "tenant".to_string(),
                         "namespace".to_string(),
                     ))

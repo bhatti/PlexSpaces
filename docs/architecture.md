@@ -1500,6 +1500,58 @@ PlexSpaces SDKs are designed so external projects can import them without a loca
 - **Rust**: Git-tag import lets Cargo resolve the entire workspace from a single reference — no individual crate publishing to crates.io needed for the ~15 internal workspace crates.
 - **Go**: Tag named `sdks/go/v0.1.3` makes the module importable via Go module proxy — no separate repo needed.
 
+## Performance Tuning
+
+PlexSpaces is optimized to approach Erlang/BEAM-like efficiency on Tokio. The key levers are:
+
+### Runtime Thread Pool
+
+Set these environment variables before starting the node:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PLEXSPACES_WORKER_THREADS` | `num_cpus` | Tokio async worker threads |
+| `PLEXSPACES_MAX_BLOCKING_THREADS` | `512` | `spawn_blocking` pool size |
+
+```bash
+PLEXSPACES_WORKER_THREADS=8 PLEXSPACES_MAX_BLOCKING_THREADS=64 plexspaces start
+```
+
+### Mailbox Architecture (Sender/Receiver Split)
+
+`Mailbox::new()` returns `(Mailbox, MailboxReceiver)`:
+
+- **`Mailbox`** — sender side, `Arc`-shareable; used by all message senders
+- **`MailboxReceiver`** — consumer side, `!Clone !Sync`, owned exclusively by the actor task
+
+This eliminates two `tokio::sync::Mutex` acquisitions per dequeue that existed previously. The actor loop uses a single flat `tokio::select!` over ctrl and data channels — no nested select state machines.
+
+### Cooperative Scheduling Budget
+
+Each actor processes at most **32 consecutive messages** before calling `tokio::task::yield_now()`. This mirrors Erlang's reduction counting and prevents message-burst actors from starving neighbors on the same worker thread.
+
+### Runtime Tracing Control
+
+All actor tracing is **disabled by default** (zero overhead). Enable selectively at runtime via:
+
+```bash
+# Enable tracing for all Counter actors
+curl -X POST http://localhost:8080/api/v1/admin/tracing/enable \
+  -H 'content-type: application/json' \
+  -d '{"target": "TRACING_TARGET_ACTOR_TYPE", "actor_type": "Counter"}'
+
+# Check current state
+curl http://localhost:8080/api/v1/admin/tracing/status
+
+# Disable all tracing
+curl -X POST http://localhost:8080/api/v1/admin/tracing/disable \
+  -d '{"target": "TRACING_TARGET_ALL"}'
+```
+
+The same API is available over gRPC as `TracingControlService`. **Note**: the toggle applies to actors spawned after the call; restart running actors to change their dispatcher.
+
+See [Detailed Design](detailed-design.md#performance-internals) for implementation details.
+
 ## See Also
 
 - [Concepts](concepts.md): Core concepts explained in detail

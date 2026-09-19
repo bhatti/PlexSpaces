@@ -342,10 +342,39 @@ This crate is used by:
 - CLI tools: CLI manages nodes
 - Examples: All examples use nodes
 
+## WebSocket Transport Optimizations
+
+The WS transport layer includes several performance and reliability improvements:
+
+| Feature | Details |
+|---------|---------|
+| **Frame size limits** | 256 KiB per frame, 1 MiB total message — prevents OOM from malicious clients |
+| **Stale session reaper** | Background task (every 60 s) removes sessions with no heartbeat for `3 × heartbeat_interval`; updates active-session gauge |
+| **Sysinfo caching** | `CachedSysinfo` with 2 s TTL shared across all WS connections — replaces per-ping `System::new_all()` (~50–200 ms each) |
+| **Enqueue-time encoding** | Proto encoding moved from the writer task to caller threads — parallelizes encoding across worker threads |
+
+## Admin HTTP Endpoints
+
+Runtime operator controls (no node restart required):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/v1/admin/tracing/enable` | Enable tracing for a target |
+| `POST` | `/api/v1/admin/tracing/disable` | Disable tracing for a target |
+| `GET` | `/api/v1/admin/tracing/status` | Current tracing state |
+
+All three are also available as gRPC `TracingControlService` RPCs. Body fields for enable/disable:
+- `target`: `1` = ACTOR_TYPE, `2` = ACTOR_ID, `3` = ALL (or the proto enum name string)
+- `actor_type`: required when `target = ACTOR_TYPE`
+- `actor_id`: required when `target = ACTOR_ID`
+
+The toggle applies to actors spawned **after** the call; running actors keep their current dispatcher until restarted.
+
 ## References
 
 - [PlexSpaces Architecture](../../docs/architecture.md) - System design overview
 - [Detailed Design](../../docs/detailed-design.md) - Component details
+- [Performance Internals](../../docs/detailed-design.md#performance-internals) - WS optimizations, tracing control
 - [Installation Guide](../../docs/installation.md) - Node deployment instructions
 - [Getting Started Guide](../../docs/getting-started.md) - Quick start with nodes
 - Implementation: `crates/node/src/`

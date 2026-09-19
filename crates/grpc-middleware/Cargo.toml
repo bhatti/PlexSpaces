@@ -25,7 +25,7 @@ axum = { workspace = true }
 tonic-web = { workspace = true }
 
 # Async
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 async-trait = { workspace = true }
 
 # Metrics (unified with MetricsService / `metrics` recorder)

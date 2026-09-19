@@ -124,11 +124,11 @@ async fn test_actor_ref_tell_with_ttl_message() {
         "node1".to_string(),
     )
     .expect("ttl test actor id should be valid");
-    let mailbox = Arc::new(
+    let (mailbox_inner, mut mailbox_receiver) =
         Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let actor_ref = ActorRef::local(
@@ -169,7 +169,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     actor_ref.tell(&tell_ctx, message).await.unwrap();
 
     // Message should be in mailbox
-    let received = mailbox.dequeue().await;
+    let received = mailbox_receiver.dequeue().await;
     assert!(received.is_some());
     let received_msg = received.unwrap();
     // ActorRef::tell adds "req-" prefix to message IDs for request tracking

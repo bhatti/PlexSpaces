@@ -20,7 +20,7 @@ ulid = { workspace = true }
 prost-types = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net", "fs", "io-util"] }
 # Certificate generation for mTLS (used by security_validator)
 rcgen = "0.13"
 # Time handling for certificate generation (rcgen uses time crate)

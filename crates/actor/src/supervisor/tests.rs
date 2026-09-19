@@ -47,18 +47,18 @@ async fn create_child_spec(
         let child_name = id_for_factory.clone();
         Box::pin(async move {
             let actor_id = test_actor_id(&child_name);
-            let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+            let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
                 .await
                 .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
             let actor = ActorInstance::new(
                 actor_id.clone(),
                 Box::new(MockBehavior::new()),
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None,
             );
-            let actor_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+            let (ref_mailbox, _ref_receiver) = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
                 .await
                 .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
             let service_locator: Arc<dyn crate::core::ServiceLocator> =
@@ -67,7 +67,7 @@ async fn create_child_spec(
                 actor_id,
                 "test-tenant".to_string(),
                 "test".to_string(),
-                Arc::new(actor_mailbox),
+                Arc::new(ref_mailbox),
                 service_locator,
                 plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
             );
@@ -104,18 +104,18 @@ fn create_child_spec_sync(id: String, restart: RestartPolicy) -> crate::ChildSpe
         let child_name = id_for_factory.clone();
         Box::pin(async move {
             let actor_id = test_actor_id(&child_name);
-            let actor_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+            let actor_mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
                 .await
                 .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
-            let ref_mailbox = Arc::new(
+            let (ref_mailbox_inner, _ref_receiver) =
                 Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
                     .await
-                    .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?,
-            );
+                    .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
+            let ref_mailbox = Arc::new(ref_mailbox_inner);
             let actor = ActorInstance::new(
                 actor_id.clone(),
                 Box::new(MockBehavior::new()),
-                actor_mailbox,
+                actor_mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None,

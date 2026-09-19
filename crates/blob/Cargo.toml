@@ -9,7 +9,7 @@ repository = "https://github.com/plexobject/plexspaces"
 
 [dependencies]
 async-trait = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
 tokio-stream = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

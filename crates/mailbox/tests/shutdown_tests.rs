@@ -25,7 +25,7 @@
 //! - In-progress message completion
 //! - Channel closing
 
-use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxBuilder, Message};
+use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxBuilder, MailboxReceiver, Message};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -41,7 +41,7 @@ fn create_test_message(payload: Vec<u8>) -> Message {
 
 /// Helper to create a SQLite mailbox for testing
 #[cfg(feature = "sqlite-backend")]
-async fn create_sqlite_mailbox(mailbox_id: &str) -> Mailbox {
+async fn create_sqlite_mailbox(mailbox_id: &str) -> (Mailbox, MailboxReceiver) {
     // Use in-memory SQLite for tests (more reliable than file-based in test environment)
     // This avoids file permission and cleanup issues
     MailboxBuilder::new()
@@ -54,7 +54,7 @@ async fn create_sqlite_mailbox(mailbox_id: &str) -> Mailbox {
 #[tokio::test]
 async fn test_in_memory_mailbox_shutdown_does_not_reject_enqueue() {
     // In-memory mailboxes should continue accepting messages during shutdown
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-in-memory".to_string(), String::new(), String::new(), None)
+    let (mailbox, _receiver) = Mailbox::new(mailbox_config_default(), "test-in-memory".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -81,7 +81,7 @@ async fn test_in_memory_mailbox_shutdown_does_not_reject_enqueue() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_non_memory_mailbox_shutdown_rejects_enqueue() {
     // Non-memory mailboxes should reject new messages during shutdown
-    let mailbox = create_sqlite_mailbox("test-sqlite-shutdown").await;
+    let (mailbox, _receiver) = create_sqlite_mailbox("test-sqlite-shutdown").await;
 
     // Verify it's not in-memory
     assert!(!mailbox.is_in_memory());
@@ -114,7 +114,7 @@ async fn test_non_memory_mailbox_shutdown_rejects_enqueue() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_shutdown_stops_dequeue() {
     // After shutdown, dequeue should stop receiving from channel backend
-    let mailbox = create_sqlite_mailbox("test-dequeue-shutdown").await;
+    let (mailbox, mut receiver) = create_sqlite_mailbox("test-dequeue-shutdown").await;
 
     // Send a message
     mailbox
@@ -134,7 +134,7 @@ async fn test_shutdown_stops_dequeue() {
     // Dequeue should return None (shutdown stopped receiving)
     let result = tokio::time::timeout(
         Duration::from_millis(500),
-        mailbox.dequeue_with_timeout(Some(Duration::from_secs(1))),
+        receiver.dequeue_with_timeout(Some(Duration::from_secs(1))),
     )
     .await;
 
@@ -146,7 +146,7 @@ async fn test_shutdown_stops_dequeue() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_shutdown_waits_for_in_progress() {
     // Shutdown should wait for in-progress messages to complete
-    let mailbox = create_sqlite_mailbox("test-in-progress").await;
+    let (mailbox, _receiver) = create_sqlite_mailbox("test-in-progress").await;
 
     // Send a message
     mailbox
@@ -173,7 +173,7 @@ async fn test_shutdown_waits_for_in_progress() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_shutdown_timeout() {
     // Shutdown should timeout if in-progress messages don't complete
-    let mailbox = create_sqlite_mailbox("test-timeout").await;
+    let (mailbox, _receiver) = create_sqlite_mailbox("test-timeout").await;
 
     // Start shutdown with very short timeout
     let start = std::time::Instant::now();
@@ -194,7 +194,7 @@ async fn test_shutdown_timeout() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_shutdown_closes_channel() {
     // Shutdown should close the channel
-    let mailbox = create_sqlite_mailbox("test-close-channel").await;
+    let (mailbox, _receiver) = create_sqlite_mailbox("test-close-channel").await;
 
     // Start shutdown
     mailbox
@@ -213,7 +213,7 @@ async fn test_shutdown_closes_channel() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_shutdown_flushes_durable_messages() {
     // Shutdown should flush pending messages for durable backends
-    let mailbox = create_sqlite_mailbox("test-flush").await;
+    let (mailbox, _receiver) = create_sqlite_mailbox("test-flush").await;
 
     // Send multiple messages
     for i in 0..5 {
@@ -240,7 +240,7 @@ async fn test_shutdown_flushes_durable_messages() {
 #[tokio::test]
 async fn test_in_memory_shutdown_does_not_close_channel() {
     // In-memory mailboxes don't close channel during shutdown
-    let mailbox = Mailbox::new(mailbox_config_default(), "test-in-memory-close".to_string(), String::new(), String::new(), None)
+    let (mailbox, _receiver) = Mailbox::new(mailbox_config_default(), "test-in-memory-close".to_string(), String::new(), String::new(), None)
         .await
         .unwrap();
 
@@ -259,7 +259,7 @@ async fn test_in_memory_shutdown_does_not_close_channel() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_shutdown_idempotent() {
     // Calling shutdown multiple times should be safe
-    let mailbox = create_sqlite_mailbox("test-idempotent").await;
+    let (mailbox, _receiver) = create_sqlite_mailbox("test-idempotent").await;
 
     // Call shutdown multiple times
     mailbox
@@ -285,7 +285,7 @@ async fn test_shutdown_idempotent() {
 #[cfg(feature = "sqlite-backend")]
 async fn test_shutdown_with_no_timeout() {
     // Shutdown with None timeout should use default
-    let mailbox = create_sqlite_mailbox("test-no-timeout").await;
+    let (mailbox, _receiver) = create_sqlite_mailbox("test-no-timeout").await;
 
     // Should complete successfully
     mailbox.graceful_shutdown(None).await.unwrap();

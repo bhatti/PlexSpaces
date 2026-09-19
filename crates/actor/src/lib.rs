@@ -285,3 +285,6 @@ pub use plexspaces_proto::supervision::v1::SupervisorStats;
 // Process groups (merged from plexspaces-process-groups)
 pub mod process_groups;
 pub use process_groups::{ProcessGroupError, ProcessGroupRegistry};
+
+pub mod tracing_gate;
+pub use tracing_gate::TracingGate;

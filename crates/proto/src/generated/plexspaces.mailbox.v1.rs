@@ -42,8 +42,8 @@ pub struct MailboxConfig {
     /// How long (ms) to suggest callers wait before retrying after RESOURCE_EXHAUSTED.
     /// Sent in the `retry-after-ms` gRPC trailing metadata field.
     /// Default 0 → 100 ms. Override via env: PLEXSPACES_MAILBOX_RETRY_AFTER_MS
-    #[prost(uint32, tag="5")]
-    pub retry_after_ms: u32,
+    #[prost(uint64, tag="5")]
+    pub retry_after_ms: u64,
     /// Message timeout (how long messages wait before being dropped)
     #[prost(message, optional, tag="6")]
     pub message_timeout: ::core::option::Option<::prost_types::Duration>,
@@ -82,8 +82,8 @@ pub struct MailboxConfig {
 pub struct MailboxFullDetail {
     /// Suggested back-off before retrying, in milliseconds.
     /// 0 means use a sensible default (e.g. 100 ms with jitter).
-    #[prost(uint32, tag="1")]
-    pub retry_after_ms: u32,
+    #[prost(uint64, tag="1")]
+    pub retry_after_ms: u64,
     /// Actor whose mailbox is full.
     #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,

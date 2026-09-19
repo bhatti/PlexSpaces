@@ -100,14 +100,14 @@ async fn test_span_cloning_panic_reproduction() {
     let _guard = span.enter();
 
     // Spawn actor from within the span (simulating actor spawned from gRPC handler)
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
 
     let mut actor = actor_with_default_service_locator(
         format!("test-actor-{}", Ulid::new()),
         Box::new(actor_impl),
-        mailbox,
+        mailbox_pair,
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     )
@@ -197,7 +197,7 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
         let processed = Arc::new(AtomicBool::new(false));
         let actor_impl = TestActor::new(processed.clone());
 
-        let mailbox = Mailbox::new(
+        let mailbox_pair = Mailbox::new(
             MailboxConfig::default(), format!("mailbox-{}-{}", i, Ulid::new()), String::new(), String::new(), None,
         )
         .await
@@ -206,7 +206,7 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
         let mut actor = actor_with_default_service_locator(
             format!("test-actor-{}-{}", i, Ulid::new()),
             Box::new(actor_impl),
-            mailbox,
+            mailbox_pair,
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         )

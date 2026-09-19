@@ -97,6 +97,12 @@ pub mod system {
     }
 }
 
+pub mod admin {
+    pub mod v1 {
+        include!("generated/plexspaces.admin.v1.rs");
+    }
+}
+
 pub mod storage {
     pub mod v1 {
         include!("generated/plexspaces.storage.v1.rs");

@@ -265,10 +265,35 @@ let reply = actor_ref
 - **Stateless workers**: ✅ Implemented via elastic pool pattern
 - **Distributed placement**: Currently random, planned intelligent placement
 
+## Performance Internals
+
+### Cooperative Scheduling
+
+Each actor loop processes at most **32 consecutive messages** before yielding to the Tokio scheduler (`tokio::task::yield_now()`). This prevents message-burst actors from starving neighbors on the same worker thread — mirroring Erlang's reduction counting.
+
+### Metric Handle Caching
+
+`ActorHotMetrics` caches `Counter`/`Histogram` handles per `message_type` in a per-actor `HashMap`. The first message of each type pays a DashMap lookup; subsequent messages pay only a `HashMap::get` (~5 ns vs. ~50–100 ns).
+
+### TracingGate — Runtime Tracing Toggle
+
+The `TracingGate` trait (`crates/actor/src/tracing_gate.rs`) decouples tracing decisions from the actor hot path:
+
+```rust
+pub trait TracingGate: Send + Sync {
+    fn is_enabled(&self, actor_type: &str, actor_id: &str) -> bool;
+}
+```
+
+`ServiceLocator::get_tracing_gate()` returns `None` by default (all actors use `Dispatch::none()` — zero overhead). When `TracingControlServiceImpl` is registered, operators can enable tracing per actor type or ID at runtime without restarting the node.
+
+**Note**: the dispatcher is chosen once at actor spawn. Changes take effect only for newly spawned actors.
+
 ## References
 
 - [PlexSpaces Architecture](../../docs/architecture.md) - System design overview
 - [Detailed Design - Actors](../../docs/detailed-design.md#actors) - Comprehensive actor documentation
+- [Performance Internals](../../docs/detailed-design.md#performance-internals) - Optimization details
 - [Getting Started Guide](../../docs/getting-started.md) - Quick start with actors
 - Implementation: `crates/actor/src/`
 - Tests: `crates/actor/src/` (unit tests)

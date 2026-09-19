@@ -912,7 +912,7 @@ impl ActorFactory for ActorFactoryImpl {
                 cfg
             })
             .unwrap_or_else(mailbox_config_default);
-        let mailbox = Mailbox::new(
+        let mailbox_pair = Mailbox::new(
             mailbox_config,
             format!("mailbox_{}", actor_id),
             tenant_id.clone(),
@@ -925,7 +925,7 @@ impl ActorFactory for ActorFactoryImpl {
         let mut actor = crate::ActorInstance::new(
             actor_id.clone(),
             behavior,
-            mailbox,
+            mailbox_pair,
             tenant_id,
             namespace.clone(),
             Some(local_node_id.to_string()),

@@ -34,7 +34,7 @@ plexspaces-dashboard = { path = "../dashboard", optional = true }
 plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 
 # Core dependencies
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net", "fs", "signal"] }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

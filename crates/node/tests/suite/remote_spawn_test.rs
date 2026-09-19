@@ -347,7 +347,7 @@ use plexspaces_actor::ActorRef;
 use plexspaces_actor::{
     Actor, ActorBuilder, ActorContext, BehaviorError, BehaviorType, Message, MessageSender,
 };
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_mailbox::{Mailbox, MailboxConfig, MailboxReceiver};
 use plexspaces_services::actor_service::ActorServiceImpl;
 use tonic::transport::Server;
 
@@ -430,11 +430,11 @@ async fn test_node_route_local_message() {
     let actor_id = test_runtime_actor_id("test-actor", "node1");
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
-    let mailbox = Arc::new(
+    let (mailbox_inner, mut mailbox_rx) =
         Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let mailbox = Arc::new(mailbox_inner);
     let service_locator = node.service_locator().clone();
     let actor_ref = ActorRef::local(
         actor_id.clone(),
@@ -483,7 +483,7 @@ async fn test_node_route_local_message() {
     let result = actor_ref.tell(&ctx, message).await;
 
     assert!(result.is_ok(), "Local routing should succeed");
-    let received = mailbox.dequeue().await;
+    let received = mailbox_rx.dequeue().await;
     assert!(received.is_some(), "Message should be in mailbox");
 }
 

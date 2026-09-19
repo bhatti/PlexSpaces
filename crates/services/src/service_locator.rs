@@ -381,6 +381,10 @@ pub struct ServiceLocatorImpl {
     /// Shutdown flag: when true, node is shutting down gracefully
     /// Components should stop accepting new requests but complete in-progress ones
     shutdown_flag: Arc<RwLock<bool>>,
+
+    /// Runtime tracing gate (set once after TracingControlService is created).
+    tracing_gate:
+        Arc<RwLock<Option<Arc<crate::tracing_control_service::TracingControlServiceImpl>>>>,
 }
 
 impl ServiceLocatorImpl {
@@ -474,6 +478,7 @@ impl ServiceLocatorImpl {
             runtime_config: Arc::new(tokio::sync::Mutex::new(None)),
             outbound_http_client: Arc::new(RwLock::new(None)),
             shutdown_flag: Arc::new(RwLock::new(false)),
+            tracing_gate: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -605,6 +610,15 @@ impl ServiceLocatorImpl {
     pub async fn unregister_outbound_http_client(&self) {
         let mut g = self.outbound_http_client.write().await;
         *g = None;
+    }
+
+    /// Register the TracingControlService (called once at node startup).
+    pub async fn register_tracing_gate(
+        &self,
+        gate: Arc<crate::tracing_control_service::TracingControlServiceImpl>,
+    ) {
+        let mut g = self.tracing_gate.write().await;
+        *g = Some(gate);
     }
 
     /// Register SecurityConfig
@@ -1170,7 +1184,7 @@ impl ServiceLocatorImpl {
     pub async fn create_default_mailbox(
         &self,
         mailbox_id: String,
-    ) -> Result<plexspaces_mailbox::Mailbox, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(plexspaces_mailbox::Mailbox, plexspaces_mailbox::MailboxReceiver), Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_mailbox::Mailbox;
         use plexspaces_proto::channel::v1::ChannelProvider;
 
@@ -1655,6 +1669,14 @@ impl plexspaces_actor::ServiceLocator for ServiceLocatorImpl {
         &self,
     ) -> Option<std::sync::Arc<dyn plexspaces_actor::OutboundHttpClient>> {
         ServiceLocatorImpl::get_outbound_http_client(self).await
+    }
+
+    async fn get_tracing_gate(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_actor::TracingGate>> {
+        let g = self.tracing_gate.read().await;
+        g.as_ref()
+            .map(|arc| arc.clone() as Arc<dyn plexspaces_actor::TracingGate>)
     }
 }
 

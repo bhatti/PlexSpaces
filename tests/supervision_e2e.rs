@@ -90,7 +90,7 @@ async fn create_child_spec(
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
     let actor_id = test_actor_id(&id);
-    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let (mailbox_inner, _mailbox_rx) = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
         .await
         .expect("Failed to create mailbox");
     let service_locator: std::sync::Arc<dyn plexspaces_actor::core::ServiceLocator> =
@@ -99,7 +99,7 @@ async fn create_child_spec(
         actor_id.clone(),
         "test-tenant".to_string(),
         "test".to_string(),
-        std::sync::Arc::new(mailbox),
+        std::sync::Arc::new(mailbox_inner),
         service_locator,
         plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
     );
@@ -220,7 +220,7 @@ async fn test_one_for_one_restart() {
             let actor_id = test_actor_id("faulty-worker");
             let mailbox_id = actor_id.to_string();
             // Create a new runtime on a separate thread to avoid blocking async runtime
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -233,7 +233,7 @@ async fn test_one_for_one_restart() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(FaultyWorker::new(2)), // Crash after 2 messages
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -250,7 +250,7 @@ async fn test_one_for_one_restart() {
             let actor_id = test_actor_id("stable-worker");
             let mailbox_id = actor_id.to_string();
             // Create a new runtime on a separate thread to avoid blocking async runtime
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -263,7 +263,7 @@ async fn test_one_for_one_restart() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(CounterWorker::new()),
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -356,7 +356,7 @@ async fn test_one_for_all_restart() {
         Arc::new(|| {
             let actor_id = test_actor_id("worker1");
             let mailbox_id = actor_id.to_string();
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -369,7 +369,7 @@ async fn test_one_for_all_restart() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(FaultyWorker::new(1)), // Crash after 1 message
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -385,7 +385,7 @@ async fn test_one_for_all_restart() {
         Arc::new(|| {
             let actor_id = test_actor_id("worker2");
             let mailbox_id = actor_id.to_string();
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -398,7 +398,7 @@ async fn test_one_for_all_restart() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(CounterWorker::new()),
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -467,7 +467,7 @@ async fn test_rest_for_one_restart() {
                 };
                 let actor_id = test_actor_id(&format!("worker{}", i));
                 let mailbox_id = actor_id.to_string();
-                let mailbox = std::thread::spawn(move || {
+                let mailbox_pair = std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
@@ -480,7 +480,7 @@ async fn test_rest_for_one_restart() {
                 Ok(ActorStruct::new(
                     actor_id,
                     behavior,
-                    mailbox,
+                    mailbox_pair,
                     "test-tenant".to_string(),
                     "test".to_string(),
                     None, // node_id - will be set when spawned
@@ -526,7 +526,7 @@ async fn test_restart_limits() {
         Arc::new(|| {
             let actor_id = test_actor_id("crasher");
             let mailbox_id = actor_id.to_string();
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -539,7 +539,7 @@ async fn test_restart_limits() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(FaultyWorker::new(0)), // Crash immediately
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -604,7 +604,7 @@ async fn test_hierarchical_supervision() {
         Arc::new(|| {
             let actor_id = test_actor_id("leaf-worker");
             let mailbox_id = actor_id.to_string();
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -617,7 +617,7 @@ async fn test_hierarchical_supervision() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(CounterWorker::new()),
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -660,7 +660,7 @@ async fn test_permanent_restart_policy() {
         Arc::new(|| {
             let actor_id = test_actor_id("permanent-worker");
             let mailbox_id = actor_id.to_string();
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -673,7 +673,7 @@ async fn test_permanent_restart_policy() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(FaultyWorker::new(1)),
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -711,7 +711,7 @@ async fn test_temporary_restart_policy() {
         Arc::new(|| {
             let actor_id = test_actor_id("temp-worker");
             let mailbox_id = actor_id.to_string();
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -724,7 +724,7 @@ async fn test_temporary_restart_policy() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(FaultyWorker::new(1)),
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
@@ -762,7 +762,7 @@ async fn test_transient_restart_policy() {
         Arc::new(|| {
             let actor_id = test_actor_id("transient-worker");
             let mailbox_id = actor_id.to_string();
-            let mailbox = std::thread::spawn(move || {
+            let mailbox_pair = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -775,7 +775,7 @@ async fn test_transient_restart_policy() {
             Ok(ActorStruct::new(
                 actor_id,
                 Box::new(FaultyWorker::new(1)),
-                mailbox,
+                mailbox_pair,
                 "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id

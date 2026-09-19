@@ -1177,7 +1177,7 @@ mod tests {
     use crate::core::ActorContext;
     use crate::core::ActorId;
     use crate::core::ActorStateHandle;
-    use plexspaces_mailbox::MailboxConfig;
+    use plexspaces_mailbox::{MailboxConfig, MailboxReceiver};
     use ulid::Ulid;
 
     /// Helper to create a test message
@@ -1202,14 +1202,14 @@ mod tests {
         }
     }
 
-    /// Helper to create a test mailbox
-    pub(crate) async fn create_test_mailbox() -> Arc<Mailbox> {
+    /// Helper to create a test mailbox (returns sender + receiver)
+    pub(crate) async fn create_test_mailbox() -> (Arc<Mailbox>, MailboxReceiver) {
         use plexspaces_mailbox::mailbox_config_default;
-        Arc::new(
+        let (mailbox, receiver) =
             Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
                 .await
-                .expect("Failed to create mailbox"),
-        )
+                .expect("Failed to create mailbox");
+        (Arc::new(mailbox), receiver)
     }
 
     /// Helper to create a test ServiceLocator stub (no external crate dependencies)
@@ -1233,7 +1233,7 @@ mod tests {
     /// TEST 1: Can create a local ActorRef
     #[tokio::test]
     async fn test_create_local_actor_ref() {
-        let mailbox = create_test_mailbox().await;
+        let (mailbox, _receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local(
             test_actor_id("test-actor", "test-node"),
@@ -1275,8 +1275,7 @@ mod tests {
     /// TEST 3: Can send message via tell() with context (local actor)
     #[tokio::test]
     async fn test_tell_sends_message_local() {
-        let mailbox = create_test_mailbox().await;
-        let mailbox_clone = Arc::clone(&mailbox);
+        let (mailbox, mut receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local(
             test_actor_id("test-actor", "node1"),
@@ -1317,17 +1316,16 @@ mod tests {
         actor_ref.tell(&ctx, message).await.unwrap();
 
         // Verify received
-        let received = mailbox_clone.dequeue().await.unwrap();
+        let received = receiver.dequeue().await.unwrap();
         assert_eq!(received.id, format!("req-{}", message_id));
     }
 
     #[tokio::test]
     async fn test_actor_ref_exposes_scope_and_local_state_handle_via_message_sender() {
-        let mailbox = Arc::new(
-            Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+        let (mailbox_inner, _receiver) = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
                 .await
-                .unwrap(),
-        );
+                .unwrap();
+        let mailbox = Arc::new(mailbox_inner);
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local(
             test_actor_id("test-actor", "test-node"),
@@ -1470,8 +1468,7 @@ mod tests {
     /// TEST 4: ActorRef is cloneable
     #[tokio::test]
     async fn test_actor_ref_is_cloneable() {
-        let mailbox = create_test_mailbox().await;
-        let mailbox_clone = Arc::clone(&mailbox);
+        let (mailbox, mut receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let actor_ref1 = ActorRef::local(
             test_actor_id("test-actor", "node1"),
@@ -1520,8 +1517,8 @@ mod tests {
         actor_ref2.tell(&ctx, msg2).await.unwrap();
 
         // Both messages received
-        let received1 = mailbox_clone.dequeue().await.unwrap();
-        let received2 = mailbox_clone.dequeue().await.unwrap();
+        let received1 = receiver.dequeue().await.unwrap();
+        let received2 = receiver.dequeue().await.unwrap();
 
         assert_eq!(received1.id, msg1_id);
         assert_eq!(received2.id, msg2_id);
@@ -1530,8 +1527,8 @@ mod tests {
     /// TEST 7: ActorRef equality based on ID and location
     #[tokio::test]
     async fn test_actor_ref_equality() {
-        let mailbox1 = create_test_mailbox().await;
-        let mailbox2 = create_test_mailbox().await;
+        let (mailbox1, _receiver1) = create_test_mailbox().await;
+        let (mailbox2, _receiver2) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
 
         let ref1 = ActorRef::local(
@@ -1554,7 +1551,7 @@ mod tests {
             test_actor_id("actor-2", "test-node"),
             "",
             "test",
-            mailbox2.clone(),
+            mailbox2,
             service_locator.clone(),
             ActorVisibility::ActorVisibilityPublic,
         );
@@ -1566,7 +1563,7 @@ mod tests {
     /// TEST 8: Debug formatting
     #[tokio::test]
     async fn test_debug_formatting() {
-        let mailbox = create_test_mailbox().await;
+        let (mailbox, _receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local(
             test_actor_id("test-actor", "test-node"),
@@ -1589,8 +1586,7 @@ mod tests {
     /// TEST 11: tell() with context - local actor (same node)
     #[tokio::test]
     async fn test_tell_with_context_local() {
-        let mailbox = create_test_mailbox().await;
-        let mailbox_clone = Arc::clone(&mailbox);
+        let (mailbox, mut receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local(
             test_actor_id("target-actor", "node1"),
@@ -1629,7 +1625,7 @@ mod tests {
         let ctx = tell_test_ctx();
         actor_ref.tell(&ctx, message).await.unwrap();
 
-        let received = mailbox_clone.dequeue().await.unwrap();
+        let received = receiver.dequeue().await.unwrap();
         assert_eq!(received.id, format!("req-{}", message_id));
     }
 
@@ -1759,15 +1755,15 @@ mod tests {
         // Test that messages with correlation_id can be routed as replies via PendingAsks.
         let correlation_id = "test-corr-123".to_string();
         let reply_mailbox_id = format!("reply-mailbox-{}", Ulid::new());
-        let _reply_mailbox = Arc::new(
+        let (_reply_mailbox, _reply_receiver) =
             Mailbox::new(MailboxConfig::default(), reply_mailbox_id, String::new(), String::new(), None)
                 .await
-                .expect("Failed to create reply mailbox"),
-        );
+                .expect("Failed to create reply mailbox");
+        let _reply_mailbox = Arc::new(_reply_mailbox);
         let _reply_actor_id = test_actor_id_string(&format!("reply-{}", correlation_id), "node1");
 
         // Create a local ActorRef that will receive the reply
-        let target_mailbox_arc = create_test_mailbox().await;
+        let (target_mailbox_arc, mut target_receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let target_ref = ActorRef::local(
             test_actor_id("target", "node1"),
@@ -1811,7 +1807,7 @@ mod tests {
         target_ref.tell(&ctx, reply_message.clone()).await.unwrap();
 
         // Verify message was received
-        let received = target_mailbox_arc.dequeue().await.unwrap();
+        let received = target_receiver.dequeue().await.unwrap();
         assert_eq!(received.correlation_id, correlation_id);
         assert_eq!(received.payload, b"reply");
     }
@@ -1821,7 +1817,7 @@ mod tests {
     async fn test_ask_local() {
         // Test ask() pattern: basic timeout test (no reply sent)
         // Full ask() pattern with replies is tested in integration tests (ask_pattern_tests.rs)
-        let mailbox = create_test_mailbox().await;
+        let (mailbox, _receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local(
             test_actor_id("test-actor", "node1"),
@@ -1948,7 +1944,7 @@ mod tests {
     /// TEST 16: ask() with context - timeout
     #[tokio::test]
     async fn test_ask_with_context_timeout() {
-        let mailbox = create_test_mailbox().await;
+        let (mailbox, _receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         // PendingAsks (in ActorRegistry) handles oneshot channels for in-flight asks.
 
@@ -1987,7 +1983,7 @@ mod tests {
     /// This test verifies timeout behavior instead
     #[tokio::test]
     async fn test_ask_with_context_timeout_behavior() {
-        let mailbox = create_test_mailbox().await;
+        let (mailbox, _receiver) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         // PendingAsks (in ActorRegistry) handles oneshot channels for in-flight asks.
 
@@ -2036,8 +2032,7 @@ mod tests {
     #[tokio::test]
     async fn test_tell_node_id_comparison() {
         // Test local (same node)
-        let mailbox1 = create_test_mailbox().await;
-        let mailbox1_clone = mailbox1.clone();
+        let (mailbox1, mut receiver1) = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
         let actor_ref1 = ActorRef::local(
             test_actor_id("actor", "node1"),
@@ -2075,7 +2070,7 @@ mod tests {
             .tell(&ctx, create_test_message(b"local".to_vec()))
             .await
             .unwrap();
-        assert!(mailbox1_clone.dequeue().await.is_some());
+        assert!(receiver1.dequeue().await.is_some());
 
         // Test remote (different node)
         let sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>> =
@@ -2152,8 +2147,7 @@ mod tests {
 
         // Remote actor testing is now done in integration tests
         // For unit tests, we verify local behavior
-        let mailbox2 = create_test_mailbox().await;
-        let mailbox2_clone = Arc::clone(&mailbox2);
+        let (mailbox2, mut receiver2) = create_test_mailbox().await;
         let actor_ref2 = ActorRef::local(
             test_actor_id("actor", "node1"),
             "",
@@ -2166,7 +2160,7 @@ mod tests {
             .tell(&ctx, create_test_message(b"remote".to_vec()))
             .await
             .unwrap();
-        assert!(mailbox2_clone.dequeue().await.is_some());
+        assert!(receiver2.dequeue().await.is_some());
     }
 
     /// TEST 20: ask() with context - node_id comparison (local vs remote)

@@ -43,6 +43,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use prost::Message as ProstMessage;
 use plexspaces_proto::actor::v1::{
     AskReplyRequest, AskReplyResponse, SendMessageRequest, SendMessageResponse,
 };
@@ -226,7 +227,7 @@ impl ActorTransportClient for WsActorTransportClient {
                 request_id: request_id.clone(),
                 payload: Some(ws_frame::Payload::Tell(inner)),
             };
-            sender.send(frame).await.map_err(|_| {
+            sender.send(frame.encode_to_vec()).await.map_err(|_| {
                 tonic::Status::unavailable(format!("WS session to '{}' closed", node_id))
             })?;
 
@@ -274,7 +275,7 @@ impl ActorTransportClient for WsActorTransportClient {
                 request_id: request_id.clone(),
                 payload: Some(ws_frame::Payload::Ask(inner)),
             };
-            if let Err(_) = sender.send(frame).await {
+            if let Err(_) = sender.send(frame.encode_to_vec()).await {
                 // Session closed between registry lookup and send — clean up so the
                 // pending entry doesn't leak until the disconnect cancel_for_node runs.
                 self.pending_asks.remove(&request_id).await;
@@ -390,8 +391,9 @@ mod tests {
     use super::*;
     use plexspaces_proto::actor::v1::{AskReplyRequest, SendMessageRequest};
     use plexspaces_proto::node::v1::NodeRole;
-    use plexspaces_proto::transport::ws::v1::ws_frame;
+    use plexspaces_proto::transport::ws::v1::{ws_frame, WsFrame};
     use plexspaces_service_traits::ActorTransportClient;
+    use prost::Message as ProstMessage;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -443,7 +445,7 @@ mod tests {
         let pending = Arc::new(PendingAsks::new());
         let transport = make_ws_transport(registry.clone(), pending);
 
-        let (tx, mut rx) = mpsc::channel(16);
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
         let session = crate::ws_registry::WsSession {
             node_id: "ws-node".to_string(),
             sender: tx,
@@ -465,8 +467,9 @@ mod tests {
             .unwrap();
         assert!(resp.into_inner().success);
 
-        // Verify the WS frame was enqueued
-        let frame = rx.recv().await.expect("Expected WS frame");
+        // Verify the WS frame was enqueued (pre-encoded — decode to inspect)
+        let bytes = rx.recv().await.expect("Expected WS frame bytes");
+        let frame = WsFrame::decode(bytes.as_slice()).expect("Decode frame");
         assert_eq!(frame.request_id, "req-001");
         assert!(matches!(frame.payload, Some(ws_frame::Payload::Tell(_))));
     }
@@ -497,7 +500,7 @@ mod tests {
         let pending = Arc::new(PendingAsks::new());
         let transport = make_ws_transport(registry.clone(), pending.clone());
 
-        let (tx, mut rx) = mpsc::channel::<WsFrame>(16);
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
         let session = crate::ws_registry::WsSession {
             node_id: "ws-ask-node".to_string(),
             sender: tx,
@@ -508,11 +511,11 @@ mod tests {
         };
         registry.register(session).await;
 
-        // Spawn a task that acts as the WS receive loop — resolves the ask
+        // Spawn a task that acts as the WS receive loop — decode and resolve the ask
         let pending2 = pending.clone();
         tokio::spawn(async move {
-            if let Some(frame) = rx.recv().await {
-                // Extract request_id from frame and resolve
+            if let Some(bytes) = rx.recv().await {
+                let frame = WsFrame::decode(bytes.as_slice()).expect("Decode ask frame");
                 pending2
                     .resolve(
                         &frame.request_id,

@@ -41,7 +41,7 @@
 //! All frames: binary protobuf (`WsFrame` via prost). No JSON.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::{
@@ -75,6 +75,38 @@ use crate::ws_transport_client::PendingAsks;
 // State
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Cached system resource snapshot for NodePing responses.
+///
+/// `sysinfo::System::new_all()` calls blocking OS APIs that can take several
+/// milliseconds (sysctl on macOS, /proc reads on Linux).  With many WebSocket
+/// connections each sending NodePing, this becomes O(connections) `spawn_blocking`
+/// calls per second.  The cache reduces this to at most one refresh every 2 s
+/// regardless of connection count — stale-reads are acceptable for resource hints.
+pub struct CachedSysinfo {
+    /// Last computed hints; `None` before the first ping.
+    pub hints: Option<plexspaces_proto::node::v1::NodeResourceHints>,
+    /// When `hints` was last refreshed.
+    pub refreshed_at: Instant,
+    /// How long before hints are considered stale and refreshed.
+    pub ttl: Duration,
+}
+
+impl CachedSysinfo {
+    /// Create a `CachedSysinfo` with an immediately-stale timestamp so the first ping always refreshes.
+    pub fn new() -> Self {
+        Self {
+            hints: None,
+            refreshed_at: Instant::now().checked_sub(Duration::from_secs(3600)).unwrap_or(Instant::now()),
+            ttl: Duration::from_secs(2),
+        }
+    }
+
+    /// Return `true` if the cached hints are older than the TTL.
+    pub fn is_stale(&self) -> bool {
+        self.refreshed_at.elapsed() >= self.ttl
+    }
+}
+
 /// Shared state for the `/ws` endpoint.
 #[derive(Clone)]
 pub struct WsRouteState {
@@ -92,6 +124,9 @@ pub struct WsRouteState {
     pub auth_disabled: bool,
     /// JWT key pair for verifying bearer tokens. None when auth is disabled.
     pub jwt_key_pair: Option<Arc<JwtKeyPair>>,
+    /// Shared sysinfo cache for NodePing responses (2 s TTL).
+    /// Wrapped in Arc<RwLock> so all WS connections share one cache entry.
+    pub sysinfo_cache: Arc<tokio::sync::RwLock<CachedSysinfo>>,
 }
 
 /// Query parameters for the `/ws` upgrade.
@@ -136,7 +171,11 @@ async fn ws_upgrade_handler(
         }
     };
 
-    ws.on_upgrade(move |socket| handle_ws_connection(socket, tenant_id, state))
+    // Bound frame and message sizes to prevent clients from exhausting server memory
+    // by sending oversized payloads (no limits = up to 64 MB frames by default).
+    ws.max_frame_size(256 * 1024)         // 256 KiB per frame
+        .max_message_size(1024 * 1024)    // 1 MiB per reassembled message
+        .on_upgrade(move |socket| handle_ws_connection(socket, tenant_id, state))
         .into_response()
 }
 
@@ -191,7 +230,7 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn handle_ws_connection(socket: WebSocket, tenant_id: String, state: WsRouteState) {
     let (mut ws_sender, mut ws_receiver) = StreamExt::split(socket);
-    let (tx, mut rx) = mpsc::channel::<WsFrame>(WS_CHANNEL_CAPACITY);
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(WS_CHANNEL_CAPACITY);
 
     // ── Step 1: Wait for NodeRegistration handshake frame ─────────────────────
     // ws_sender is passed so error frames can be flushed before the writer task starts.
@@ -285,9 +324,10 @@ async fn handle_ws_connection(socket: WebSocket, tenant_id: String, state: WsRou
     }
 
     // ── Step 4: Writer task — drains the mpsc channel to the WS socket ──────
+    // Frames are pre-encoded by callers (encode_to_vec at enqueue time, on the
+    // caller's worker thread) so this task only does I/O — no encoding work.
     let writer_handle = tokio::spawn(async move {
-        while let Some(frame) = rx.recv().await {
-            let bytes = frame.encode_to_vec();
+        while let Some(bytes) = rx.recv().await {
             if ws_sender.send(Message::Binary(bytes.into())).await.is_err() {
                 break;
             }
@@ -495,7 +535,7 @@ async fn dispatch_frame(frame: WsFrame, node_id: &str, tenant_id: &str, state: &
                 };
                 // try_send: if the channel is full the client is backed up; drop the ack.
                 // Heartbeats are advisory; the client will retry after the next interval.
-                if tx.try_send(ack).is_err() {
+                if tx.try_send(ack.encode_to_vec()).is_err() {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         debug!("WS heartbeat ack dropped: channel full for {}", node_id);
                     }
@@ -513,13 +553,19 @@ async fn dispatch_frame(frame: WsFrame, node_id: &str, tenant_id: &str, state: &
         }
         Some(ws_frame::Payload::NodePing(req)) => {
             if let Some(tx) = state.ws_registry.get_sender(node_id).await {
-                // sysinfo::System::new_all() + refresh_all() call blocking OS APIs
-                // (sysctl on macOS, /proc reads on Linux) that can take several
-                // milliseconds.  Running them on a Tokio async worker thread would
-                // block the thread and starve other tasks.  spawn_blocking moves
-                // the work to Tokio's dedicated blocking thread pool.
-                let resources =
-                    match tokio::task::spawn_blocking(|| {
+                // Check the shared sysinfo cache (2 s TTL).
+                // Reading a fresh entry is a short RwLock read — no spawn_blocking needed.
+                // On stale: one spawn_blocking refresh per 2 s window regardless of
+                // how many concurrent connections send NodePing.
+                let cached = {
+                    let guard = state.sysinfo_cache.read().await;
+                    if !guard.is_stale() { guard.hints.clone() } else { None }
+                };
+                let resources = if let Some(hints) = cached {
+                    Some(hints)
+                } else {
+                    // Cache is stale — refresh via spawn_blocking.
+                    let fresh = tokio::task::spawn_blocking(|| {
                         let available_cores = std::thread::available_parallelism()
                             .map(|n| n.get() as u32)
                             .unwrap_or(0);
@@ -532,12 +578,17 @@ async fn dispatch_frame(frame: WsFrame, node_id: &str, tenant_id: &str, state: &
                             memory_available_mb,
                             available_cores,
                         }
-                    })
-                    .await
+                    }).await.ok();
+                    // Write back to cache regardless of whether refresh succeeded.
+                    // Other concurrent pings that also saw a stale cache will write too —
+                    // all will get the same data; the last write wins harmlessly.
                     {
-                        Ok(hints) => Some(hints),
-                        Err(_) => None, // spawn_blocking panicked — return pong without hints
-                    };
+                        let mut guard = state.sysinfo_cache.write().await;
+                        guard.hints = fresh.clone();
+                        guard.refreshed_at = Instant::now();
+                    }
+                    fresh
+                };
                 let pong = WsFrame {
                     request_id,
                     payload: Some(ws_frame::Payload::NodePingResponse(
@@ -550,7 +601,7 @@ async fn dispatch_frame(frame: WsFrame, node_id: &str, tenant_id: &str, state: &
                     )),
                 };
                 // try_send: ping-pong is best-effort; drop if channel full.
-                if tx.try_send(pong).is_err() {
+                if tx.try_send(pong.encode_to_vec()).is_err() {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         debug!("WS node-ping pong dropped: channel full for {}", node_id);
                     }
@@ -670,7 +721,7 @@ async fn handle_ask(
                 request_id: request_id.clone(),
                 payload: Some(ws_frame::Payload::AskResponse(resp)),
             };
-            let _ = tx.send(frame).await;
+            let _ = tx.send(frame.encode_to_vec()).await;
         }
         Err(status) => {
             if tracing::enabled!(tracing::Level::DEBUG) {
@@ -690,7 +741,7 @@ async fn handle_ask(
                 request_id: request_id.clone(),
                 payload: Some(ws_frame::Payload::AskResponse(resp)),
             };
-            let _ = tx.send(frame).await;
+            let _ = tx.send(frame.encode_to_vec()).await;
         }
     }
 }
@@ -699,7 +750,7 @@ async fn handle_ask(
 /// `request_id` echoes the frame that triggered the error so clients can correlate
 /// it to an in-flight ask/tell on a multiplexed connection.
 async fn send_error(
-    tx: &mpsc::Sender<WsFrame>,
+    tx: &mpsc::Sender<Vec<u8>>,
     request_id: &str,
     code: u32,
     message: &str,
@@ -712,7 +763,7 @@ async fn send_error(
             message: message.to_string(),
         })),
     };
-    tx.send(frame).await.map_err(|_| ())
+    tx.send(frame.encode_to_vec()).await.map_err(|_| ())
 }
 
 #[cfg(test)]

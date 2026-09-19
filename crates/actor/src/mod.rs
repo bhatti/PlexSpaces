@@ -253,7 +253,7 @@ fn parse_exit_reason_from_str(
 use async_trait::async_trait;
 use plexspaces_facet::{Facet, FacetContainer};
 use plexspaces_journaling::{CheckpointStateAdapter, ReplayHandler};
-use plexspaces_mailbox::Mailbox;
+use plexspaces_mailbox::{Mailbox, MailboxReceiver};
 use plexspaces_proto::common::v1::Message;
 
 // Observability
@@ -275,6 +275,96 @@ pub use actor_state::ActorState;
 /// `exit_reason` is excluded: `actor_factory_impl::watch_actor_termination` holds a
 /// direct `Arc<RwLock<Option<ExitReason>>>` clone and reads it after the actor task
 /// joins. Merging it here would require changing that external interface.
+/// Lazily-populated metric handle cache for the actor message loop.
+///
+/// The `metrics` crate registry uses a DashMap for all lookups.  Each
+/// `metrics::counter!()` call on the hot path costs ~50–100 ns even if the
+/// counter already exists.  `ActorHotMetrics` stores the `Counter`/`Histogram`
+/// handles keyed by message type so the hot-path lookup becomes a local
+/// `HashMap::get` (~5 ns) after the first occurrence.
+///
+/// Created once per actor task, before the message loop.
+struct ActorHotMetrics {
+    tenant_id: String,
+    namespace: String,
+    actor_type: String,
+    /// message_type → received counter
+    received: std::collections::HashMap<String, metrics::Counter>,
+    /// message_type → (processed-success counter, processing-duration histogram)
+    processed_ok: std::collections::HashMap<String, (metrics::Counter, metrics::Histogram)>,
+    /// message_type → processed-error counter
+    processed_err: std::collections::HashMap<String, metrics::Counter>,
+    /// Fixed-label counter — pre-created at construction.
+    ping: metrics::Counter,
+}
+
+impl ActorHotMetrics {
+    fn new(tenant_id: &str, namespace: &str, actor_type: &str) -> Self {
+        let ping = metrics::counter!(
+            "plexspaces_actor_ping_total",
+            "tenant_id" => tenant_id.to_string(),
+            "namespace" => namespace.to_string(),
+            "actor_type" => actor_type.to_string()
+        );
+        Self {
+            tenant_id: tenant_id.to_string(),
+            namespace: namespace.to_string(),
+            actor_type: actor_type.to_string(),
+            received: std::collections::HashMap::new(),
+            processed_ok: std::collections::HashMap::new(),
+            processed_err: std::collections::HashMap::new(),
+            ping,
+        }
+    }
+
+    fn received(&mut self, message_type: &str) -> metrics::Counter {
+        self.received.entry(message_type.to_string()).or_insert_with(|| {
+            metrics::counter!(
+                "plexspaces_actor_messages_received_total",
+                "tenant_id" => self.tenant_id.clone(),
+                "namespace" => self.namespace.clone(),
+                "actor_type" => self.actor_type.clone(),
+                "message_type" => message_type.to_string()
+            )
+        }).clone()
+    }
+
+    fn processed_ok(&mut self, message_type: &str) -> (metrics::Counter, metrics::Histogram) {
+        let entry = self.processed_ok.entry(message_type.to_string()).or_insert_with(|| {
+            let ctr = metrics::counter!(
+                "plexspaces_actor_messages_processed_total",
+                "tenant_id" => self.tenant_id.clone(),
+                "namespace" => self.namespace.clone(),
+                "actor_type" => self.actor_type.clone(),
+                "message_type" => message_type.to_string(),
+                "status" => "success"
+            );
+            let hist = metrics::histogram!(
+                "plexspaces_actor_message_processing_duration_seconds",
+                "tenant_id" => self.tenant_id.clone(),
+                "namespace" => self.namespace.clone(),
+                "actor_type" => self.actor_type.clone(),
+                "message_type" => message_type.to_string()
+            );
+            (ctr, hist)
+        });
+        (entry.0.clone(), entry.1.clone())
+    }
+
+    fn processed_err(&mut self, message_type: &str) -> metrics::Counter {
+        self.processed_err.entry(message_type.to_string()).or_insert_with(|| {
+            metrics::counter!(
+                "plexspaces_actor_messages_processed_total",
+                "tenant_id" => self.tenant_id.clone(),
+                "namespace" => self.namespace.clone(),
+                "actor_type" => self.actor_type.clone(),
+                "message_type" => message_type.to_string(),
+                "status" => "error"
+            )
+        }).clone()
+    }
+}
+
 struct ActorMutableState {
     resource_usage: ResourceUsage,
     last_message_time: std::time::Instant,
@@ -312,8 +402,11 @@ pub struct ActorInstance {
     /// Behavior stack for become/unbecome pattern
     behavior_stack: Arc<RwLock<Vec<Box<dyn ActorTrait>>>>,
 
-    /// Composable mailbox for message handling
+    /// Composable mailbox for message handling (sender side — enqueue, stats, shutdown)
     mailbox: Arc<Mailbox>,
+
+    /// Mailbox receiver (consumer side — dequeue). Taken by start() for the actor task.
+    mailbox_receiver: Option<MailboxReceiver>,
 
     /// Actor context
     context: Arc<ActorContext>,
@@ -625,11 +718,12 @@ impl ActorInstance {
     pub fn new(
         id: ActorId,
         behavior: Box<dyn crate::core::Actor>,
-        mailbox: Mailbox,
+        mailbox_pair: (Mailbox, MailboxReceiver),
         tenant_id: String,
         namespace: String,
         node_id: Option<String>,
     ) -> Self {
+        let (mailbox, mailbox_receiver) = mailbox_pair;
         // Create context with ServiceLocator - Node will update it with full services when spawning
         // node_id is normalized to the real node at spawn time by spawn_built_actor_impl.
         let node_id_str = node_id.clone().unwrap_or_else(|| "unassigned".to_string());
@@ -652,6 +746,7 @@ impl ActorInstance {
             behavior: Arc::new(RwLock::new(behavior)),
             behavior_stack: Arc::new(RwLock::new(Vec::new())),
             mailbox: Arc::new(mailbox),
+            mailbox_receiver: Some(mailbox_receiver),
             context,
             processor_handle: None,
             shutdown_tx: None,
@@ -1030,6 +1125,8 @@ impl ActorInstance {
         self.shutdown_tx = Some(shutdown_tx);
 
         let mailbox = self.mailbox.clone();
+        let mut mailbox_receiver = self.mailbox_receiver.take()
+            .expect("mailbox_receiver already taken — start() called twice?");
         let behavior = self.behavior.clone();
         let context = self.context.clone();
         let state = self.state.clone();
@@ -1044,16 +1141,33 @@ impl ActorInstance {
 
         // Simple message loop - Node/Supervisor will detect termination via JoinHandle
         let handle = tokio::spawn(async move {
-            // CRITICAL: Clear tracing context at the start of the actor task to prevent
-            // "tried to clone a span that already closed" panics. The issue occurs when:
-            // 1. Actor is spawned from within a gRPC handler (which has a span)
-            // 2. The actor task inherits the tracing context from the handler
-            // 3. When the handler returns, the span guard is dropped, but the actor task is still running
-            // 4. When the actor task completes and tries to log, tracing tries to clone the already-closed span
-            // Solution: Clear the tracing context at the start of the actor task so it doesn't inherit spans.
-            // CRITICAL: The guard must remain active for the ENTIRE task lifecycle to prevent panics.
-            let noop_dispatcher = tracing::dispatcher::Dispatch::none();
-            let _tracing_guard = tracing::dispatcher::set_default(&noop_dispatcher);
+            // Detach from the spawning context's span to prevent "span already closed" panics.
+            // When spawned inside a gRPC handler, the actor inherits the handler's span; the handler
+            // span closes when the RPC returns, but the actor task lives on.  We consult the
+            // TracingGate (if registered) to decide which dispatcher to install:
+            //   • Disabled (default): Dispatch::none() — zero overhead, no closed-span panics.
+            //   • Enabled: reset to the global subscriber so this task gets a clean root span.
+            // The guard MUST remain alive for the entire task lifetime.
+            //
+            // NOTE: The dispatcher is chosen ONCE at spawn time and cannot change while the actor
+            // runs.  Calling EnableTracing after this point affects only actors spawned thereafter.
+            // To apply tracing to an already-running actor, stop and restart it.
+            let actor_type_str = actor_id_for_logging.actor_type().to_string();
+            let actor_id_str = actor_id_for_logging.to_string();
+            let tracing_enabled = context
+                .service_locator
+                .get_tracing_gate()
+                .await
+                .map(|g| g.is_enabled(&actor_type_str, &actor_id_str))
+                .unwrap_or(false);
+            let _tracing_guard = if tracing_enabled {
+                // Reset to the global subscriber with a clean span context.
+                let global = tracing::dispatcher::get_default(|d| d.clone());
+                tracing::dispatcher::set_default(&global)
+            } else {
+                let noop = tracing::dispatcher::Dispatch::none();
+                tracing::dispatcher::set_default(&noop)
+            };
 
             // Mark as active
             *state.write().await = ActorState::Active;
@@ -1061,6 +1175,16 @@ impl ActorInstance {
             // Signal that actor is now active and ready to process messages
             // Ignore error if receiver was dropped (shouldn't happen in normal flow)
             let _ = active_tx.send(());
+            // Cooperative yielding budget (mirrors Erlang's reduction counting).
+            // After processing 32 consecutive messages the actor yields to Tokio so
+            // other tasks on the same worker thread get a turn.  Prevents a single
+            // message-burst actor from starving neighbours on the same thread.
+            let mut msg_budget: u32 = 0;
+            let mut hot_metrics = ActorHotMetrics::new(
+                &context.tenant_id,
+                &context.namespace,
+                actor_id_for_logging.actor_type(),
+            );
             loop {
                 // Use tokio::select! with biased to prioritize shutdown over mailbox work.
                 tokio::select! {
@@ -1080,7 +1204,7 @@ impl ActorInstance {
                             }
                         }
                     }
-                    Some(message) = mailbox.dequeue() => {
+                    Some(message) = mailbox_receiver.dequeue() => {
                         if tracing::enabled!(tracing::Level::TRACE) {
                             tracing::trace!(
                                 actor_id = %actor_id_for_logging,
@@ -1348,11 +1472,7 @@ impl ActorInstance {
                         // never needs to handle it.  The reply reuses the caller's
                         // correlation_id so an ask() future can match it.
                         if message.message_type == "__PING__" {
-                            metrics::counter!("plexspaces_actor_ping_total",
-                                "tenant_id" => context.tenant_id.clone(),
-            "namespace" => context.namespace.clone(),
-            "actor_type" => actor_id_for_logging.actor_type().to_string()
-                            ).increment(1);
+                            hot_metrics.ping.increment(1);
                             if !message.sender_id.is_empty() {
                                 let pong = crate::core::create_pong_message(&message);
                                 if let Err(e) = context
@@ -1402,6 +1522,7 @@ impl ActorInstance {
                             &context,
                             &mutable_state,
                             &facets,
+                            &mut hot_metrics,
                         ).await;
 
                         // ACK/NACK message based on processing result
@@ -1517,6 +1638,14 @@ impl ActorInstance {
                             }
                         }
                     }
+                }
+                // Cooperative yield: runs after each message processed (select! data arm).
+                // Shutdown / WASM-poison break paths exit the loop before reaching here,
+                // so the yield only fires when a real message was consumed.
+                msg_budget += 1;
+                if msg_budget >= 32 {
+                    msg_budget = 0;
+                    tokio::task::yield_now().await;
                 }
             }
 
@@ -2312,6 +2441,7 @@ impl ActorInstance {
         context: &Arc<ActorContext>,
         mutable_state: &Arc<RwLock<ActorMutableState>>,
         facets: &Arc<RwLock<FacetContainer>>,
+        hot_metrics: &mut ActorHotMetrics,
     ) -> Result<(), ActorError> {
         // RECURSION DETECTION: Track call depth to detect infinite loops
         use std::thread_local;
@@ -2398,15 +2528,8 @@ impl ActorInstance {
             );
         }
 
-        // OBSERVABILITY: Track message received
-        let message_type_owned = message_type.clone();
-        metrics::counter!("plexspaces_actor_messages_received_total",
-            "tenant_id" => context.tenant_id.clone(),
-            "namespace" => context.namespace.clone(),
-            "actor_type" => context.actor_id().actor_type().to_string(),
-            "message_type" => message_type_owned
-        )
-        .increment(1);
+        // OBSERVABILITY: Track message received (cached handle — avoids DashMap lookup per message)
+        hot_metrics.received(&message_type).increment(1);
 
         // Update last message time for health monitoring
         mutable_state.write().await.last_message_time = std::time::Instant::now();
@@ -2544,51 +2667,26 @@ impl ActorInstance {
                         .await;
                 }
 
-                // OBSERVABILITY: Track message processing result and latency
+                // OBSERVABILITY: Track message processing result and latency (cached handles)
                 let duration = start.elapsed();
                 match &result {
                     Ok(_) => {
-                        let message_type_owned2 = message_type.clone();
-                        metrics::counter!("plexspaces_actor_messages_processed_total",
-                            "tenant_id" => context.tenant_id.clone(),
-            "namespace" => context.namespace.clone(),
-            "actor_type" => context.actor_id().actor_type().to_string(),
-                            "message_type" => message_type_owned2.clone(),
-                            "status" => "success"
-                        )
-                        .increment(1);
-                        metrics::histogram!("plexspaces_actor_message_processing_duration_seconds",
-                            "tenant_id" => context.tenant_id.clone(),
-            "namespace" => context.namespace.clone(),
-            "actor_type" => context.actor_id().actor_type().to_string(),
-                            "message_type" => message_type_owned2.clone()
-                        )
-                        .record(duration.as_secs_f64());
+                        let (ctr, hist) = hot_metrics.processed_ok(&message_type);
+                        ctr.increment(1);
+                        hist.record(duration.as_secs_f64());
                     }
                     Err(e) => {
-                        let message_type_owned3 = message_type.clone();
+                        hot_metrics.processed_err(&message_type).increment(1);
+                        // error_type varies per error instance — keep inline (infrequent path)
                         let error_type = format!("{:?}", e);
-                        metrics::counter!("plexspaces_actor_messages_processed_total",
-                            "tenant_id" => context.tenant_id.clone(),
-            "namespace" => context.namespace.clone(),
-            "actor_type" => context.actor_id().actor_type().to_string(),
-                            "message_type" => message_type_owned3.clone(),
-                            "status" => "error"
-                        )
-                        .increment(1);
                         metrics::counter!("plexspaces_actor_message_processing_errors_total",
                             "tenant_id" => context.tenant_id.clone(),
-            "namespace" => context.namespace.clone(),
-            "actor_type" => context.actor_id().actor_type().to_string(),
-                            "message_type" => message_type_owned3.clone(),
+                            "namespace" => context.namespace.clone(),
+                            "actor_type" => context.actor_id().actor_type().to_string(),
+                            "message_type" => message_type.clone(),
                             "error_type" => error_type
                         )
                         .increment(1);
-                        // Note: set_error_message() is available but not called here because:
-                        // 1. process_message() is not a method (no self parameter)
-                        // 2. Error handling should be done at the actor level, not in process_message
-                        // 3. The error is already logged and tracked via metrics
-                        // TODO: Consider calling set_error_message() when actor transitions to FAILED state
                     }
                 }
 

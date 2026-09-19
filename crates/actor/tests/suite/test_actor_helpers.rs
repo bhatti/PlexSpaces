@@ -7,7 +7,7 @@
 
 use plexspaces_actor::ActorInstance as Actor;
 use plexspaces_actor::{ActorContext, ActorId, BehaviorType, ServiceLocator};
-use plexspaces_mailbox::Mailbox;
+use plexspaces_mailbox::{Mailbox, MailboxReceiver};
 use std::sync::Arc;
 
 pub(crate) enum TestActorIdentity {
@@ -69,7 +69,7 @@ fn normalized_test_actor_id(
 pub async fn actor_with_default_service_locator(
     id: impl Into<TestActorIdentity>,
     behavior: Box<dyn plexspaces_actor::Actor>,
-    mailbox: Mailbox,
+    mailbox: (Mailbox, MailboxReceiver),
     tenant_id: String,
     namespace: String,
 ) -> Actor {

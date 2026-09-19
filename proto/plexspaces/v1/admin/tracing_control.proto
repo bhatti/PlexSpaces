@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+syntax = "proto3";
+
+package plexspaces.admin.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/admin;plexspaces_admin_v1";
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces Admin Tracing API"
+    version: "1.0"
+    description: "Runtime tracing control for actor observability (JMX-like toggle)"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+};
+
+// Granularity for tracing toggle.
+enum TracingTarget {
+  TRACING_TARGET_UNSPECIFIED = 0;
+  // All actors of a given type (e.g. "Counter").
+  TRACING_TARGET_ACTOR_TYPE = 1;
+  // One specific actor instance by its full actor-id string.
+  TRACING_TARGET_ACTOR_ID = 2;
+  // Every actor on this node (use with caution at scale).
+  TRACING_TARGET_ALL = 3;
+}
+
+// Enable tracing for a target.
+message EnableTracingRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  TracingTarget target = 2;
+  // actor_type name when target = TRACING_TARGET_ACTOR_TYPE.
+  string actor_type = 3;
+  // Full actor-id string when target = TRACING_TARGET_ACTOR_ID.
+  string actor_id = 4;
+}
+
+message EnableTracingResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Disable tracing for a target.
+message DisableTracingRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  TracingTarget target = 2;
+  string actor_type = 3;
+  string actor_id = 4;
+}
+
+message DisableTracingResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Query the current tracing state.
+message GetTracingStatusRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+}
+
+// One entry in the tracing status report.
+message TracingEntry {
+  TracingTarget target = 1;
+  // The type name or actor-id this entry applies to.
+  string value = 2;
+  bool enabled = 3;
+}
+
+message GetTracingStatusResponse {
+  // True when TRACING_TARGET_ALL is enabled.
+  bool global_enabled = 1;
+  repeated TracingEntry entries = 2;
+}
+
+// Runtime tracing control service.
+// All actors default to tracing-off; operators enable selectively.
+service TracingControlService {
+  // Enable tracing for the specified target.
+  rpc EnableTracing(EnableTracingRequest) returns (EnableTracingResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/admin/tracing/enable"
+      body: "*"
+    };
+  }
+
+  // Disable tracing for the specified target.
+  rpc DisableTracing(DisableTracingRequest) returns (DisableTracingResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/admin/tracing/disable"
+      body: "*"
+    };
+  }
+
+  // Get current tracing status for all configured targets.
+  rpc GetTracingStatus(GetTracingStatusRequest) returns (GetTracingStatusResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/admin/tracing/status"
+    };
+  }
+}

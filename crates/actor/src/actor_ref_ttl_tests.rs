@@ -75,11 +75,11 @@ mod tests {
     }
 
     async fn create_test_mailbox() -> Arc<Mailbox> {
-        Arc::new(
+        let (mailbox, _receiver) =
             Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
                 .await
-                .expect("Failed to create mailbox"),
-        )
+                .expect("Failed to create mailbox");
+        Arc::new(mailbox)
     }
 
     fn test_actor_id(name: &str, node_id: &str) -> ActorId {

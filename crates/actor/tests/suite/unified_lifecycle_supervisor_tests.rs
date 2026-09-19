@@ -129,7 +129,7 @@ async fn test_supervisor_start_child_with_facets() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(
+                let mailbox_pair = Mailbox::new(
                     MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                 )
                 .await
@@ -137,7 +137,7 @@ async fn test_supervisor_start_child_with_facets() {
                 let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
-                    mailbox,
+                    mailbox_pair,
                     "tenant".to_string(),
                     "namespace".to_string(),
                 )
@@ -197,7 +197,7 @@ async fn test_supervisor_restart_preserves_facets() {
             move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
-                    let mailbox = Mailbox::new(
+                    let mailbox_pair = Mailbox::new(
                         MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
                     )
                     .await
@@ -205,7 +205,7 @@ async fn test_supervisor_restart_preserves_facets() {
                     let actor = actor_with_default_service_locator(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
-                        mailbox,
+                        mailbox_pair,
                         "tenant".to_string(),
                         "namespace".to_string(),
                     )
@@ -313,7 +313,7 @@ async fn test_supervisor_restart_sets_self_ref_before_init() {
                 let actor_id_string = actor_id_string.clone();
                 let actor_id_for_factory = actor_id_for_factory.clone();
                 Box::pin(async move {
-                    let mailbox = Mailbox::new(
+                    let mailbox_pair = Mailbox::new(
                         MailboxConfig::default(),
                         format!("mailbox-{}", actor_id_string),
                         String::new(),
@@ -327,7 +327,7 @@ async fn test_supervisor_restart_sets_self_ref_before_init() {
                         Box::new(InitObservingActor {
                             observed_ids: observed_ids.clone(),
                         }),
-                        mailbox,
+                        mailbox_pair,
                         "tenant".to_string(),
                         "namespace".to_string(),
                     )

@@ -57,7 +57,7 @@ async fn start_actor_grpc_server(node: Arc<plexspaces_node::Node>) -> String {
 
 /// Poll mailbox for a `__DOWN__` (same contract as `distributed_supervision` tests).
 async fn wait_for_down(
-    mailbox: &plexspaces_mailbox::Mailbox,
+    mailbox: &mut plexspaces_mailbox::MailboxReceiver,
     deadline: Duration,
 ) -> Option<Message> {
     let start = tokio::time::Instant::now();
@@ -100,18 +100,18 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
     let worker_id = test_runtime_actor_id("remote-w", "demonitor-node2");
     let sup_id = test_runtime_actor_id("remote-s", "demonitor-node1");
 
-    let sup_mailbox = Arc::new(
+    let (sup_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), sup_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let sup_mailbox = Arc::new(sup_mailbox_inner);
     register_actor_with_message_sender(&node1, &sup_id, sup_mailbox).await;
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node2, &worker_id, worker_mailbox).await;
 
     let ctx = node1
@@ -196,16 +196,16 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
     let a_id = test_runtime_actor_id("link-a", "link-node1");
     let b_id = test_runtime_actor_id("link-b", "link-node2");
 
-    let ma = Arc::new(
+    let (ma_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), a_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
-    let mb = Arc::new(
+            .unwrap();
+    let ma = Arc::new(ma_inner);
+    let (mb_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), b_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let mb = Arc::new(mb_inner);
     register_actor_with_message_sender(&node1, &a_id, ma).await;
     register_actor_with_message_sender(&node2, &b_id, mb).await;
 
@@ -318,18 +318,18 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
     let worker_id = test_runtime_actor_id("down-worker", "down-node2");
     let supervisor_id = test_runtime_actor_id("down-supervisor", "down-node1");
 
-    let supervisor_mailbox = Arc::new(
+    let (supervisor_mailbox_inner, mut supervisor_rx) =
         Mailbox::new(MailboxConfig::default(), supervisor_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let supervisor_mailbox = Arc::new(supervisor_mailbox_inner);
     register_actor_with_message_sender(&node1, &supervisor_id, supervisor_mailbox.clone()).await;
 
-    let worker_mailbox = Arc::new(
+    let (worker_mailbox_inner, _rx) =
         Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
             .await
-            .unwrap(),
-    );
+            .unwrap();
+    let worker_mailbox = Arc::new(worker_mailbox_inner);
     register_actor_with_message_sender(&node2, &worker_id, worker_mailbox.clone()).await;
 
     let ctx1 = node1
@@ -397,7 +397,7 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
     reg2.handle_actor_termination(&worker_id, ExitReason::Normal)
         .await;
 
-    let down = wait_for_down(&supervisor_mailbox, Duration::from_secs(2))
+    let down = wait_for_down(&mut supervisor_rx, Duration::from_secs(2))
         .await
         .expect("supervisor on node1 should receive __DOWN__ after remote worker termination");
     assert!(

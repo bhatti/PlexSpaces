@@ -107,8 +107,8 @@ pub struct RedisStorage {
     /// Enable pub/sub for notifications
     enable_pubsub: bool,
 
-    /// Operation statistics (for metrics)
-    stats: Arc<std::sync::Mutex<RedisOperationStats>>,
+    /// Operation statistics (for metrics) — atomic fields, no lock needed.
+    stats: Arc<RedisOperationStats>,
 }
 
 /// Local config type for Redis storage (proto types removed, now using shared database)
@@ -125,20 +125,15 @@ pub struct RedisConfig {
     pub enable_pubsub: bool,
 }
 
-/// Operation statistics for metrics
+/// Operation statistics for metrics — uses atomics so updates require no lock.
 #[cfg(feature = "redis-backend")]
 #[derive(Debug, Default)]
 struct RedisOperationStats {
-    /// Total operations
-    total_operations: u64,
-    /// Read operations
-    read_operations: u64,
-    /// Write operations
-    write_operations: u64,
-    /// Take operations
-    take_operations: u64,
-    /// Total latency in microseconds
-    total_latency_us: u64,
+    total_operations: std::sync::atomic::AtomicU64,
+    read_operations: std::sync::atomic::AtomicU64,
+    write_operations: std::sync::atomic::AtomicU64,
+    take_operations: std::sync::atomic::AtomicU64,
+    total_latency_us: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(feature = "redis-backend")]
@@ -181,19 +176,19 @@ impl RedisStorage {
             client,
             key_prefix,
             enable_pubsub: config.enable_pubsub,
-            stats: Arc::new(std::sync::Mutex::new(RedisOperationStats::default())),
+            stats: Arc::new(RedisOperationStats::default()),
         })
     }
 
-    /// Record operation for metrics
+    /// Record operation for metrics (lock-free atomic update).
     fn record_operation(&self, op_type: &str, latency_us: u64) {
-        let mut stats = self.stats.lock().unwrap();
-        stats.total_operations += 1;
-        stats.total_latency_us += latency_us;
+        use std::sync::atomic::Ordering::Relaxed;
+        self.stats.total_operations.fetch_add(1, Relaxed);
+        self.stats.total_latency_us.fetch_add(latency_us, Relaxed);
         match op_type {
-            "read" => stats.read_operations += 1,
-            "write" => stats.write_operations += 1,
-            "take" => stats.take_operations += 1,
+            "read" => { self.stats.read_operations.fetch_add(1, Relaxed); }
+            "write" => { self.stats.write_operations.fetch_add(1, Relaxed); }
+            "take" => { self.stats.take_operations.fetch_add(1, Relaxed); }
             _ => {}
         }
     }
@@ -730,10 +725,12 @@ impl TupleSpaceStorage for RedisStorage {
             .await
             .map_err(|e| TupleSpaceError::BackendError(format!("SCAN failed: {}", e)))?;
 
-        // Get operation stats
-        let stats = self.stats.lock().unwrap();
-        let avg_latency_ms = if stats.total_operations > 0 {
-            ((stats.total_latency_us as f64 / stats.total_operations as f64) / 1000.0) as f32
+        // Snapshot stats with Relaxed loads — stats are advisory, not requiring strict ordering.
+        use std::sync::atomic::Ordering::Relaxed;
+        let total_ops = self.stats.total_operations.load(Relaxed);
+        let total_lat = self.stats.total_latency_us.load(Relaxed);
+        let avg_latency_ms = if total_ops > 0 {
+            ((total_lat as f64 / total_ops as f64) / 1000.0) as f32
         } else {
             0.0f32
         };
@@ -741,10 +738,10 @@ impl TupleSpaceStorage for RedisStorage {
         Ok(StorageStats {
             tuple_count: keys.len() as u64,
             memory_bytes: 0, // TODO: Get from Redis INFO
-            total_operations: stats.total_operations,
-            read_operations: stats.read_operations,
-            write_operations: stats.write_operations,
-            take_operations: stats.take_operations,
+            total_operations: total_ops,
+            read_operations: self.stats.read_operations.load(Relaxed),
+            write_operations: self.stats.write_operations.load(Relaxed),
+            take_operations: self.stats.take_operations.load(Relaxed),
             avg_latency_ms,
         })
     }

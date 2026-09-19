@@ -139,13 +139,13 @@ async fn test_registration_after_init_succeeds() {
     // This prevents memory leaks when init() fails
     let actor_impl = FailingInitActor::new(false);
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
-        mailbox,
+        mailbox_pair,
         "tenant".to_string(),
         "namespace".to_string(),
     )
@@ -173,13 +173,13 @@ async fn test_no_registration_when_init_fails() {
     // This prevents memory leaks
     let actor_impl = FailingInitActor::new(true);
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
-        mailbox,
+        mailbox_pair,
         "tenant".to_string(),
         "namespace".to_string(),
     )
@@ -205,13 +205,13 @@ async fn test_unregister_on_stop() {
     // Test that unregistration happens when actor is stopped
     let actor_impl = FailingInitActor::new(false);
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
-        mailbox,
+        mailbox_pair,
         "tenant".to_string(),
         "namespace".to_string(),
     )
@@ -239,13 +239,13 @@ async fn test_unregister_on_natural_termination() {
     // Test that unregistration happens when actor terminates naturally
     let actor_impl = NaturalTerminationActor::new(1);
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
-        mailbox,
+        mailbox_pair,
         "tenant".to_string(),
         "namespace".to_string(),
     )
@@ -268,13 +268,13 @@ async fn test_idempotent_unregistration() {
     // Test that unregistration is idempotent (safe to call multiple times)
     let actor_impl = FailingInitActor::new(false);
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
-        mailbox,
+        mailbox_pair,
         "tenant".to_string(),
         "namespace".to_string(),
     )
@@ -304,13 +304,13 @@ async fn test_no_memory_leak_on_init_failure() {
     // Actor should not be registered, so no cleanup needed
     let actor_impl = FailingInitActor::new(true);
 
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()), String::new(), String::new(), None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
-        mailbox,
+        mailbox_pair,
         "tenant".to_string(),
         "namespace".to_string(),
     )

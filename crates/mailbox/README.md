@@ -51,25 +51,29 @@ assert_eq!(pong.message_type, "__PONG__");
 
 ## Key Components
 
-### Mailbox
+### Mailbox + MailboxReceiver (Sender/Receiver Split)
+
+`Mailbox::new()` returns a `(Mailbox, MailboxReceiver)` pair. This split eliminates two `tokio::sync::Mutex` acquisitions per dequeue that the previous single-struct design required.
+
+- **`Mailbox`** — sender side, `Arc`-shareable; all enqueue callers use this
+- **`MailboxReceiver`** — consumer side, `!Clone !Sync`; owned exclusively by the actor task
 
 ```rust
-impl Mailbox {
-    // Enqueue: ctrl messages go to the ctrl queue; data messages to the data queue
-    pub async fn enqueue(&self, message: Message) -> Result<(), MailboxError>;
+// Construction
+let (mailbox, receiver) = Mailbox::new(config);
 
-    // Dequeue: drains ctrl queue first, then data queue
-    pub fn dequeue(&self) -> impl Future<Output = Option<Message>>;
-    pub fn dequeue_with_timeout(&self, timeout: Option<Duration>) -> impl Future<Output = Option<Message>>;
+// Sender side (Arc<Mailbox> shared across threads)
+mailbox.enqueue(message).await?;
+mailbox.size();         // data queue depth (atomic)
+mailbox.ctrl_size();    // ctrl queue depth (atomic)
+mailbox.get_stats();    // observability snapshot
 
-    // Size helpers (sync — read atomics directly, no await needed)
-    pub fn size(&self) -> usize;               // data queue depth (not counting ctrl)
-    pub fn ctrl_size(&self) -> usize;          // ctrl queue depth (atomic, O(1))
-
-    // Observability (sync — all counters are atomics)
-    pub fn get_stats(&self) -> MailboxObservabilityStats;
-}
+// Receiver side (owned by actor task — no locking)
+receiver.ctrl.recv().await   // ctrl queue (priority)
+receiver.data.recv().await   // data queue
 ```
+
+The actor loop uses a single flat `tokio::select! { biased; ctrl.recv() | data.recv() }` — previously this was two nested select state machines.
 
 ### MailboxObservabilityStats
 
@@ -175,5 +179,6 @@ cargo test -p plexspaces-mailbox --lib
 
 - Architecture: [docs/architecture.md](../../docs/architecture.md)
 - Detailed design: [docs/detailed-design.md](../../docs/detailed-design.md)
+- Performance internals: [docs/detailed-design.md#performance-internals](../../docs/detailed-design.md#performance-internals)
 - Control messages: `crates/core/src/actor_monitor.rs` (`CTRL_MSG_PREFIX`, `is_ctrl_message`)
 - Durability: [docs/durability.md](../../docs/durability.md)

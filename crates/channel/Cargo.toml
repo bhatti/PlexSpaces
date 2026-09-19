@@ -14,7 +14,7 @@ description = "Extensible channel/queue abstraction for PlexSpaces microservices
 plexspaces-proto = { workspace = true }
 
 # Core dependencies
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

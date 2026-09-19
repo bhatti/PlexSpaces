@@ -3854,6 +3854,80 @@ Key implementation details:
 
 See [WebSocket Transport](websocket.md) for the full protocol reference.
 
+## Performance Internals
+
+### Mailbox: Sender/Receiver Split
+
+`Mailbox::new()` returns `(Mailbox, MailboxReceiver)`. The split removes the two `tokio::sync::Mutex` acquisitions that were previously needed per dequeue (Receiver isn't Sync, so Mutex was used as a type-system workaround).
+
+```rust
+// Before: single Mailbox (sender + receiver locked together)
+let mailbox = Mailbox::new(config);
+mailbox.dequeue().await  // acquires 2 Mutex locks
+
+// After: split on construction
+let (mailbox, mut receiver) = Mailbox::new(config);
+// receiver is !Clone, !Sync — owned by the actor task, no locking needed
+receiver.ctrl.recv().await
+receiver.data.recv().await
+```
+
+The actor loop uses a single flat `tokio::select! { biased; ctrl.recv() | data.recv() }` — no nested select state machines.
+
+**Durable path**: enqueue calls `notify.notify_one()`; the durable pump waits on `notify.notified()` instead of busy-polling with `yield_now()`.
+
+### Actor Loop: Cooperative Scheduling
+
+Each actor maintains a `msg_budget: u32` counter. After processing 32 consecutive messages, it calls `tokio::task::yield_now()` to give other tasks on the same worker thread a turn. This mirrors Erlang's reduction counting and prevents burst-heavy actors from monopolizing a thread.
+
+```
+loop {
+    select! { biased; shutdown | ctrl | data }
+    msg_budget += 1;
+    if msg_budget >= 32 { yield_now().await; msg_budget = 0; }
+}
+```
+
+### Metric Handle Caching (`ActorHotMetrics`)
+
+Per-message `metrics::counter!()` macros do a string-hash DashMap lookup (~50–100 ns each). `ActorHotMetrics` pre-creates `Counter`/`Histogram` handles keyed by `message_type` in a `HashMap` local to the actor task:
+
+- First message of a given type: DashMap insert + cache in HashMap
+- Subsequent messages: `HashMap::get` (~5 ns), `counter.increment(1)` 
+
+### WebSocket Frame Encoding at Enqueue
+
+Previously the WS writer task serialized protobuf encoding for all outbound frames serially. Now callers encode before sending:
+
+```rust
+// Enqueue side (caller thread): parallelize encoding across worker threads
+tx.send(frame.encode_to_vec()).await?;
+
+// Writer task: no encoding work, just forward bytes
+while let Some(bytes) = rx.recv().await {
+    ws_sender.send(Message::Binary(bytes.into())).await?;
+}
+```
+
+### TracingControl: Runtime Per-Actor Tracing Toggle
+
+All actor tracing is **off by default** (`Dispatch::none()` — zero overhead, no closed-span panics). The `TracingControlServiceImpl` implements both:
+
+1. **`TracingGate` trait** (`crates/actor`) — `is_enabled(actor_type, actor_id) -> bool`; two DashMap reads (~10 ns)
+2. **`TracingControlService` gRPC trait** — `EnableTracing`, `DisableTracing`, `GetTracingStatus`
+
+State precedence: actor-id override > actor-type override > global switch.
+
+At actor spawn, the task samples `TracingGate::is_enabled()` once and installs either:
+- `Dispatch::none()` — tracing off, zero overhead
+- `tracing::dispatcher::get_default(|d| d.clone())` — tracing on, clean root span (no closed-parent-span panic)
+
+**Limitation**: the dispatcher is chosen at spawn time. Enabling tracing for a running actor requires restarting it.
+
+### Atomic Stats (No Mutex)
+
+`RedisOperationStats` and `SqlOperationStats` use `AtomicU64` with `Ordering::Relaxed` for all counters, replacing `Arc<Mutex<Stats>>`. `record_operation` is now a single `fetch_add` with no lock acquisition.
+
 ## See Also
 
 - [Architecture](architecture.md): High-level overview

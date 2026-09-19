@@ -22,7 +22,7 @@ async fn test_get_or_activate_actor_new_actor() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(
+    let mailbox_pair = Mailbox::new(
         mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
     )
     .await
@@ -31,7 +31,7 @@ async fn test_get_or_activate_actor_new_actor() {
     let actor = Actor::new(
         actor_id.clone().into(),
         behavior,
-        mailbox,
+        mailbox_pair,
         "default".to_string(),
         "default".to_string(),
         None,
@@ -70,7 +70,7 @@ async fn test_get_or_activate_actor_existing_actor() {
 
     // First, spawn an actor
     let behavior1 = Box::new(MockBehavior::new());
-    let mailbox1 = Mailbox::new(
+    let mailbox1_pair = Mailbox::new(
         mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
     )
     .await
@@ -78,7 +78,7 @@ async fn test_get_or_activate_actor_existing_actor() {
     let actor1 = Actor::new(
         actor_id.clone().into(),
         behavior1,
-        mailbox1,
+        mailbox1_pair,
         "default".to_string(),
         "default".to_string(),
         None,
@@ -102,7 +102,7 @@ async fn test_get_or_activate_actor_concurrent_activation() {
 
     // Spawn the actor once
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(
+    let mailbox_pair = Mailbox::new(
         mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
     )
     .await
@@ -110,7 +110,7 @@ async fn test_get_or_activate_actor_concurrent_activation() {
     let actor = Actor::new(
         actor_id.clone().into(),
         behavior,
-        mailbox,
+        mailbox_pair,
         "default".to_string(),
         "default".to_string(),
         None,

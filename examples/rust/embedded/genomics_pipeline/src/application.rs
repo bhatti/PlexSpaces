@@ -167,17 +167,20 @@ impl Application for GenomicsPipelineApplication {
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = tokio::task::block_in_place(|| {
+                    let mailbox_pair = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(Mailbox::new(
                             config,
                             format!("mailbox-{}", child_actor_id_for_factory.name()),
+                            "default".to_string(),
+                            "genomics".to_string(),
+                            None,
                         ))
                     })
                     .expect("Failed to create mailbox");
                     Ok(ActorInstance::new(
                         child_actor_id_for_factory.clone(),
                         Box::new(QCWorker::new(child_actor_id_for_factory.name().to_string())),
-                        mailbox,
+                        mailbox_pair,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
                         Some(node_id_for_factory.clone()), // node_id
@@ -216,10 +219,13 @@ impl Application for GenomicsPipelineApplication {
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = tokio::task::block_in_place(|| {
+                    let mailbox_pair = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(Mailbox::new(
                             config,
                             format!("mailbox-{}", child_actor_id_for_factory.name()),
+                            "default".to_string(),
+                            "genomics".to_string(),
+                            None,
                         ))
                     })
                     .expect("Failed to create mailbox");
@@ -228,7 +234,7 @@ impl Application for GenomicsPipelineApplication {
                         Box::new(AlignmentWorker::new(
                             child_actor_id_for_factory.name().to_string(),
                         )),
-                        mailbox,
+                        mailbox_pair,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
                         Some(node_id_for_factory.clone()), // node_id
@@ -269,10 +275,13 @@ impl Application for GenomicsPipelineApplication {
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = tokio::task::block_in_place(|| {
+                    let mailbox_pair = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(Mailbox::new(
                             config,
                             format!("mailbox-{}", child_actor_id_for_factory.name()),
+                            "default".to_string(),
+                            "genomics".to_string(),
+                            None,
                         ))
                     })
                     .expect("Failed to create mailbox");
@@ -282,7 +291,7 @@ impl Application for GenomicsPipelineApplication {
                             child_actor_id_for_factory.name().to_string(),
                             chromosome_for_factory.clone(),
                         )),
-                        mailbox,
+                        mailbox_pair,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
                         Some(node_id_for_factory.clone()), // node_id
@@ -324,10 +333,13 @@ impl Application for GenomicsPipelineApplication {
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = tokio::task::block_in_place(|| {
+                    let mailbox_pair = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(Mailbox::new(
                             config,
                             format!("mailbox-{}", child_actor_id_for_factory.name()),
+                            "default".to_string(),
+                            "genomics".to_string(),
+                            None,
                         ))
                     })
                     .expect("Failed to create mailbox");
@@ -336,7 +348,7 @@ impl Application for GenomicsPipelineApplication {
                         Box::new(AnnotationWorker::new(
                             child_actor_id_for_factory.name().to_string(),
                         )),
-                        mailbox,
+                        mailbox_pair,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
                         Some(node_id_for_factory.clone()), // node_id
@@ -374,10 +386,13 @@ impl Application for GenomicsPipelineApplication {
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = tokio::task::block_in_place(|| {
+                    let mailbox_pair = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(Mailbox::new(
                             config,
                             format!("mailbox-{}", child_actor_id_for_factory.name()),
+                            "default".to_string(),
+                            "genomics".to_string(),
+                            None,
                         ))
                     })
                     .expect("Failed to create mailbox");
@@ -386,7 +401,7 @@ impl Application for GenomicsPipelineApplication {
                         Box::new(ReportWorker::new(
                             child_actor_id_for_factory.name().to_string(),
                         )),
-                        mailbox,
+                        mailbox_pair,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
                         Some(node_id_for_factory.clone()), // node_id

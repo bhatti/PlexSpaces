@@ -33,11 +33,11 @@
 //! `WsRegistry` is constructed in `Node::start()` and injected into all consumers
 //! via `Arc<WsRegistry>`. There are no thread-locals or statics.
 
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use plexspaces_proto::node::v1::NodeRole;
-use plexspaces_proto::transport::ws::v1::WsFrame;
 use tokio::sync::mpsc;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,8 +56,8 @@ use tokio::sync::mpsc;
 pub struct WsSession {
     /// The remote node's identifier.
     pub node_id: String,
-    /// Channel for sending frames to the remote node's WebSocket connection.
-    pub sender: mpsc::Sender<WsFrame>,
+    /// Channel for sending pre-encoded frames to the remote node's WebSocket connection.
+    pub sender: mpsc::Sender<Vec<u8>>,
     /// Role of the remote node in the cluster.
     pub role: NodeRole,
     /// Tenant ID extracted from the JWT on upgrade.
@@ -117,7 +117,7 @@ impl WsRegistry {
     }
 
     /// Return the outbound sender for `node_id`, or `None` if not connected.
-    pub async fn get_sender(&self, node_id: &str) -> Option<mpsc::Sender<WsFrame>> {
+    pub async fn get_sender(&self, node_id: &str) -> Option<mpsc::Sender<Vec<u8>>> {
         self.sessions.get(node_id).map(|s| s.sender.clone())
     }
 
@@ -154,7 +154,7 @@ impl WsRegistry {
     pub async fn update_heartbeat_and_get_sender(
         &self,
         node_id: &str,
-    ) -> Option<mpsc::Sender<WsFrame>> {
+    ) -> Option<mpsc::Sender<Vec<u8>>> {
         self.sessions.get_mut(node_id).map(|mut s| {
             s.last_heartbeat = Instant::now();
             s.sender.clone()
@@ -164,6 +164,64 @@ impl WsRegistry {
     /// Return the current session count.
     pub async fn session_count(&self) -> usize {
         self.sessions.len()
+    }
+
+    /// Remove all sessions whose `last_heartbeat` is older than `stale_timeout`.
+    ///
+    /// Returns the node IDs that were reaped. Callers can use this for testing
+    /// without relying on wall-clock timing.
+    pub fn scan_and_reap_stale(&self, stale_timeout: Duration) -> Vec<String> {
+        let stale: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|e| e.value().last_heartbeat.elapsed() > stale_timeout)
+            .map(|e| e.key().clone())
+            .collect();
+
+        for node_id in &stale {
+            self.sessions.remove(node_id);
+            metrics::counter!("plexspaces_ws_stale_sessions_reaped_total").increment(1);
+            tracing::warn!(node_id = %node_id, "Reaped stale WS session (no heartbeat received within timeout)");
+        }
+
+        let remaining = self.sessions.len();
+        metrics::gauge!("plexspaces_ws_thin_nodes_active").set(remaining as f64);
+
+        stale
+    }
+
+    /// Spawn a background task that periodically reaps stale sessions.
+    ///
+    /// `stale_timeout` = 3 × expected heartbeat interval. Sessions that miss
+    /// this window are treated as half-open connections and removed.
+    /// The scan runs every 60 seconds.
+    pub fn start_reaper(
+        registry: Arc<WsRegistry>,
+        stale_timeout: Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let scan_interval = Duration::from_secs(60);
+            loop {
+                tokio::time::sleep(scan_interval).await;
+                registry.scan_and_reap_stale(stale_timeout);
+            }
+            // loop is infinite; this line is unreachable but makes the reaper's
+            // intent explicit — the task runs for the lifetime of the node.
+        })
+    }
+
+    /// Spawn the reaper and detach it, logging an error if it ever exits unexpectedly.
+    ///
+    /// Use this in `Node::start()` where the `JoinHandle` would otherwise be
+    /// silently dropped. A panic inside the reaper is logged and does not crash
+    /// the node process.
+    pub fn spawn_reaper(registry: Arc<WsRegistry>, stale_timeout: Duration) {
+        let handle = Self::start_reaper(registry, stale_timeout);
+        tokio::spawn(async move {
+            if let Err(e) = handle.await {
+                tracing::error!(error = %e, "WS session reaper task exited unexpectedly");
+            }
+        });
     }
 }
 
@@ -206,7 +264,7 @@ mod tests {
     use plexspaces_proto::node::v1::NodeRole;
     use tokio::sync::mpsc;
 
-    fn make_session(node_id: &str, role: NodeRole) -> (WsSession, mpsc::Receiver<WsFrame>) {
+    fn make_session(node_id: &str, role: NodeRole) -> (WsSession, mpsc::Receiver<Vec<u8>>) {
         let (tx, rx) = mpsc::channel(16);
         let session = WsSession {
             node_id: node_id.to_string(),
@@ -313,6 +371,49 @@ mod tests {
         // The thin_nodes list should be empty since the reconnect used FULL role
         let thin = registry.list_thin_nodes().await;
         assert!(thin.is_empty(), "Reconnect replaced thin session with full");
+    }
+
+    #[tokio::test]
+    async fn test_scan_and_reap_stale_removes_expired_sessions() {
+        let registry = WsRegistry::new();
+
+        // Register two sessions with a heartbeat far in the past and one fresh one.
+        let (mut old1, _rx1) = make_session("stale-1", NodeRole::NodeRoleThin);
+        let (mut old2, _rx2) = make_session("stale-2", NodeRole::NodeRoleThin);
+        let (fresh, _rx3) = make_session("fresh-1", NodeRole::NodeRoleThin);
+
+        // Force last_heartbeat to be 10 minutes ago so they exceed any reasonable stale_timeout.
+        let ten_minutes_ago = Instant::now() - Duration::from_secs(600);
+        old1.last_heartbeat = ten_minutes_ago;
+        old2.last_heartbeat = ten_minutes_ago;
+
+        registry.register(old1).await;
+        registry.register(old2).await;
+        registry.register(fresh).await;
+
+        assert_eq!(registry.session_count().await, 3);
+
+        // Reap with a 30-second timeout — only the two old sessions qualify.
+        let reaped = registry.scan_and_reap_stale(Duration::from_secs(30));
+        let mut reaped_sorted = reaped.clone();
+        reaped_sorted.sort();
+        assert_eq!(reaped_sorted, vec!["stale-1", "stale-2"]);
+        assert_eq!(registry.session_count().await, 1);
+        assert!(registry.is_connected("fresh-1").await);
+    }
+
+    #[tokio::test]
+    async fn test_scan_and_reap_stale_noop_when_all_fresh() {
+        let registry = WsRegistry::new();
+        let (s1, _) = make_session("node-a", NodeRole::NodeRoleThin);
+        let (s2, _) = make_session("node-b", NodeRole::NodeRoleFull);
+        registry.register(s1).await;
+        registry.register(s2).await;
+
+        // Very long timeout — nothing should be reaped.
+        let reaped = registry.scan_and_reap_stale(Duration::from_secs(3600));
+        assert!(reaped.is_empty());
+        assert_eq!(registry.session_count().await, 2);
     }
 
     #[tokio::test]

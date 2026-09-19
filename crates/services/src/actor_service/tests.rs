@@ -22,7 +22,7 @@ use super::*;
 use plexspaces_actor::{
     InitializableServiceLocator, MessageSender, ObjectRegistry as ObjectRegistryTrait,
 };
-use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxReceiver};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration};
@@ -536,11 +536,11 @@ async fn test_register_and_unregister_local_actor() {
     let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _rx) =
         Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
-            .expect("Failed to create mailbox"),
-    );
+            .expect("Failed to create mailbox");
+    let mailbox = Arc::new(mailbox_inner);
     let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
 
     // ACT: Register actor
@@ -597,7 +597,7 @@ async fn test_canonical_actor_id_from_client_target_resolves_bare_live_actor_typ
     let actor_registry = create_test_registry("node1").await;
     let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _rx) =
         Mailbox::new(
             mailbox_config_default(),
             "controller//controller::app-ns@node1".to_string(),
@@ -606,8 +606,8 @@ async fn test_canonical_actor_id_from_client_target_resolves_bare_live_actor_typ
             None,
         )
         .await
-        .expect("Failed to create mailbox"),
-    );
+        .expect("Failed to create mailbox");
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_actor_id("controller", "controller", "app-ns", "node1");
     let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
 
@@ -634,7 +634,7 @@ async fn test_canonical_actor_id_from_client_target_name_colon_type_hits_live_ac
     let actor_registry = create_test_registry("node1").await;
     let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _rx) =
         Mailbox::new(
             mailbox_config_default(),
             "weather//weather_actor_wasm::app-ns@node1".to_string(),
@@ -643,8 +643,8 @@ async fn test_canonical_actor_id_from_client_target_name_colon_type_hits_live_ac
             None,
         )
         .await
-        .expect("Failed to create mailbox"),
-    );
+        .expect("Failed to create mailbox");
+    let mailbox = Arc::new(mailbox_inner);
     let actor_id = test_actor_id("weather", "weather_actor_wasm", "app-ns", "node1");
     let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
 
@@ -815,11 +815,11 @@ async fn test_route_message_local_routing() {
     let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, mut mailbox_rx) =
         Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
-            .expect("Failed to create mailbox"),
-    );
+            .expect("Failed to create mailbox");
+    let mailbox = Arc::new(mailbox_inner);
     let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
     register_test_actor(
         actor_registry.clone(),
@@ -847,7 +847,7 @@ async fn test_route_message_local_routing() {
     assert!(response.is_none());
 
     // Verify message delivered (poll immediately - no sleep needed)
-    let delivered = mailbox.dequeue().await;
+    let delivered = mailbox_rx.dequeue().await;
     assert!(
         delivered.is_some(),
         "Message should be delivered immediately"
@@ -919,11 +919,11 @@ async fn test_send_message_success() {
     let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, mut mailbox_rx) =
         Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
-            .expect("Failed to create mailbox"),
-    );
+            .expect("Failed to create mailbox");
+    let mailbox = Arc::new(mailbox_inner);
     let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
     register_test_actor(
         actor_registry.clone(),
@@ -954,7 +954,7 @@ async fn test_send_message_success() {
     assert!(response.success);
 
     // Verify delivery (poll immediately - no sleep needed)
-    let delivered = mailbox.dequeue().await;
+    let delivered = mailbox_rx.dequeue().await;
     assert!(
         delivered.is_some(),
         "Message should be delivered immediately"
@@ -969,11 +969,11 @@ async fn test_send_message_with_timeout() {
     let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _mailbox_rx) =
         Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
-            .expect("Failed to create mailbox"),
-    );
+            .expect("Failed to create mailbox");
+    let mailbox = Arc::new(mailbox_inner);
     let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
     register_test_actor(
         actor_registry.clone(),
@@ -1027,11 +1027,11 @@ async fn test_send_message_converts_timeout_correctly() {
     let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
-    let mailbox = Arc::new(
+    let (mailbox_inner, _rx) =
         Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
             .await
-            .expect("Failed to create mailbox"),
-    );
+            .expect("Failed to create mailbox");
+    let mailbox = Arc::new(mailbox_inner);
     let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
     register_test_actor(
         actor_registry.clone(),

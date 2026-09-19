@@ -204,11 +204,11 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
     for _ in 0..20 {
         if actor_registry.lookup_actor(actor_id).await.is_some() {
             use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-            let mailbox_for_ref = Arc::new(
+            let (mailbox_for_ref_inner, _mailbox_rx) =
                 Mailbox::new(mailbox_config_default(), format!("ref-{}", actor_id), String::new(), String::new(), None)
                     .await
-                    .expect("Failed to create mailbox for ActorRef"),
-            );
+                    .expect("Failed to create mailbox for ActorRef");
+            let mailbox_for_ref = Arc::new(mailbox_for_ref_inner);
             return ActorRef::local(
                 actor_id.clone(),
                 "test-tenant",

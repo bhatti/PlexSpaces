@@ -41,7 +41,7 @@ mod tests {
     use plexspaces_journaling::{
         CompressionType, DurabilityConfig, DurabilityFacet, JournalStorage,
     };
-    use plexspaces_mailbox::{Mailbox, MailboxBuilder};
+    use plexspaces_mailbox::{Mailbox, MailboxBuilder, MailboxReceiver};
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -50,11 +50,12 @@ mod tests {
     async fn create_durable_mailbox(mailbox_id: &str) -> Mailbox {
         // Use in-memory SQLite for tests (more reliable than file-based in test environment)
         // In production, use file-based SQLite for durability
-        MailboxBuilder::new()
+        let (mailbox, _receiver) = MailboxBuilder::new()
             .with_sqlite(":memory:".to_string())
             .build(mailbox_id.to_string())
             .await
-            .unwrap()
+            .unwrap();
+        mailbox
     }
 
     /// Helper to create a DurabilityFacet
@@ -89,7 +90,7 @@ mod tests {
     #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_is_durable_check() {
         // Test in-memory mailbox (not durable)
-        let mailbox = MailboxBuilder::new()
+        let (mailbox, _receiver) = MailboxBuilder::new()
             .with_in_memory()
             .build("test-in-memory".to_string())
             .await
@@ -275,10 +276,9 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
+            let (mailbox, _receiver) = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
-
             // Create and attach DurabilityFacet
             let storage = SqliteJournalStorage::new(&journal_db_str).await.unwrap();
             let durability_config = DurabilityConfig {
@@ -350,10 +350,9 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let mailbox = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
+            let (mailbox, mut receiver) = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
                 .await
                 .unwrap();
-
             // Recover DurabilityFacet (will replay journal)
             #[cfg(feature = "sqlite-backend")]
             use plexspaces_journaling::sql::SqliteJournalStorage;
@@ -395,7 +394,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             // Should be able to receive messages
-            let _received = mailbox
+            let _received = receiver
                 .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
                 .await;
             // Note: Recovery of messages depends on SQLite channel implementation

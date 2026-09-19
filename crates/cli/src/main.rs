@@ -353,9 +353,21 @@ async fn async_main() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("plexspaces-runtime-worker")
-        .build()?
-        .block_on(async_main())
+    // Runtime sizing via env vars — operators can tune without recompiling.
+    // Defaults: num_cpus for workers, 512 for blocking (Tokio defaults).
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all().thread_name("plexspaces-runtime-worker");
+
+    if let Ok(val) = std::env::var("PLEXSPACES_WORKER_THREADS") {
+        if let Ok(n) = val.parse::<usize>() {
+            builder.worker_threads(n);
+        }
+    }
+    if let Ok(val) = std::env::var("PLEXSPACES_MAX_BLOCKING_THREADS") {
+        if let Ok(n) = val.parse::<usize>() {
+            builder.max_blocking_threads(n);
+        }
+    }
+
+    builder.build()?.block_on(async_main())
 }

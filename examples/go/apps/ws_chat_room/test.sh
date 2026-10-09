@@ -40,7 +40,7 @@ fail() { echo -e "${RED}[FAIL] $*${NC}" >&2; exit 1; }
 pass() { echo -e "${GREEN}[PASS] $*${NC}" >&2; }
 
 # ─── 0. Build if needed ──────────────────────────────────────────────────────
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   log "Building ws_chat_actor.wasm..."
   bash "$SCRIPT_DIR/build.sh" || fail "Build failed"
 fi
@@ -68,7 +68,7 @@ echo ""
 # ─── 2. Check node is reachable ──────────────────────────────────────────────
 log "Checking node at ${HTTP_URL}..."
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 
@@ -124,6 +124,8 @@ extract_field() {
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 v = p.get('$field', None)
 if v is None:
     print('')
@@ -216,6 +218,8 @@ if echo "$HISTORY_RESP" | grep -q '"history"'; then
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 history = p.get('history', [])
 texts = [e.get('text','') for e in history]
 found = any('${TEST_TEXT}' in t for t in texts)

@@ -50,7 +50,7 @@ echo "================================================================"
 echo ""
 
 # Build if needed
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
     echo "Building WASM actor..."
     chmod +x "$SCRIPT_DIR/build.sh"
     "$SCRIPT_DIR/build.sh" || { echo -e "${RED}Build failed${NC}"; exit 1; }
@@ -61,7 +61,7 @@ fi
 echo "Step 1: Check node status"
 echo "----------------------------------------------------------------"
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
@@ -141,6 +141,8 @@ test_op() {
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 print(p.get('result', 'ERROR'))
 " 2>/dev/null || echo "ERROR")
 
@@ -183,6 +185,8 @@ OP_COUNT=$(echo "$HIST_RESP" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 print(p.get('operation_count', 0))
 " 2>/dev/null || echo "?")
 echo -e "  Operations recorded: $OP_COUNT"
@@ -201,6 +205,8 @@ echo "$BATCH_RESP" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 total = p.get('total_operations', 0)
 dur = p.get('duration_ms', 0)
 ops = p.get('ops_per_sec', 0)
@@ -221,6 +227,8 @@ echo "$STATS_RESP" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 counters = p.get('counters', {})
 bench = p.get('benchmarks', {})
 print(f'  Actor ID:         {p.get(\"actor_id\", \"?\")}')

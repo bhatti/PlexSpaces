@@ -40,7 +40,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 APP_ID="go-miniclaw"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 send_op() {
   local actor="$1"
@@ -74,6 +74,8 @@ import sys, json
 try:
     d = json.load(sys.stdin)
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print($expr)
 except:
     print('$default')
@@ -102,7 +104,8 @@ fi
 
 # gRPC and HTTP share a single port
 GRPC_PORT=$HTTP_PORT
-TEMP_CONFIG="$(mktemp -t miniclaw-config)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
 python3 - "$CONFIG_FILE" "$TEMP_CONFIG" "$GRPC_PORT" <<'PY'
 import pathlib, sys
 source = pathlib.Path(sys.argv[1]).read_text()
@@ -115,8 +118,8 @@ for line in source.splitlines():
         lines.append(line)
 pathlib.Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
 PY
-trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
@@ -147,8 +150,8 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $BODY${NC}"
   exit 1
 fi
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 echo -e "  ${GREEN}Deployed${NC} — 8 actors registered, each joined its process group (svc:*)"
 sleep 3
 echo ""
@@ -170,6 +173,8 @@ python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 count = p.get('count', 0)
 tools = p.get('tools', [])
 print(f'  Registered tools ({count} total):')
@@ -209,6 +214,8 @@ python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 o = p.get('output', {})
 print(f'  Location    : {o.get(\"location\",\"?\")}')
 print(f'  Temperature : {o.get(\"temperature\",\"?\")}°{o.get(\"unit\",\"?\")[0].upper()}')
@@ -271,6 +278,8 @@ python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 mems = p.get('memories', [])
 for m in mems:
     print(f'  Recalled    : scope={m.get(\"scope\",\"?\")}  key={m.get(\"key\",\"?\")}  value={m.get(\"value\",\"?\")}')
@@ -308,6 +317,8 @@ python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 print(f'  Retrieved   : channel={p.get(\"channel\",\"?\")}  user_id={p.get(\"user_id\",\"?\")}  agent_id={p.get(\"agent_id\",\"?\")}')
 " <<< "$SESS_GET"
 if echo "$SESS_GET" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); assert p.get('user_id')=='user-42', p" 2>/dev/null; then
@@ -362,6 +373,8 @@ python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 events = p.get('events', [])
 if events:
     print('  Recent events (last 5):')

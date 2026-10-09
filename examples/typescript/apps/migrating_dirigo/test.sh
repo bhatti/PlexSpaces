@@ -43,7 +43,7 @@ echo "  Dirigo → PlexSpaces: Windowed stream (TypeScript WASM)"
 echo "  Real-time analytics, Kafka-style window aggregation"
 echo "================================================================"
 
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   echo "Building WASM..."
   chmod +x "$SCRIPT_DIR/build.sh"
   "$SCRIPT_DIR/build.sh" || { echo -e "${RED}Build failed${NC}"; exit 1; }
@@ -51,7 +51,7 @@ if [ ! -f "$WASM_FILE" ]; then
 fi
 
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"

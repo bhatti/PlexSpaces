@@ -1966,6 +1966,43 @@ Data flow: CreateShardGroup `config.placement` → `shard_config.resource_requir
 
 Five MPI-style collective operations extend shard groups for data-parallel applications. All are handled by `ActorService` (thin gRPC/service controller) delegating pure computation to `crates/actor/src/parallel.rs`.
 
+### Typed SDK API (all four languages)
+
+All SDKs expose shard group operations through **typed request structs** — no raw dicts/maps. See `PROJECT_CONTEXT.md §8 ShardGroup SDK Typed API` for the full cross-language reference.
+
+```python
+# Python
+from plexspaces import CreateShardGroupRequest, ScatterGatherRequest, NodePlacement
+group = host.create_shard_group(CreateShardGroupRequest(
+    group_id=group_id, actor_type="WorkerActor", shard_count=8,
+    placement=NodePlacement(strategy="from_registry")
+))
+result = host.scatter_gather(ScatterGatherRequest(
+    group_id=group.group_id, query={"op": "process", "data": batch}
+))
+for resp in result.shard_responses: ...  # shard_responses NOT responses
+```
+
+```go
+// Go
+group, _ := host.CreateShardGroup(plexspaces.CreateShardGroupRequest{
+    GroupID: id, ActorType: "WorkerActor", ShardCount: 8,
+    Placement: plexspaces.NodePlacement{Strategy: "from_registry"},
+})
+result, _ := host.ScatterGather(plexspaces.ScatterGatherRequest{
+    GroupID: group.GroupID, Query: payload, TimeoutMs: 30000,
+})
+for _, resp := range result.ShardResponses { ... }
+```
+
+```typescript
+// TypeScript
+const group = host.createShardGroup({ groupId, actorType: 'Worker', shardCount: 8,
+    placement: { strategy: 'from_registry' } });
+const result = host.scatterGather({ groupId: group.groupId, query: {...}, timeoutMs: 30000 });
+for (const resp of result.shardResponses) { const payload = resp.payload; }
+```
+
 ### Operations
 
 | Operation | Proto RPC | Semantics |

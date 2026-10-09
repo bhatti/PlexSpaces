@@ -45,6 +45,7 @@ AUTH_HEADER=""
 if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
   AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
 fi
+export AUTH_HEADER
 
 get_time_ms() {
     # Try date with nanoseconds (Linux) - strip any trailing N
@@ -71,8 +72,8 @@ actor_op_with_metrics() {
     # Coordination phase: HTTP request/response overhead
     local coord_start=$(get_time_ms)
     trap 'rm -f "${APP_ZIP:-}"' EXIT
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
-rm -f "$APP_ZIP"
+    APP_ZIP="$(mktemp).zip"
+    rm -f "$APP_ZIP"
     zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
     RESPONSE=$(curl -s -w "\n%{time_total}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor_id" \
         -H "Content-Type: application/json" \
@@ -139,7 +140,7 @@ echo "╚═══════════════════════�
 echo ""
 
 # Step 1: Check if WASM file exists
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
     echo -e "${RED}❌ WASM file not found: $WASM_FILE${NC}"
     echo "   Run ./build.sh first to build the WASM component"
     exit 1
@@ -164,7 +165,8 @@ for _attempt in 1 2 3; do
         -F "version=1.0.0" \
         -F "app_file=@$APP_ZIP" 2>&1) || true
   else
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+    APP_ZIP="$(mktemp).zip"
+    rm -f "$APP_ZIP"
     DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
         ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
         -F "application_id=$APP_ID" \

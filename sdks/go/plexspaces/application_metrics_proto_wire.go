@@ -10,7 +10,6 @@
 package plexspaces
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -174,13 +173,7 @@ func uint64FromMetricsValue(path string, v any) (uint64, error) {
 			return 0, fmt.Errorf("%s: parse uint from string: %w", path, err)
 		}
 		return n, nil
-	case json.Number:
-		n, err := strconv.ParseUint(string(t), 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("%s: json.Number to uint64: %w", path, err)
-		}
-		return n, nil
 	default:
-		return 0, fmt.Errorf("%s: unsupported type %T (use int, uint64, float64 whole number, string, or json.Number)", path, v)
+		return 0, fmt.Errorf("%s: unsupported type %T (use int, uint64, float64 whole number, or string)", path, v)
 	}
 }

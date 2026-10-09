@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 PlexSpaces Contributors
 //
-// PlexSpaces Go SDK - Multi-Actor Router
+// PlexSpaces Go SDK - Multi-Actor Router (native build)
 //
 // Dispatch rule (matches Python and TypeScript SDKs):
 //   1. config.role       — exact match (wins for same-module multi-role variants).
@@ -22,6 +22,8 @@
 //
 //	router.Route("AbstractionsActor", func() plexspaces.Actor { return &AbstractionsActor{} })
 //	router.Route("ephemeral",         func() plexspaces.Actor { return &AbstractionsActor{} })
+
+//go:build !wasm
 
 package plexspaces
 

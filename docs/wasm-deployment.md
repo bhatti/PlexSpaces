@@ -1659,4 +1659,246 @@ Tests cover:
 - [jco](https://bytecodealliance.github.io/jco/) - JavaScript/TypeScript componentize (componentize-js)
 - [wasm-opt Documentation](https://github.com/WebAssembly/binaryen)
 - [HTTP Multipart Upload Best Practices](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST)
+
+---
+
+## TinyGo WASM Constraints and Known Issues
+
+Go examples in PlexSpaces use [TinyGo](https://tinygo.org/) compiled to WASM. TinyGo is a subset of the
+Go runtime with specific limitations that affect how actor code must be written.
+
+### JSON Marshaling of NaN / Infinity (Critical)
+
+**Issue**: TinyGo's `encoding/json` traps (WASM `unreachable` instruction) when it encounters a
+`NaN` or `Inf` `float64` value during marshaling. Standard Go would return an `UnsupportedValueError`
+— TinyGo panics instead, which surfaces as a WASM handle_message failure with a backtrace showing
+`strconv.ryuDigits32` → `reflectlite.Value.IsNil` → the actor function.
+
+**Symptom**:
+```
+WASM handle_message failed: … wasm backtrace:
+    strconv.rightShift (strconv/decimal.go)
+    (*reflectlite.RawType).Kind / (reflectlite.Value).IsNil
+    strconv.ryuDigits32 (strconv/ftoaryu.go)
+    main!(*main.MyActor).OnRun
+```
+
+**Fix**: Sanitize every `float64` returned from the actor before passing it to `json.Marshal`:
+
+```go
+func safeFloat(f float64) float64 {
+    if math.IsNaN(f) || math.IsInf(f, 0) {
+        return 0.0
+    }
+    return f
+}
+
+// Guard division-by-zero paths that produce NaN:
+granularity := 0.0
+if totalCoordMs > 0 {
+    granularity = float64(totalComputeMs) / float64(totalCoordMs)
+}
+
+// Wrap all float64 fields before returning:
+return map[string]interface{}{
+    "granularity_ratio": safeFloat(granularity),
+    "final_loss":        safeFloat(loss),
+}
+```
+
+### Large `numFeatures` With Struct-Slice JSON Marshaling
+
+**Issue**: Increasing `numFeatures` significantly (e.g. 100) in compute-heavy actors causes the same
+`reflectlite.Value.IsNil` WASM trap even when individual float values look finite. The root cause
+is interaction between large heap allocations (multiple `make([]float64, 100)` per scatter-gather
+round), TinyGo's conservative GC, and reflection-based JSON marshaling of `[]SomeStruct` slices
+embedded in `map[string]interface{}`.
+
+**Workaround**: Keep `numFeatures` small (≤ 10) and scale compute work by increasing
+`samples_per_client` and `local_epochs` instead. For example, `samples=50000, epochs=20,
+features=10` yields ~10M float ops per client per round, which registers clearly in ms-level
+timestamps without triggering the marshaling trap.
+
+### Excessive Per-Iteration Allocations
+
+**Issue**: Allocating a slice inside a hot loop (e.g. `for i := 0; i < count; i++ { buf :=
+make([]float64, n) }`) creates enormous GC pressure in TinyGo. With 5000 iterations × 100 float64
+elements, this is ~4 MB of garbage per scatter-gather call. TinyGo's WASM GC may fail to reclaim
+fast enough, causing an allocator trap.
+
+**Fix**: Allocate once outside the loop and reuse or zero the slice:
+
+```go
+// ❌ Allocates count × numFeatures slices
+for i := 0; i < count; i++ {
+    trueWeights := make([]float64, numFeatures)
+    // ...
+}
+
+// ✅ Allocate once, reuse
+trueWeights := make([]float64, numFeatures)
+for i := 0; i < count; i++ {
+    // use trueWeights
+}
+```
+
+### Stack Size
+
+TinyGo uses a per-goroutine heap stack (not a native call stack). Deep recursion is possible but
+allocates heap memory. Avoid mutual recursion or deeply recursive data processing within a single
+actor call. Iterative approaches are preferred for WASM actors.
+
+### No `fmt.Sprintf` for Critical Paths
+
+`fmt.Sprintf` is notably slow in TinyGo WASM. For string formatting in hot paths, use manual
+string concatenation or `strconv.AppendInt` / `strconv.AppendFloat`.
+
+### `regexp` Package Causes WASM Trap (CRITICAL)
+
+**Issue**: Importing `"regexp"` in a TinyGo WASM actor causes a WASM trap during `_start`
+(the Go runtime initialization phase). The PlexSpaces framework catches the trap and reports it
+as `"ERROR: no actor registered for actor_type=… role=…"`, which is misleading. The actual root
+cause is the `regexp` package's initialization failing in TinyGo's WASM runtime.
+
+**Symptom**:
+```
+WASM instantiation failed: Actor function call failed: actor-world init() error:
+ERROR: no actor registered for actor_type='your_wasm' role='your_role'
+```
+
+**Fix**: Replace all `regexp` usage with strings-based scanning:
+
+```go
+// ❌ DO NOT USE - causes WASM trap in TinyGo
+import "regexp"
+var tsRegex = regexp.MustCompile(`(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})`)
+
+// ✅ Use strings-based scanning instead
+func extractTimestamp(s string) string {
+    for i := 10; i < len(s)-8; i++ {
+        if s[i] == 'T' {
+            c := s[i-10 : i+9]
+            if len(c) == 19 && c[4] == '-' && c[7] == '-' && c[13] == ':' && c[16] == ':' {
+                return c
+            }
+        }
+    }
+    return ""
+}
+```
+
+**Rule**: Never import `"regexp"` in a TinyGo WASM actor. Use `strings.Contains`,
+`strings.Index`, `strings.HasPrefix`, character scanning, or pre-computed string logic instead.
+
+### `float64` in `map[string]any` Causes WASM Trap (CRITICAL)
+
+**Issue**: Putting a `float64` value in a `map[string]any` and calling `json.Marshal` (or any SDK
+function that internally calls `json.Marshal`) crashes TinyGo WASM:
+
+```
+WASM trap: strconv.genericFtoa / strconv.bigFtoa / strconv.rightShift
+```
+
+**Root cause**: TinyGo's `strconv.genericFtoa` (float-to-string) has a broken slow-path in its
+WASM build. Any float64 that requires the extended decimal representation (including most
+non-trivial floats) crashes.
+
+**Recommended fix**: Use `plexspaces.SafeMarshal` instead of `json.Marshal` for actor response
+maps. `SafeMarshal` converts float64 values using integer arithmetic, avoiding the broken path:
+
+```go
+// In your actor file — replace the standard marshal helper:
+func marshal(v any) string {
+    return plexspaces.SafeMarshal(v)  // ✅ TinyGo WASM safe, handles float64 and nested maps
+}
+
+// Example response map — float64 values work safely:
+return map[string]any{
+    "granularity_ratio": 2.8,   // float64 ✅
+    "speedup":           1.75,  // float64 ✅
+    "efficiency_pct":    94.0,  // float64 ✅
+    "metrics_per_sec":   177000, // int ✅
+}
+```
+
+**Fallback (no SafeMarshal)**: Integer-scale float values before storing in maps:
+```go
+granularityX10 := 0
+if coord > 0 { granularityX10 = int(compute * 10 / coord) }
+// In response: "granularity_ratio": granularityX10  (divide by 10 on the client)
+```
+
+### Nested `map[string]any` Marshaling Causes WASM Trap (CRITICAL)
+
+**Issue**: Passing a nested `map[string]any` (a map whose values are themselves `map[string]any`) to
+`json.Marshal`, `h.ApplicationMetricsAdd`, or any SDK call that internally calls `json.Marshal`,
+crashes TinyGo WASM with the following backtrace pattern:
+
+```
+0: (*encoding/base64.Encoding).decodeQuantum
+1: slices.symMergeCmpFunc[internal/fmtsort.KeyValue]
+2: <your actor function>
+```
+
+**Root cause**: TinyGo's WASM function-table dispatch is broken for certain generic
+instantiations of `slices.SortStableFunc`. When `json.Marshal` sorts the keys of a nested
+`map[string]any`, it triggers `internal/fmtsort.Sort` → `slices.SortStableFunc[fmtsort.KeyValue]`.
+TinyGo calls the wrong function-table entry, landing in `base64.decodeQuantum` and trapping.
+
+**Symptom**:
+```
+WASM handle_message failed: Actor function call failed: Simple actor handle() call failed:
+error while executing at wasm backtrace:
+    0: (*encoding/base64.Encoding).decodeQuantum
+    1: slices.symMergeCmpFunc[internal/fmtsort.KeyValue]
+    2: (*main.YourActor).yourMethod
+```
+
+**Recommended fix**: Use `plexspaces.SafeMarshal` (see above). It iterates map keys without
+calling `fmtsort.Sort`, so nested maps are safe:
+
+```go
+func marshal(v any) string { return plexspaces.SafeMarshal(v) }
+
+// ✅ Nested maps work with SafeMarshal:
+return map[string]any{
+    "status":   "ok",
+    "severity": map[string]any{"critical": 2, "warning": 5},
+}
+```
+
+**Fallback (no SafeMarshal)**: Use flat maps (no map values that are themselves maps), or skip the
+`ApplicationMetricsAdd` call entirely if metrics aren't required for correctness:
+
+```go
+// ❌ CRASHES: nested map[string]any passed to json.Marshal
+h.ApplicationMetricsAdd(appID, map[string]any{
+    "counter_metrics": map[string]any{"events": 100},  // nested map — crashes
+})
+// ✅ Skip ApplicationMetricsAdd for TinyGo WASM actors
+```
+
+Also avoid `fmt.Sprintf("%v", someMap)` or any `fmt` verb that prints a map — these trigger the
+same `fmtsort.Sort` path:
+
+```go
+// ❌ CRASHES: fmt.Sprintf with a map triggers fmtsort.Sort
+batchBytes += len(fmt.Sprintf("%v", event))  // event is map[string]any
+
+// ✅ Use direct field access
+if sz, ok := event["_size"].(int); ok {
+    batchBytes += sz
+}
+```
+
+**Rule**: In TinyGo WASM actors, use `plexspaces.SafeMarshal` for actor response maps. It handles
+both float64 values and nested maps safely. Never pass nested `map[string]any` to raw `json.Marshal`
+or SDK helpers that call it, and never use `fmt` verbs to format a map value.
+
+### Debugging WASM Traps
+
+TinyGo WASM backtraces show symbol names at the crash address, not a Go-style stack trace. Frames
+are listed lowest to highest address, not caller order. The **last** frame is the actor function;
+the first frames are library internals in the crash path. To narrow down the crash location, add
+explicit checkpoint returns early in the function and binary-search the failing region.
 - [WASM Calculator Example](../examples/simple/wasm_calculator/README.md)

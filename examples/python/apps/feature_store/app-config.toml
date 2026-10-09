@@ -1,0 +1,30 @@
+name = "python-feature-store"
+version = "1.0.0"
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "LeaderActor"
+actor_type = "LeaderActor"
+restart = "permanent"
+shutdown_timeout_seconds = 30
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "WorkerActor"
+actor_type = "WorkerActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]

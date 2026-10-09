@@ -28,6 +28,16 @@ import time
 from typing import Any, Dict, List, Optional
 
 from plexspaces import actor, handler, host, init_handler, state
+from plexspaces import ScatterGatherRequest
+from plexspaces import (
+    BroadcastShardGroupRequest,
+    BulkUpdateShardGroupRequest,
+    CreateShardGroupRequest,
+    MapShardGroupRequest,
+    NodePlacement,
+    ReduceShardGroupRequest,
+    ScatterGatherRequest,
+)
 
 
 # =============================================================================
@@ -376,58 +386,58 @@ class RedisCoordinator:
             # Try from_registry first (distributes across all cluster nodes).
             # Fall back to same_node if remote spawn fails (single-node mode or
             # unreachable peer in registry).
-            for placement in ({"strategy": "from_registry"}, {"strategy": "same_node"}):
+            for strategy in ("from_registry", "same_node"):
                 try:
-                    return host.create_shard_group({
-                        "group_id": group_id,
-                        "actor_type": "StorageActor",
-                        "shard_count": self.num_shards,
-                        "partition_strategy": "hash",
-                        "rebalance_policy": "manual",
-                        "placement": placement,
-                        "initial_state": {"args": {"num_shards": self.num_shards, "role": role}},
-                    })
+                    return host.create_shard_group(CreateShardGroupRequest(
+                        group_id=group_id,
+                        actor_type="StorageActor",
+                        shard_count=self.num_shards,
+                        partition_strategy="hash",
+                        rebalance_policy="manual",
+                        placement=NodePlacement(strategy=strategy),
+                        initial_state={"args": {"num_shards": self.num_shards, "role": role}},
+                    ))
                 except Exception as e:
                     err = str(e)
-                    if placement["strategy"] == "from_registry" and (
+                    if strategy == "from_registry" and (
                         "tcp connect" in err or "remote spawn" in err.lower() or "connect error" in err.lower()
                     ):
                         continue  # retry with same_node
                     raise
 
         master_group = _create_group(self.master_group_id, "master")
-        master_ids = master_group.get("shard_actor_ids", [])
+        master_ids = master_group.shard_actor_ids
 
         # --- Create replica shard group ---
         _create_group(self.replica_group_id, "replica")
 
         # --- Replication handshake: PING → REPLCONF → PSYNC ---
         for step in ("ping", "replconf", "psync"):
-            host.broadcast_shard_group({
-                "group_id": self.master_group_id,
-                "payload": {"op": "handshake", "step": step, "args": []},
-                "timeout_ms": 5000,
-            })
+            host.broadcast_shard_group(BroadcastShardGroupRequest(
+                group_id=self.master_group_id,
+                message={"op": "handshake", "step": step, "args": []},
+                timeout_ms=5000,
+            ))
 
         # --- Initial bulk sync (RDB equivalent) ---
-        snapshot_resp = host.scatter_gather({
-            "group_id": self.master_group_id,
-            "payload": {"op": "snapshot"},
-            "timeout_ms": 5000,
-        })
-        shards = snapshot_resp.get("shard_responses", [])
+        snapshot_resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.master_group_id,
+            query={"op": "snapshot"},
+            timeout_ms=5000,
+        ))
+        shards = snapshot_resp.shard_responses
         total_keys = sum(
             len(s.get("payload", {}).get("data", {})) for s in shards
         )
-        host.broadcast_shard_group({
-            "group_id": self.replica_group_id,
-            "payload": {
+        host.broadcast_shard_group(BroadcastShardGroupRequest(
+            group_id=self.replica_group_id,
+            message={
                 "op": "bulk_sync",
                 "data": {},
                 "offset": 0,
             },
-            "timeout_ms": 5000,
-        })
+            timeout_ms=5000,
+        ))
 
         self.initialized = True
         coord_ms = (time.time() - t0) * 1000
@@ -459,13 +469,13 @@ class RedisCoordinator:
     @handler("ping")
     def ping(self) -> dict:
         t0 = time.time()
-        resp = host.scatter_gather({
-            "group_id": self.master_group_id,
-            "query": {"op": "ping"},
-            "aggregation": "concat",
-            "min_responses": self.num_shards,
-            "timeout_ms": 5000,
-        })
+        resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.master_group_id,
+            query={"op": "ping"},
+            aggregation="concat",
+            min_responses=self.num_shards,
+            timeout_ms=5000,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -479,18 +489,18 @@ class RedisCoordinator:
                 "latency_samples": {"coord": 1},
             },
         )
-        results = [s.get("payload", {}).get("result") for s in resp.get("shard_responses", [])]
+        results = [s.get("payload", {}).get("result") for s in resp.shard_responses]
         return {"result": results}
 
     @handler("get")
     def get(self, key: str = "") -> dict:
         t0 = time.time()
-        resp = host.scatter_gather({
-            "group_id": self.master_group_id,
-            "payload": {"op": "get", "key": key},
-            "timeout_ms": 5000,
-            "min_responses": 1,
-        })
+        resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.master_group_id,
+            query={"op": "get", "key": key},
+            timeout_ms=5000,
+            min_responses=1,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -505,7 +515,7 @@ class RedisCoordinator:
             },
         )
         payload = {}
-        for sr in resp.get("shard_responses", []):
+        for sr in resp.shard_responses:
             p = sr.get("payload", {})
             if p.get("found"):
                 payload = p
@@ -523,12 +533,12 @@ class RedisCoordinator:
         px: Optional[int] = None,
     ) -> dict:
         t0 = time.time()
-        resp = host.scatter_gather({
-            "group_id": self.master_group_id,
-            "payload": {"op": "set", "key": key, "value": value, "nx": nx, "xx": xx, "ex": ex, "px": px},
-            "timeout_ms": 5000,
-            "min_responses": 1,
-        })
+        resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.master_group_id,
+            query={"op": "set", "key": key, "value": value, "nx": nx, "xx": xx, "ex": ex, "px": px},
+            timeout_ms=5000,
+            min_responses=1,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -543,7 +553,7 @@ class RedisCoordinator:
             },
         )
         payload = {}
-        for sr in resp.get("shard_responses", []):
+        for sr in resp.shard_responses:
             p = sr.get("payload", {})
             if not p.get("skip"):
                 payload = p
@@ -553,12 +563,12 @@ class RedisCoordinator:
     @handler("incr")
     def incr(self, key: str = "") -> dict:
         t0 = time.time()
-        resp = host.scatter_gather({
-            "group_id": self.master_group_id,
-            "payload": {"op": "incr", "key": key},
-            "timeout_ms": 5000,
-            "min_responses": 1,
-        })
+        resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.master_group_id,
+            query={"op": "incr", "key": key},
+            timeout_ms=5000,
+            min_responses=1,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -573,7 +583,7 @@ class RedisCoordinator:
             },
         )
         payload = {}
-        for sr in resp.get("shard_responses", []):
+        for sr in resp.shard_responses:
             p = sr.get("payload", {})
             if not p.get("skip"):
                 payload = p
@@ -583,12 +593,12 @@ class RedisCoordinator:
     @handler("del")
     def delete(self, key: str = "") -> dict:
         t0 = time.time()
-        resp = host.scatter_gather({
-            "group_id": self.master_group_id,
-            "payload": {"op": "del", "key": key},
-            "timeout_ms": 5000,
-            "min_responses": 1,
-        })
+        resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.master_group_id,
+            query={"op": "del", "key": key},
+            timeout_ms=5000,
+            min_responses=1,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -603,7 +613,7 @@ class RedisCoordinator:
             },
         )
         payload = {}
-        for sr in resp.get("shard_responses", []):
+        for sr in resp.shard_responses:
             p = sr.get("payload", {})
             if not p.get("skip"):
                 payload = p
@@ -618,13 +628,13 @@ class RedisCoordinator:
     def dbsize(self) -> dict:
         """DBSIZE — reduce(SUM) across all shards."""
         t0 = time.time()
-        resp = host.reduce_shard_group({
-            "group_id": self.master_group_id,
-            "query": {"op": "dbsize"},
-            "reduce_op": "SUM",
-            "reduce_field": "count",
-            "timeout_ms": 5000,
-        })
+        resp = host.reduce_shard_group(ReduceShardGroupRequest(
+            group_id=self.master_group_id,
+            map_function={"op": "dbsize"},
+            reduction="sum",
+            target="count",
+            timeout_ms=5000,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -644,13 +654,13 @@ class RedisCoordinator:
     def keys(self) -> dict:
         """KEYS — scatter_gather + concat across all shards."""
         t0 = time.time()
-        resp = host.scatter_gather({
-            "group_id": self.master_group_id,
-            "query": {"op": "keys"},
-            "aggregation": "concat",
-            "min_responses": self.num_shards,
-            "timeout_ms": 5000,
-        })
+        resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.master_group_id,
+            query={"op": "keys"},
+            aggregation="concat",
+            min_responses=self.num_shards,
+            timeout_ms=5000,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -665,7 +675,7 @@ class RedisCoordinator:
             },
         )
         all_keys: List[str] = []
-        for shard in resp.get("shard_responses", []):
+        for shard in resp.shard_responses:
             shard_keys = shard.get("payload", {}).get("keys", [])
             all_keys.extend(shard_keys)
         return {"result": all_keys, "count": len(all_keys)}
@@ -717,13 +727,13 @@ class RedisCoordinator:
     def wait(self, num_replicas: int = 1, timeout_ms: int = 5000, min_offset: int = 0) -> dict:
         """WAIT — scatter_gather to collect replication ACKs (Ch8)."""
         t0 = time.time()
-        resp = host.scatter_gather({
-            "group_id": self.replica_group_id,
-            "query": {"op": "get_ack"},
-            "aggregation": "concat",
-            "min_responses": num_replicas,
-            "timeout_ms": timeout_ms,
-        })
+        resp = host.scatter_gather(ScatterGatherRequest(
+            group_id=self.replica_group_id,
+            query={"op": "get_ack"},
+            aggregation="concat",
+            min_responses=num_replicas,
+            timeout_ms=timeout_ms,
+        ))
         coord_ms = (time.time() - t0) * 1000
         self.total_coord_ms += coord_ms
         self.operation_count += 1
@@ -739,7 +749,7 @@ class RedisCoordinator:
         )
         confirmed = sum(
             1
-            for shard in resp.get("shard_responses", [])
+            for shard in resp.shard_responses
             if shard.get("payload", {}).get("offset", 0) >= min_offset
         )
         return {"result": confirmed, "requested": num_replicas}
@@ -922,12 +932,12 @@ class BenchmarkActor:
         for i in range(keys_per_batch):
             key = f"bench:set:0:{i}"
             t0 = time.time()
-            host.scatter_gather({
-                "group_id": self.master_group_id,
-                "payload": {"op": "get", "key": key},
-                "timeout_ms": 5000,
-                "min_responses": 1,
-            })
+            host.scatter_gather(ScatterGatherRequest(
+                group_id=self.master_group_id,
+                query={"op": "get", "key": key},
+                timeout_ms=5000,
+                min_responses=1,
+            ))
             get_latencies_ms.append((time.time() - t0) * 1000)
 
         get_latencies_ms.sort()

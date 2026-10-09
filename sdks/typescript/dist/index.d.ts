@@ -7,5 +7,6 @@ export { ActorRouter } from "./router.js";
 export { defaultRetryConfig, withRetry, type RetryConfig, } from "./workflow.js";
 export { LeaderWorkerClient, listWorkerNodeIds, } from "./leader_worker.js";
 export { ActorID } from "./actor_id.js";
+export type { CreateShardGroupOptions, CreateShardGroupResult, ScatterGatherOptions, ScatterGatherResult, ShardQueryResult, BroadcastShardGroupOptions, ReduceShardGroupOptions, AllReduceShardGroupOptions, BarrierShardGroupOptions, MapShardGroupOptions, BulkUpdateShardGroupOptions, NodePlacementOptions, } from "./shard_types.js";
 export { WsThinClient, type ThinClientOptions, type ThinNodePingResult, } from "./ws_thin_client.js";
 export { AgentLoop, agentActor, defaultAgentConfig, type AgentConfig, type AgentStep, type AgentTrajectory, type AgentStepKind, } from "./agent.js";

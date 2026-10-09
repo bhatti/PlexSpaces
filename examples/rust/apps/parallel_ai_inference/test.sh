@@ -42,7 +42,7 @@ fi
 APP_ID="rust-parallel-ai-inference"
 APP_NAME="rust-parallel-ai-inference"
 OTHER_APP_ID="python-parallel-ai-inference"
-TEMP_CONFIG=""
+TEMP_DIR=""
 SCALING_SHARDS="${SCALING_SHARDS:-2,4,8,16,32}"
 SCALING_REQUESTS_PER_SHARD="${SCALING_REQUESTS_PER_SHARD:-4}"
 SCALING_WARMUP_REQUESTS="${SCALING_WARMUP_REQUESTS:-2}"
@@ -155,7 +155,7 @@ ask_actor() {
     -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
 
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   "$SCRIPT_DIR/build.sh"
 fi
 
@@ -169,12 +169,13 @@ for node in "${NODE_LIST[@]}"; do
   fi
 done
 
-TEMP_CONFIG="$(mktemp -t rust-parallel-ai-inference-app-config)"
-  trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+  trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+  APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 render_config "$TEMP_CONFIG"
+  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Step 1: Undeploy from all nodes, then deploy to all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
@@ -210,7 +211,7 @@ for node in "${NODE_LIST[@]}"; do
 done
 _deployed=0
 for _attempt in 1 2 3; do
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+    APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
     zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \
@@ -233,8 +234,8 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $body${NC}"
   exit 1
 fi
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 echo -e "  ${GREEN}Deployed${NC}"
 echo "Step 1b: Wait for cluster node discovery (async SWIM reconcile)"
 wait_for_registry_membership "${#NODE_LIST[@]}" 5 2

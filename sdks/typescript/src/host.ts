@@ -24,7 +24,22 @@ import {
   encodeBulkUpdateShardGroupRequest,
   encodeCreateShardGroupRequest,
   encodeScatterGatherRequest,
+  encodeBroadcastShardGroupRequest,
+  decodeBroadcastShardGroupResponse,
+  encodeReduceShardGroupRequest,
+  decodeReduceShardGroupResponse,
+  encodeAllReduceShardGroupRequest,
+  decodeAllReduceShardGroupResponse,
+  encodeBarrierShardGroupRequest,
+  decodeBarrierShardGroupResponse,
+  encodeMapShardGroupRequest,
+  decodeMapShardGroupResponse,
 } from './wire/shard-group-proto-wire.js';
+import type {
+  CreateShardGroupOptions, CreateShardGroupResult, ScatterGatherOptions, ScatterGatherResult,
+  BroadcastShardGroupOptions, ReduceShardGroupOptions, AllReduceShardGroupOptions,
+  BarrierShardGroupOptions, MapShardGroupOptions, BulkUpdateShardGroupOptions,
+} from './shard_types.js';
 import { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from './wit-payload.js';
 import {
   encodeRegisterRequest,
@@ -1058,22 +1073,48 @@ export class Host {
     }
   }
 
-  createShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const reqBytes = encodeCreateShardGroupRequest(request);
+  createShardGroup(request: CreateShardGroupOptions): CreateShardGroupResult {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      actor_type: request.actorType,
+      shard_count: request.shardCount,
+      partition_strategy: request.partitionStrategy ?? 'hash',
+      rebalance_policy: request.rebalancePolicy ?? 'manual',
+      placement: request.placement ? {
+        strategy: request.placement.strategy ?? 'from_registry',
+        node_ids: request.placement.nodeIds ?? [],
+        cluster: request.placement.cluster ?? '',
+      } : undefined,
+      initial_state: request.initialState,
+      metadata: request.metadata,
+    };
+    const reqBytes = encodeCreateShardGroupRequest(wireReq);
     const result = safeCall(hostCreateShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
     const bytes = hostPayloadToBytes(result);
-    if (bytes.length === 0) return { shard_actor_ids: [] };
+    if (bytes.length === 0) return { groupId: '', actorType: '', shardActorIds: [], shardCount: 0 };
     const decoded = decodeCreateShardGroupResponse(bytes);
-    // Flatten: expose group fields at top level for actor convenience
     const group = decoded.group as Record<string, unknown> ?? {};
-    return { ...group, ...decoded };
+    const config = (group.config ?? {}) as Record<string, unknown>;
+    return {
+      groupId: (config.group_id as string) ?? '',
+      actorType: (group.actor_type as string) ?? '',
+      shardActorIds: (group.shard_actor_ids as string[]) ?? [],
+      shardCount: (config.shard_count as number) ?? 0,
+    };
   }
 
-  bulkUpdateShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const reqBytes = encodeBulkUpdateShardGroupRequest(request);
+  bulkUpdateShardGroup(request: BulkUpdateShardGroupOptions): Record<string, unknown> {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      updates: request.updates,
+      consistency_level: request.consistencyLevel === 'strong' ? 2 : request.consistencyLevel === 'sequential' ? 3 : 1,
+      timeout_ms: request.timeoutMs ?? 5000,
+      wait_for_responses: request.waitForResponses ?? false,
+    };
+    const reqBytes = encodeBulkUpdateShardGroupRequest(wireReq);
     const result = safeCall(hostBulkUpdateShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
@@ -1083,55 +1124,119 @@ export class Host {
     return decodeBulkUpdateShardGroupResponse(bytes);
   }
 
-  mapShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostMapShardGroup, JSON.stringify(request)) as string;
+  mapShardGroup(request: MapShardGroupOptions): Record<string, unknown> {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      map_function: request.mapFunction,
+      timeout_ms: request.timeoutMs ?? 30000,
+      min_responses: request.minResponses ?? 0,
+    };
+    const reqBytes = encodeMapShardGroupRequest(wireReq);
+    const result = safeCall(hostMapShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { shard_results: [] };
+    return decodeMapShardGroupResponse(bytes);
   }
 
-  scatterGather(request: Record<string, unknown>): Record<string, unknown> {
-    const reqBytes = encodeScatterGatherRequest(request);
+  scatterGather(request: ScatterGatherOptions): ScatterGatherResult {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      query: request.query,
+      aggregation: request.aggregation ?? 'concat',
+      timeout_ms: request.timeoutMs ?? 30000,
+      min_responses: request.minResponses ?? 0,
+    };
+    const reqBytes = encodeScatterGatherRequest(wireReq);
     const result = safeCall(hostScatterGather, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
     const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { shardResponses: [] };
+    const decoded = decodeScatterGatherResponse(bytes);
+    return { shardResponses: (decoded.shard_responses as Record<string, unknown>[]).map(r => ({
+      shardId: (r.shard_id as number) ?? 0,
+      shardActorId: (r.shard_actor_id as string) ?? '',
+      payload: r.payload ?? {},
+      success: (r.success as boolean) ?? false,
+      error: (r.error as string) ?? '',
+    })) };
+  }
+
+  broadcastShardGroup(request: BroadcastShardGroupOptions): Record<string, unknown> {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      message: request.message,
+      timeout_ms: request.timeoutMs ?? 30000,
+      min_acks: request.minAcks ?? 0,
+    };
+    const reqBytes = encodeBroadcastShardGroupRequest(wireReq);
+    const result = safeCall(hostBroadcastShardGroup, reqBytes) as unknown;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    const bytes = hostPayloadToBytes(result);
     if (bytes.length === 0) return { shard_responses: [] };
-    return decodeScatterGatherResponse(bytes);
+    return decodeBroadcastShardGroupResponse(bytes);
   }
 
-  broadcastShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostBroadcastShardGroup, JSON.stringify(request)) as string;
+  reduceShardGroup(request: ReduceShardGroupOptions): Record<string, unknown> {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      map_function: request.mapFunction,
+      reduction: request.reduction,
+      target: request.target,
+      timeout_ms: request.timeoutMs ?? 30000,
+      min_responses: request.minResponses ?? 0,
+    };
+    const reqBytes = encodeReduceShardGroupRequest(wireReq);
+    const result = safeCall(hostReduceShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { shard_responses: [] };
+    return decodeReduceShardGroupResponse(bytes);
   }
 
-  reduceShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostReduceShardGroup, JSON.stringify(request)) as string;
+  allReduceShardGroup(request: AllReduceShardGroupOptions): Record<string, unknown> {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      map_function: request.mapFunction,
+      reduction: request.reduction,
+      target: request.target,
+      timeout_ms: request.timeoutMs ?? 30000,
+      min_responses: request.minResponses ?? 0,
+    };
+    const reqBytes = encodeAllReduceShardGroupRequest(wireReq);
+    const result = safeCall(hostAllReduceShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { shard_responses: [] };
+    return decodeAllReduceShardGroupResponse(bytes);
   }
 
-  allReduceShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostAllReduceShardGroup, JSON.stringify(request)) as string;
+  barrierShardGroup(request: BarrierShardGroupOptions): Record<string, unknown> {
+    const wireReq: Record<string, unknown> = {
+      group_id: request.groupId,
+      barrier_id: request.barrierId,
+      round: request.round ?? 0,
+      timeout_ms: request.timeoutMs ?? 30000,
+      min_acks: request.minAcks ?? 0,
+    };
+    const reqBytes = encodeBarrierShardGroupRequest(wireReq);
+    const result = safeCall(hostBarrierShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
-  }
-
-  barrierShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostBarrierShardGroup, JSON.stringify(request)) as string;
-    if (typeof result === 'string' && result.startsWith('ERROR:')) {
-      throw new Error(result);
-    }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { shard_responses: [] };
+    return decodeBarrierShardGroupResponse(bytes);
   }
 
   spawnActors(request: Record<string, unknown>): Record<string, unknown> {

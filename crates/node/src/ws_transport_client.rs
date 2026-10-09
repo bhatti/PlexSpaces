@@ -215,6 +215,7 @@ impl ActorTransportClient for WsActorTransportClient {
         node_id: &str,
         request: tonic::Request<SendMessageRequest>,
     ) -> Result<tonic::Response<SendMessageResponse>, tonic::Status> {
+        let metadata = request.metadata().clone();
         let inner = request.into_inner();
         let request_id = if inner.request_id.is_empty() {
             Ulid::new().to_string()
@@ -238,9 +239,11 @@ impl ActorTransportClient for WsActorTransportClient {
                 ..Default::default()
             }))
         } else {
-            // gRPC fallback — reconstruct request
+            // gRPC fallback — reconstruct request preserving original metadata
+            let mut fallback_req = tonic::Request::new(inner);
+            *fallback_req.metadata_mut() = metadata;
             self.grpc_fallback
-                .send_message(node_id, tonic::Request::new(inner))
+                .send_message(node_id, fallback_req)
                 .await
         }
     }
@@ -250,6 +253,7 @@ impl ActorTransportClient for WsActorTransportClient {
         node_id: &str,
         request: tonic::Request<AskReplyRequest>,
     ) -> Result<tonic::Response<AskReplyResponse>, tonic::Status> {
+        let metadata = request.metadata().clone();
         let inner = request.into_inner();
         let request_id = if inner.request_id.is_empty() {
             Ulid::new().to_string()
@@ -301,8 +305,11 @@ impl ActorTransportClient for WsActorTransportClient {
                 }
             }
         } else {
+            // gRPC fallback — reconstruct request preserving original metadata
+            let mut fallback_req = tonic::Request::new(inner);
+            *fallback_req.metadata_mut() = metadata;
             self.grpc_fallback
-                .ask_reply(node_id, tonic::Request::new(inner))
+                .ask_reply(node_id, fallback_req)
                 .await
         }
     }
@@ -562,6 +569,108 @@ mod tests {
         let inner = resp.into_inner();
         assert!(inner.success);
         assert_eq!(inner.payload, b"grpc-reply");
+    }
+
+    struct MetadataCapturingFallback {
+        captured_metadata: Arc<tokio::sync::Mutex<Option<tonic::metadata::MetadataMap>>>,
+    }
+
+    #[async_trait]
+    impl ActorTransportClient for MetadataCapturingFallback {
+        async fn send_message(
+            &self,
+            _node_id: &str,
+            request: tonic::Request<SendMessageRequest>,
+        ) -> Result<tonic::Response<SendMessageResponse>, tonic::Status> {
+            *self.captured_metadata.lock().await = Some(request.metadata().clone());
+            Ok(tonic::Response::new(SendMessageResponse {
+                request_id: request.into_inner().request_id,
+                success: true,
+                ..Default::default()
+            }))
+        }
+
+        async fn ask_reply(
+            &self,
+            _node_id: &str,
+            request: tonic::Request<AskReplyRequest>,
+        ) -> Result<tonic::Response<AskReplyResponse>, tonic::Status> {
+            *self.captured_metadata.lock().await = Some(request.metadata().clone());
+            Ok(tonic::Response::new(AskReplyResponse {
+                request_id: request.into_inner().request_id,
+                success: true,
+                ..Default::default()
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ask_reply_grpc_fallback_preserves_metadata() {
+        let captured = Arc::new(tokio::sync::Mutex::new(None));
+        let fallback = MetadataCapturingFallback {
+            captured_metadata: captured.clone(),
+        };
+        let registry = Arc::new(WsRegistry::new());
+        let pending = Arc::new(PendingAsks::new());
+        let transport = WsActorTransportClient::new(registry, pending, Arc::new(fallback));
+
+        let req = AskReplyRequest {
+            request_id: "ask-meta".to_string(),
+            actor_type: "echo".to_string(),
+            ..Default::default()
+        };
+        let mut grpc_req = tonic::Request::new(req);
+        grpc_req.metadata_mut().insert(
+            "x-tenant-id",
+            tonic::metadata::MetadataValue::from_static("test-tenant"),
+        );
+        grpc_req.metadata_mut().insert(
+            "x-namespace",
+            tonic::metadata::MetadataValue::from_static("test-ns"),
+        );
+
+        let resp = transport
+            .ask_reply("no-ws-node", grpc_req)
+            .await
+            .unwrap();
+        assert!(resp.into_inner().success);
+
+        let md = captured.lock().await;
+        let md = md.as_ref().expect("metadata should be captured");
+        assert_eq!(md.get("x-tenant-id").unwrap().to_str().unwrap(), "test-tenant");
+        assert_eq!(md.get("x-namespace").unwrap().to_str().unwrap(), "test-ns");
+    }
+
+    #[tokio::test]
+    async fn test_send_message_grpc_fallback_preserves_metadata() {
+        let captured = Arc::new(tokio::sync::Mutex::new(None));
+        let fallback = MetadataCapturingFallback {
+            captured_metadata: captured.clone(),
+        };
+        let registry = Arc::new(WsRegistry::new());
+        let pending = Arc::new(PendingAsks::new());
+        let transport = WsActorTransportClient::new(registry, pending, Arc::new(fallback));
+
+        let req = SendMessageRequest {
+            request_id: "send-meta".to_string(),
+            actor_type: "echo".to_string(),
+            ..Default::default()
+        };
+        let mut grpc_req = tonic::Request::new(req);
+        grpc_req.metadata_mut().insert(
+            "x-tenant-id",
+            tonic::metadata::MetadataValue::from_static("my-tenant"),
+        );
+
+        let resp = transport
+            .send_message("no-ws-node", grpc_req)
+            .await
+            .unwrap();
+        assert!(resp.into_inner().success);
+
+        let md = captured.lock().await;
+        let md = md.as_ref().expect("metadata should be captured");
+        assert_eq!(md.get("x-tenant-id").unwrap().to_str().unwrap(), "my-tenant");
     }
 
     #[tokio::test]

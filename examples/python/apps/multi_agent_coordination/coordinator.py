@@ -6,6 +6,7 @@ Two-Phase Commit, Capability Discovery, Generator-Verifier, Voting.
 """
 
 from plexspaces import workflow_actor, state, run_handler, signal_handler, query_handler, init_handler, host
+from plexspaces import ScatterGatherRequest
 from .helpers import fire_audit, discover_service, sibling_actor_target, ask
 
 
@@ -66,14 +67,14 @@ class CoordinatorWorkflow:
         # Step 5: Research each subtask (try scatter-gather, fallback sequential)
         research_results = []
         try:
-            sg_result = host.scatter_gather({
-                "group_id": f"research-{host.now_ms()}",
-                "query": {"op": "research", "topic": task},
-                "aggregation": "concat",
-                "min_responses": len(subtasks),
-                "timeout_ms": 15000,
-            })
-            shard_responses = sg_result.get("shard_responses", [])
+            sg_result = host.scatter_gather(ScatterGatherRequest(
+                group_id=f"research-{host.now_ms()}",
+                query={"op": "research", "topic": task},
+                aggregation="concat",
+                min_responses=len(subtasks),
+                timeout_ms=15000,
+            ))
+            shard_responses = sg_result.shard_responses
             if shard_responses:
                 research_results = shard_responses
         except Exception:

@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 PlexSpaces Contributors
 //
-// PlexSpaces Go SDK - Host Functions
+// PlexSpaces Go SDK - Host Functions (native build)
 //
-// Provides Go wrappers for WIT host imports. When compiled with TinyGo
-// to WASM, the //go:wasmimport directives link to the actual host functions.
-// Outside WASM, stub implementations are used.
-//
-// Actor message payloads and several host APIs use JSON strings at the WIT boundary.
-// TupleSpace host imports (ts-write, ts-read, …) use protobuf wire bytes (WriteRequest,
-// ReadRequest, ReadResponse) per wit/plexspaces-actor/host.wit; the SDK maps []any patterns
-// to those messages (WASM) or JSON for native test stubs.
-// Shard-group and application-metrics/status host calls use protobuf wire on WASM
-// (see host_actor_api_wire_wasm.go) and JSON for native stubs (host_actor_api_wire_native.go).
+// Native (non-WASM) implementation of host function wrappers.
+// WASM builds use host_wasm.go which avoids encoding/json to prevent
+// TinyGo function-table corruption.
+
+//go:build !wasm
 
 package plexspaces
 
@@ -996,23 +991,78 @@ func (h *Host) PoolGetMetrics(poolName string) map[string]any {
 	return out
 }
 
+func strOrEmpty(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func floatOrZero(v any) float64 {
+	if f, ok := v.(float64); ok {
+		return f
+	}
+	return 0
+}
+
+func anySliceToStrings(v any) []string {
+	s, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(s))
+	for _, item := range s {
+		if str, ok := item.(string); ok {
+			out = append(out, str)
+		}
+	}
+	return out
+}
+
+func anySliceToMaps(v any) []map[string]any {
+	// WASM builds return []map[string]any directly to avoid interface boxing of map[string]any.
+	if s, ok := v.([]map[string]any); ok {
+		return s
+	}
+	s, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(s))
+	for _, item := range s {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // CreateShardGroup creates a shard group. Native builds send JSON to stubs; WASM sends
 // CreateShardGroupRequest protobuf wire per the actor host WIT contract.
-func (h *Host) CreateShardGroup(request any) (map[string]any, error) {
-	wire, err := hostWireCreateShardGroupRequest(request)
+func (h *Host) CreateShardGroup(req CreateShardGroupRequest) (CreateShardGroupResponse, error) {
+	wire, err := hostWireCreateShardGroupRequest(req)
 	if err != nil {
-		return nil, err
+		return CreateShardGroupResponse{}, err
 	}
 	result := hostCreateShardGroup(wire)
 	if isHostError(result) {
-		return nil, &HostError{result}
+		return CreateShardGroupResponse{}, &HostError{result}
 	}
-	return hostDecodeCreateShardGroupResponse(result)
+	resMap, err := hostDecodeCreateShardGroupResponse(result)
+	if err != nil {
+		return CreateShardGroupResponse{}, err
+	}
+	return CreateShardGroupResponse{
+		GroupID:       strOrEmpty(resMap["group_id"]),
+		ActorType:     strOrEmpty(resMap["actor_type"]),
+		ShardActorIDs: anySliceToStrings(resMap["shard_actor_ids"]),
+		ShardCount:    int(floatOrZero(resMap["shard_count"])),
+	}, nil
 }
 
 // BulkUpdateShardGroup sends bulk updates to shards.
-func (h *Host) BulkUpdateShardGroup(request any) (map[string]any, error) {
-	wire, err := hostWireBulkUpdateShardGroupRequest(request)
+func (h *Host) BulkUpdateShardGroup(req BulkUpdateShardGroupRequest) (map[string]any, error) {
+	wire, err := hostWireBulkUpdateShardGroupRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1024,8 +1074,8 @@ func (h *Host) BulkUpdateShardGroup(request any) (map[string]any, error) {
 }
 
 // MapShardGroup maps a query across shards.
-func (h *Host) MapShardGroup(request any) (map[string]any, error) {
-	wire, err := hostWireMapShardGroupRequest(request)
+func (h *Host) MapShardGroup(req MapShardGroupRequest) (map[string]any, error) {
+	wire, err := hostWireMapShardGroupRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1037,21 +1087,44 @@ func (h *Host) MapShardGroup(request any) (map[string]any, error) {
 }
 
 // ScatterGather runs scatter/gather across a shard group.
-func (h *Host) ScatterGather(request any) (map[string]any, error) {
-	wire, err := hostWireScatterGatherRequest(request)
+func (h *Host) ScatterGather(req ScatterGatherRequest) (ScatterGatherResponse, error) {
+	wire, err := hostWireScatterGatherRequest(req)
 	if err != nil {
-		return nil, err
+		return ScatterGatherResponse{}, err
 	}
 	result := hostScatterGather(wire)
 	if isHostError(result) {
-		return nil, &HostError{result}
+		return ScatterGatherResponse{}, &HostError{result}
 	}
-	return hostDecodeScatterGatherResponse(result)
+	resMap, err := hostDecodeScatterGatherResponse(result)
+	if err != nil {
+		return ScatterGatherResponse{}, err
+	}
+	shards := anySliceToMaps(resMap["shard_responses"])
+	stats, _ := resMap["stats"].(map[string]any)
+	if stats == nil {
+		// WASM build: stats are inlined as _stat_* keys to avoid TinyGo WASM crash
+		// when storing a map[string]any function-return value in another map[string]any.
+		stats = map[string]any{}
+		if v, ok := resMap["_stat_shards_queried"]; ok {
+			stats["shards_queried"] = v
+		}
+		if v, ok := resMap["_stat_shards_responded"]; ok {
+			stats["shards_responded"] = v
+		}
+		if v, ok := resMap["_stat_shards_failed"]; ok {
+			stats["shards_failed"] = v
+		}
+		if v, ok := resMap["_stat_max_latency_ms"]; ok {
+			stats["max_latency_ms"] = v
+		}
+	}
+	return ScatterGatherResponse{ShardResponses: shards, Stats: stats}, nil
 }
 
 // BroadcastShardGroup broadcasts a message to every shard in a group.
-func (h *Host) BroadcastShardGroup(request any) (map[string]any, error) {
-	wire, err := hostWireBroadcastShardGroupRequest(request)
+func (h *Host) BroadcastShardGroup(req BroadcastShardGroupRequest) (map[string]any, error) {
+	wire, err := hostWireBroadcastShardGroupRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1063,8 +1136,8 @@ func (h *Host) BroadcastShardGroup(request any) (map[string]any, error) {
 }
 
 // ReduceShardGroup reduces values returned by a shard-group map operation.
-func (h *Host) ReduceShardGroup(request any) (map[string]any, error) {
-	wire, err := hostWireReduceShardGroupRequest(request)
+func (h *Host) ReduceShardGroup(req ReduceShardGroupRequest) (map[string]any, error) {
+	wire, err := hostWireReduceShardGroupRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1076,8 +1149,8 @@ func (h *Host) ReduceShardGroup(request any) (map[string]any, error) {
 }
 
 // AllReduceShardGroup reduces values and broadcasts the reduced result back to all shards.
-func (h *Host) AllReduceShardGroup(request any) (map[string]any, error) {
-	wire, err := hostWireAllReduceShardGroupRequest(request)
+func (h *Host) AllReduceShardGroup(req AllReduceShardGroupRequest) (map[string]any, error) {
+	wire, err := hostWireAllReduceShardGroupRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1089,8 +1162,8 @@ func (h *Host) AllReduceShardGroup(request any) (map[string]any, error) {
 }
 
 // BarrierShardGroup synchronizes a shard group at a framework barrier round.
-func (h *Host) BarrierShardGroup(request any) (map[string]any, error) {
-	wire, err := hostWireBarrierShardGroupRequest(request)
+func (h *Host) BarrierShardGroup(req BarrierShardGroupRequest) (map[string]any, error) {
+	wire, err := hostWireBarrierShardGroupRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1114,24 +1187,48 @@ func (h *Host) SpawnActors(request any) (map[string]any, error) {
 	return hostDecodeSpawnActorsResponse(result)
 }
 
+// ApplicationMetrics holds per-node application metrics, mirroring the proto ApplicationMetrics message.
+// All map fields use map[string]uint64 (not map[string]any) for TinyGo WASM safety.
+type ApplicationMetrics struct {
+	ActorCounts     map[string]uint64
+	SupervisorCount uint64
+	UptimeSeconds   uint64
+	MessageCount    uint64
+	ErrorCount      uint64
+	CounterMetrics  map[string]uint64
+	LatencyTotalsMs map[string]uint64
+	LatencyMaxMs    map[string]uint64
+	LatencySamples  map[string]uint64
+}
+
+// ApplicationStatus holds application deployment status, mirroring the proto GetApplicationStatusResponse message.
+type ApplicationStatus struct {
+	ApplicationID      string
+	ApplicationName    string
+	ApplicationVersion string
+	StatusCode         string
+	NodeID             string
+	NodeAddress        string
+}
+
 // ApplicationMetricsAdd merges a node-local application metrics delta.
-func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (map[string]any, error) {
+func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (ApplicationMetrics, error) {
 	wire, err := hostWireApplicationMetrics(metrics)
 	if err != nil {
-		return nil, err
+		return ApplicationMetrics{}, err
 	}
 	result := hostApplicationMetricsAdd(applicationID, wire)
 	if isHostError(result) {
-		return nil, &HostError{result}
+		return ApplicationMetrics{}, &HostError{result}
 	}
 	return hostDecodeApplicationMetricsResponse(result)
 }
 
 // ApplicationGetMetrics returns node-local application metrics for a participating node.
-func (h *Host) ApplicationGetMetrics(applicationID, nodeID string) (map[string]any, error) {
+func (h *Host) ApplicationGetMetrics(applicationID, nodeID string) (ApplicationMetrics, error) {
 	result := hostApplicationGetMetrics(applicationID, nodeID)
 	if isHostError(result) {
-		return nil, &HostError{result}
+		return ApplicationMetrics{}, &HostError{result}
 	}
 	return hostDecodeApplicationMetricsResponse(result)
 }
@@ -1166,10 +1263,10 @@ func (h *Host) HTTPFetch(linkName, method, pathAndQuery string, headers map[stri
 }
 
 // ApplicationGetStatus returns application status for a participating node.
-func (h *Host) ApplicationGetStatus(applicationID, nodeID string) (map[string]any, error) {
+func (h *Host) ApplicationGetStatus(applicationID, nodeID string) (ApplicationStatus, error) {
 	result := hostApplicationGetStatus(applicationID, nodeID)
 	if isHostError(result) {
-		return nil, &HostError{result}
+		return ApplicationStatus{}, &HostError{result}
 	}
 	return hostDecodeApplicationGetStatusResponse(result)
 }
@@ -1290,6 +1387,10 @@ func marshalPayload(payload any) string {
 	}
 	if s, ok := payload.(string); ok {
 		return s
+	}
+	// Use SafeMarshal for map types to avoid TinyGo WASM fmtsort crash.
+	if m, ok := payload.(map[string]any); ok {
+		return SafeMarshal(m)
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

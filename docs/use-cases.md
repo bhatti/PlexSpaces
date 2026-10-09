@@ -278,6 +278,13 @@ Low-latency real-time applications:
 | Edge Computing | Cloudflare Workers | Better state management, synchronization |
 | FAAS | AWS Lambda, Azure Functions | Durable execution, longer timeouts |
 | Scientific Computing | Slurm, HTCondor | Better workflow orchestration, fault tolerance |
+| Log Pipelines | Vector, Fluentd | Actor-per-stage state, shard groups for parallel pipeline workers, same model as ML/workflow pipelines. See [log_pipeline examples](../examples/README.md). |
+| Metrics Aggregation | Datadog Agent, CloudWatch, Prometheus | Window aggregation + cascading rollup + anomaly detection as actors, hash-partitioned shards for scale. See [metrics_aggregation examples](../examples/README.md). |
+| Distributed Tracing | Jaeger, Zipkin, Datadog APM | Trace assembly with out-of-order spans, tail-based sampling, service graph — all as actors with durable state. See [tracing_pipeline examples](../examples/README.md). |
+| Federated Learning | Flower, PySyft, FATE | Aggregator + client actors, FedAvg with differential privacy, gradient clipping — no external ML framework required. See [federated_learning examples](../examples/README.md). |
+| Feature Stores | Feast, Tecton, SageMaker Feature Store | Versioned KV with consistent-hash routing, LRU cache, low-latency serving — all as shard-group actors. See [feature_store examples](../examples/README.md). |
+| LLM Serving | Ray Serve, vLLM, TGI | Model tier actors, cost-aware routing, dynamic batching, health supervision — actors compose fault tolerance with serving. See [llm_serving examples](../examples/README.md). |
+| CDC Pipelines | Debezium, Maxwell, AWS DMS | WAL event actors with LSN tracking, transformation, fan-out to multiple sinks — integrated with same actor framework as ML and observability. See [cdc_pipeline examples](../examples/README.md). |
 
 ## Getting Started
 

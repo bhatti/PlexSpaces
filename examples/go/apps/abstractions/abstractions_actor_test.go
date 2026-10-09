@@ -68,8 +68,8 @@ func TestChannelPublish(t *testing.T) {
 
 func TestHostContractHelpers(t *testing.T) {
 	plexspaces.ResetStubs()
-	if out := host.KV().Put("abstractions/config", "ready"); out != "" {
-		t.Fatalf("KVPut() = %q", out)
+	if err := host.KV().Put("abstractions/config", "ready"); err != nil {
+		t.Fatalf("KVPut() = %v", err)
 	}
 	if err := host.PG().Join(defaultGroup); err != nil {
 		t.Fatalf("PG().Join() error = %v", err)

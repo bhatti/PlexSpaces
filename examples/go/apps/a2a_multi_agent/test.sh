@@ -39,7 +39,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 APP_ID="go-a2a-multi-agent"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 send_op() {
   local actor="$1"
@@ -83,7 +83,8 @@ fi
 
 # gRPC and HTTP share a single port
 GRPC_PORT=$HTTP_PORT
-TEMP_CONFIG="$(mktemp -t a2a-multi-agent-config)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
 python3 - "$CONFIG_FILE" "$TEMP_CONFIG" "$GRPC_PORT" <<'PY'
 import pathlib, sys
 source = pathlib.Path(sys.argv[1]).read_text()
@@ -96,8 +97,8 @@ for line in source.splitlines():
         lines.append(line)
 pathlib.Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
 PY
-trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
@@ -128,8 +129,8 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $BODY${NC}"
   exit 1
 fi
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 echo -e "  ${GREEN}Deployed${NC}"
 sleep 2
 echo ""
@@ -143,6 +144,8 @@ line = sys.stdin.read()
 try:
     d = json.loads(line.split('Response: ', 1)[1])
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     agents = p.get('agents', [])
     count = p.get('count', len(agents))
     print(f'  Registered agents: {count}')
@@ -167,6 +170,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     agents = p.get('agents', [])
     print(f'  Found {len(agents)} research agent(s)')
     for a in agents:
@@ -185,6 +190,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     agents = p.get('agents', [])
     print(f'  Found {len(agents)} analysis agent(s)')
 except Exception as e:
@@ -201,6 +208,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Agent: {p.get(\"name\",\"?\")} ({p.get(\"agent_id\",\"?\")})')
     print(f'  Description: {p.get(\"description\",\"?\")}')
     print(f'  Capabilities: {p.get(\"capabilities\",[])}')
@@ -222,6 +231,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     findings = p.get('findings', [])
     print(f'  Topic: {p.get(\"topic\",\"?\")}')
     print(f'  Findings ({len(findings)}):')
@@ -243,6 +254,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Question: {p.get(\"question\",\"?\")}')
     print(f'  Key points: {len(p.get(\"key_points\",[]))}')
     print(f'  Summary: {str(p.get(\"summary\",\"\"))[:100]}')
@@ -261,6 +274,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     doc = p.get('document', '')
     print(f'  Word count: {p.get(\"word_count\",0)}')
     print(f'  Style: {p.get(\"style\",\"?\")}')
@@ -284,6 +299,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Task ID:  {p.get(\"task_id\",\"?\")}')
     print(f'  Status:   {p.get(\"status\",\"?\")}')
     research = p.get('research', {})
@@ -321,6 +338,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read().strip())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Task ID:  {p.get(\"task_id\",\"?\")}')
     print(f'  Status:   {p.get(\"status\",\"?\")}')
     print(f'  Progress: {p.get(\"progress\",0)}%')

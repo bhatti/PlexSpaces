@@ -57,7 +57,7 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${HTTP_URL}/health" 2>/dev/n
 
 # ─── 3. Build app zip and deploy ──────────────────────────────────────────────
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 

@@ -27,7 +27,6 @@ package plexspaces
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"strings"
 	"unsafe"
 )
@@ -43,15 +42,36 @@ import (
 // does not fit in one register.
 var cabiResultArea [12]byte
 
+// cabiArena is a static ring buffer in WASM linear memory used by cabi_realloc.
+// Using WASM linear memory (not the Go GC heap) means no GC is triggered inside
+// cabi_realloc. This is critical: cabi_realloc is called by the host while the
+// main goroutine may be asyncify-suspended. TinyGo 0.40's conservative GC does
+// not scan asyncify-saved goroutine state, so any make() call inside cabi_realloc
+// risks a GC cycle that crashes when it can't find valid GC roots.
+//
+// The arena wraps around when exhausted (ring buffer). After ptrToString copies
+// the bytes to the Go heap, the arena allocation is no longer needed, so wrap-
+// around is safe as long as the host finishes using the buffer before wrap-around.
+// 1MB covers the largest expected host→WASM string (ScatterGather responses).
+var cabiArena [1024 * 1024]byte
+var cabiArenaPos uint32
+
 // cabi_realloc is required by the Component Model canonical ABI.
 // The host calls this to allocate memory in the WASM module for string parameters.
 //
 //export cabi_realloc
 func cabiRealloc(oldPtr, oldSize, align, newSize uint32) uint32 {
 	if newSize == 0 {
-		return 0 // align as uintptr to suppress unused warning
+		return 0
 	}
-	buf := make([]byte, newSize)
+	// Align up to the requested alignment.
+	alignMask := align - 1
+	pos := (cabiArenaPos + alignMask) &^ alignMask
+	if pos+newSize > uint32(len(cabiArena)) {
+		// Wrap around the arena.
+		pos = 0
+	}
+	dst := unsafe.Pointer(&cabiArena[pos])
 	if oldPtr != 0 && oldSize > 0 {
 		copyLen := oldSize
 		if newSize < copyLen {
@@ -59,18 +79,24 @@ func cabiRealloc(oldPtr, oldSize, align, newSize uint32) uint32 {
 		}
 		src := unsafe.Pointer(uintptr(oldPtr))
 		for i := uint32(0); i < copyLen; i++ {
-			buf[i] = *(*byte)(unsafe.Add(src, i))
+			*(*byte)(unsafe.Add(dst, i)) = *(*byte)(unsafe.Add(src, i))
 		}
 	}
-	return uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+	cabiArenaPos = pos + newSize
+	return uint32(uintptr(dst))
 }
 
 // ptrToString reads a Go string from WASM linear memory given (ptr, len).
+// Copies bytes into a Go-managed heap allocation so TinyGo's GC/asyncify
+// correctly traces the backing memory after the calling goroutine suspends
+// (e.g. during ScatterGather host calls). Without the copy, the cabi_realloc
+// buffer becomes unreachable from the asyncify save frame and may be collected.
 func ptrToString(ptr, length uint32) string {
 	if length == 0 {
 		return ""
 	}
-	return unsafe.String((*byte)(unsafe.Pointer(uintptr(ptr))), int(length))
+	src := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), int(length))
+	return string(src)
 }
 
 func clearCabiResultArea() {
@@ -163,17 +189,11 @@ func wasmHandle(fromPtr, fromLen, msgTypePtr, msgTypeLen, payloadPtr, payloadLen
 	// Resolve operation from payload when envelope is "call" or "cast". Payload key order
 	// (aligned with Rust/Python/TS): message_type (canonical) -> op -> msg_type.
 	if msgType == "call" || msgType == "cast" {
-		var envelope struct {
-			MessageType string `json:"message_type"`
-			Op          string `json:"op"`
-			MsgType     string `json:"msg_type"`
-		}
-		if json.Unmarshal([]byte(payloadJSON), &envelope) == nil {
-			for _, v := range []string{envelope.MessageType, envelope.Op, envelope.MsgType} {
-				if v != "" && v != "call" && v != "cast" {
-					msgType = v
-					break
-				}
+		for _, key := range []string{"message_type", "op", "msg_type"} {
+			v := WasmJSONExtractStr(payloadJSON, key)
+			if v != "" && v != "call" && v != "cast" {
+				msgType = v
+				break
 			}
 		}
 	}

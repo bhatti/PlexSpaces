@@ -139,19 +139,18 @@ func (l *LeaderActor) run(payloadJSON string) string {
 	}
 
 	groupID := fmt.Sprintf("mpi-collectives-go-%d", host.NowMs())
-	group, err := host.CreateShardGroup(map[string]any{
-		"group_id":           groupID,
-		"actor_type":         "worker",
-		"shard_count":        request.WorkerCount,
-		"partition_strategy": "hash",
-		"rebalance_policy":   "manual",
-		"placement":          map[string]any{"strategy": "from_registry"},
-		"initial_state":      map[string]any{},
+	group, err := host.CreateShardGroup(plexspaces.CreateShardGroupRequest{
+		GroupID:           groupID,
+		ActorType:         "worker",
+		ShardCount:        request.WorkerCount,
+		PartitionStrategy: "hash",
+		RebalancePolicy:   "manual",
+		Placement:         plexspaces.NodePlacement{Strategy: "from_registry"},
 	})
 	if err != nil {
 		return marshal(map[string]any{"error": err.Error()})
 	}
-	shardActorIDs := stringSlice(group["shard_actor_ids"])
+	shardActorIDs := group.ShardActorIDs
 	if len(shardActorIDs) == 0 {
 		return marshal(map[string]any{"error": "failed to create worker shard group"})
 	}
@@ -203,12 +202,11 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		// ── Phase 1: MPI_Bcast ─────────────────────────────────────────────────
 		// Broadcast the round's scale factor to all worker shards.
 		broadcastStart := host.NowMs()
-		broadcastResponse, err := host.BroadcastShardGroup(map[string]any{
-			"group_id":     groupID,
-			"message_type": "apply_broadcast",
-			"message":      map[string]any{"round": round, "scale": scale},
-			"min_acks":     request.WorkerCount,
-			"timeout_ms":   30000,
+		broadcastResponse, err := host.BroadcastShardGroup(plexspaces.BroadcastShardGroupRequest{
+			GroupID:   groupID,
+			Message:   map[string]any{"round": round, "scale": scale},
+			MinAcks:   request.WorkerCount,
+			TimeoutMs: 30000,
 		})
 		if err != nil {
 			return marshal(map[string]any{"error": err.Error()})
@@ -227,18 +225,17 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		// ── Phase 2: MPI_Scatter + MPI_Gather ─────────────────────────────────
 		// Each worker receives a unique chunk descriptor and computes a local sum.
 		scatterStart := host.NowMs()
-		scatterResponse, err := host.ScatterGather(map[string]any{
-			"group_id":     groupID,
-			"message_type": "process_scatter_chunk",
-			"query": map[string]any{
+		scatterResponse, err := host.ScatterGather(plexspaces.ScatterGatherRequest{
+			GroupID: groupID,
+			Query: map[string]any{
 				"round":               round,
 				"elements_per_worker": request.ElementsPerWorker,
 				"base_value":          float64((round + 1) * 7),
 				"scale":               scale,
 			},
-			"aggregation":   "concat",
-			"min_responses": request.WorkerCount,
-			"timeout_ms":    30000,
+			Aggregation:  "concat",
+			MinResponses: request.WorkerCount,
+			TimeoutMs:    30000,
 		})
 		if err != nil {
 			return marshal(map[string]any{"error": err.Error()})
@@ -250,7 +247,7 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		scatterElements := 0
 		scatterChecksum := 0.0
 		if err := accumulateScatterStats(
-			scatterResponse["shard_responses"],
+			scatterResponse.ShardResponses,
 			leaderNodeID, remoteNodesWithWork,
 			&totalWorkerLatencyMs, &totalWorkerResponses, &maxWorkerLatencyMs,
 			&scatterElements, &scatterChecksum, &totalErrors,
@@ -263,14 +260,13 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		// Leader queries each worker's partial_sum and reduces to a global total.
 		// Result is available ONLY at the leader (root).
 		reduceStart := host.NowMs()
-		reduceResponse, err := host.ReduceShardGroup(map[string]any{
-			"group_id":      groupID,
-			"message_type":  "partial_reduce",
-			"map_function":  map[string]any{"round": round},
-			"target":        "partial_sum",
-			"reduction":     "sum",
-			"min_responses": request.WorkerCount,
-			"timeout_ms":    30000,
+		reduceResponse, err := host.ReduceShardGroup(plexspaces.ReduceShardGroupRequest{
+			GroupID:      groupID,
+			MapFunction:  map[string]any{"round": round},
+			Target:       "partial_sum",
+			Reduction:    "sum",
+			MinResponses: request.WorkerCount,
+			TimeoutMs:    30000,
 		})
 		if err != nil {
 			return marshal(map[string]any{"error": err.Error()})
@@ -293,14 +289,13 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		// to ALL workers as a message_type="event" message so every shard holds
 		// the global total (handled by worker applyAllreduceEvent).
 		allreduceStart := host.NowMs()
-		allreduceResponse, err := host.AllReduceShardGroup(map[string]any{
-			"group_id":      groupID,
-			"message_type":  "partial_reduce",
-			"map_function":  map[string]any{"round": round},
-			"target":        "partial_sum",
-			"reduction":     "sum",
-			"min_responses": request.WorkerCount,
-			"timeout_ms":    30000,
+		allreduceResponse, err := host.AllReduceShardGroup(plexspaces.AllReduceShardGroupRequest{
+			GroupID:      groupID,
+			MapFunction:  map[string]any{"round": round},
+			Target:       "partial_sum",
+			Reduction:    "sum",
+			MinResponses: request.WorkerCount,
+			TimeoutMs:    30000,
 		})
 		if err != nil {
 			return marshal(map[string]any{"error": err.Error()})
@@ -315,12 +310,12 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		// ── Phase 5: MPI_Barrier ───────────────────────────────────────────────
 		// All workers must acknowledge before the next round begins.
 		barrierStart := host.NowMs()
-		_, err = host.BarrierShardGroup(map[string]any{
-			"group_id":   groupID,
-			"barrier_id": fmt.Sprintf("barrier-round-%d", round),
-			"round":      uint64(round),
-			"min_acks":   request.WorkerCount,
-			"timeout_ms": 30000,
+		_, err = host.BarrierShardGroup(plexspaces.BarrierShardGroupRequest{
+			GroupID:   groupID,
+			BarrierID: fmt.Sprintf("barrier-round-%d", round),
+			Round:     uint64(round),
+			MinAcks:   request.WorkerCount,
+			TimeoutMs: 30000,
 		})
 		if err != nil {
 			return marshal(map[string]any{"error": err.Error()})
@@ -1024,6 +1019,13 @@ func anySlice(value any) []any {
 	}
 	if out, ok := value.([]any); ok {
 		return out
+	}
+	if out, ok := value.([]map[string]any); ok {
+		result := make([]any, len(out))
+		for i, v := range out {
+			result[i] = v
+		}
+		return result
 	}
 	return nil
 }

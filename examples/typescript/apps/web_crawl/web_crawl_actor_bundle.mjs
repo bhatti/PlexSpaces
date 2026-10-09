@@ -486,15 +486,15 @@ function encodeTupleFields(tuple, allowWildcardStar) {
 }
 function encodeWriteRequest(tuple) {
   const tupleBody = encodeTupleFields(tuple, false);
-  return appendLengthDelimited(new Uint8Array(0), 1, tupleBody);
+  return appendLengthDelimited(new Uint8Array(0), 2, tupleBody);
 }
 function encodeReadRequest(pattern, take, maxResults) {
   const templateBody = encodeTupleFields(pattern, true);
-  let out = appendLengthDelimited(new Uint8Array(0), 1, templateBody);
+  let out = appendLengthDelimited(new Uint8Array(0), 2, templateBody);
   if (take) {
-    out = concatBytes(out, new Uint8Array([32, 1]));
+    out = concatBytes(out, new Uint8Array([40, 1]));
   }
-  out = concatBytes(out, new Uint8Array([40]));
+  out = concatBytes(out, new Uint8Array([48]));
   out = appendVarint(out, maxResults >>> 0);
   return out;
 }
@@ -561,7 +561,7 @@ function parseReadResponseTuples(data) {
     pos += tn;
     const fn = Number(tag >> 3n);
     const wt = Number(tag & 7n);
-    if (fn === 1 && wt === 2) {
+    if (fn === 2 && wt === 2) {
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
       tuples.push(parseTupleMsg(slice));
@@ -815,15 +815,18 @@ function ulid() {
   return id;
 }
 function encodeMessage(query) {
+  const op = query["op"] || query["message_type"] || "call";
   let buf = new Uint8Array(0);
   buf = appendString(buf, 1, ulid());
-  buf = appendString(buf, 5, "call");
-  const payloadBytes = new Uint8Array(encW.encode(JSON.stringify(query)));
+  buf = appendString(buf, 5, op);
+  const payloadObj = { ...query, message_type: op };
+  const payloadBytes = new Uint8Array(encW.encode(JSON.stringify(payloadObj)));
   buf = appendBytes(buf, 6, payloadBytes);
   return buf;
 }
 function encodeCreateShardGroupRequest(req) {
   let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
   const cfgFields = {
     group_id: req.group_id,
     shard_count: req.shard_count,
@@ -832,13 +835,22 @@ function encodeCreateShardGroupRequest(req) {
     placement: req.placement
   };
   const cfgBytes = encodeDataParallelConfig(cfgFields);
-  buf = appendLengthDelimited(buf, 1, cfgBytes);
-  buf = appendString(buf, 2, req.actor_type ?? "");
+  buf = appendLengthDelimited(buf, 2, cfgBytes);
+  buf = appendString(buf, 3, req.actor_type ?? "");
   const initialState = req.initial_state;
   if (initialState !== void 0 && initialState !== null) {
     const stateBytes = new Uint8Array(encW.encode(JSON.stringify(initialState)));
     if (stateBytes.length > 0) {
-      buf = appendBytes(buf, 4, stateBytes);
+      buf = appendBytes(buf, 5, stateBytes);
+    }
+  }
+  const metadata = req.metadata;
+  if (metadata && typeof metadata === "object") {
+    for (const [k, v] of Object.entries(metadata)) {
+      let entry = new Uint8Array(0);
+      entry = appendString(entry, 1, k);
+      entry = appendString(entry, 2, String(v));
+      buf = appendLengthDelimited(buf, 6, entry);
     }
   }
   return buf;
@@ -859,24 +871,25 @@ function encodeDurationMs(ms) {
 }
 function encodeScatterGatherRequest(req) {
   let buf = new Uint8Array(0);
-  buf = appendString(buf, 1, req.group_id ?? "");
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, req.group_id ?? "");
   const query = req.query;
   if (query && typeof query === "object") {
     const msgBytes = encodeMessage(query);
-    buf = appendLengthDelimited(buf, 2, msgBytes);
+    buf = appendLengthDelimited(buf, 3, msgBytes);
   }
   const timeoutMs = Number(req.timeout_ms ?? 3e4);
   if (timeoutMs > 0) {
     const durBytes = encodeDurationMs(timeoutMs);
     if (durBytes.length > 0)
-      buf = appendLengthDelimited(buf, 3, durBytes);
+      buf = appendLengthDelimited(buf, 4, durBytes);
   }
   const agg = aggregationStrategyEnum(req.aggregation);
   if (agg !== 0)
-    buf = appendUint32(buf, 4, agg);
+    buf = appendUint32(buf, 5, agg);
   const minResponses = Number(req.min_responses ?? 0) >>> 0;
   if (minResponses > 0)
-    buf = appendUint32(buf, 5, minResponses);
+    buf = appendUint32(buf, 6, minResponses);
   return buf;
 }
 function decodeShardGroup(data) {
@@ -957,7 +970,7 @@ function decodeCreateShardGroupResponse(data) {
     pos += tn;
     const fn = Number(tag >> 3n);
     const wt = Number(tag & 7n);
-    if (fn === 1 && wt === 2) {
+    if (fn === 2 && wt === 2) {
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
       group = decodeShardGroup(slice);
@@ -992,6 +1005,37 @@ function decodeMessagePayload(data) {
     return text;
   }
 }
+function decodeScatterGatherStats(data) {
+  const result = {
+    shards_queried: 0,
+    shards_responded: 0,
+    shards_failed: 0,
+    max_latency_ms: 0
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.shards_queried = value;
+      pos = nextPos;
+    } else if (fn === 2 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.shards_responded = value;
+      pos = nextPos;
+    } else if (fn === 3 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.shards_failed = value;
+      pos = nextPos;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return result;
+}
 function decodeShardQueryResponse(data) {
   const result = {
     shard_id: 0,
@@ -1006,23 +1050,23 @@ function decodeShardQueryResponse(data) {
     pos += tn;
     const fn = Number(tag >> 3n);
     const wt = Number(tag & 7n);
-    if (fn === 1 && wt === 0) {
+    if (fn === 2 && wt === 0) {
       const { value, nextPos } = readUint32(data, pos);
       pos = nextPos;
       result.shard_id = value;
-    } else if (fn === 2 && wt === 2) {
+    } else if (fn === 3 && wt === 2) {
       const { value, nextPos } = readString(data, pos);
       pos = nextPos;
       result.shard_actor_id = value;
-    } else if (fn === 3 && wt === 2) {
+    } else if (fn === 4 && wt === 2) {
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
       result.payload = decodeMessagePayload(slice);
-    } else if (fn === 5 && wt === 0) {
+    } else if (fn === 6 && wt === 0) {
       const { value, nextPos } = readUint32(data, pos);
       pos = nextPos;
       result.success = value !== 0;
-    } else if (fn === 6 && wt === 2) {
+    } else if (fn === 7 && wt === 2) {
       const { value, nextPos } = readString(data, pos);
       pos = nextPos;
       result.error = value;
@@ -1034,6 +1078,30 @@ function decodeShardQueryResponse(data) {
 }
 function decodeScatterGatherResponse(data) {
   const shardResponses = [];
+  let stats = null;
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      shardResponses.push(decodeShardQueryResponse(slice));
+    } else if (fn === 4 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      stats = decodeScatterGatherStats(slice);
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { shard_responses: shardResponses, stats: stats ?? {} };
+}
+function decodeBroadcastLikeResponse(data) {
+  const shardResponses = [];
+  let stats = null;
   let pos = 0;
   while (pos < data.length) {
     const { value: tag, n: tn } = readVarint(data, pos);
@@ -1044,11 +1112,15 @@ function decodeScatterGatherResponse(data) {
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
       shardResponses.push(decodeShardQueryResponse(slice));
+    } else if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      stats = decodeScatterGatherStats(slice);
     } else {
       pos = skipField(data, pos, wt);
     }
   }
-  return { shard_responses: shardResponses };
+  return { shard_responses: shardResponses, stats: stats ?? {} };
 }
 function decodeUint64MapEntry(data) {
   let pos = 0;
@@ -1222,6 +1294,295 @@ function encodeUint64MapEntry(key, value) {
   entry = appendString(entry, 1, key);
   entry = appendUint64(entry, 2, value);
   return entry;
+}
+function encodeBulkUpdateShardGroupRequest(req) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, req.request_id ?? "");
+  buf = appendString(buf, 2, req.group_id ?? "");
+  const rawUpdates = req.updates;
+  let items;
+  if (Array.isArray(rawUpdates)) {
+    items = rawUpdates;
+  } else if (rawUpdates && typeof rawUpdates === "object") {
+    items = Object.entries(rawUpdates).map(([k, v]) => ({
+      key: k,
+      payload: v
+    }));
+  } else {
+    items = [];
+  }
+  for (const entry of items) {
+    const partitionKey = String(entry.key ?? "");
+    const payload = entry.payload && typeof entry.payload === "object" ? entry.payload : {};
+    const msgBytes = encodeMessage(payload);
+    let mapEntry = new Uint8Array(0);
+    mapEntry = appendString(mapEntry, 1, partitionKey);
+    mapEntry = appendLengthDelimited(mapEntry, 2, msgBytes);
+    buf = appendLengthDelimited(buf, 3, mapEntry);
+  }
+  const consistencyLevel = Number(req.consistency_level ?? 0) >>> 0;
+  if (consistencyLevel !== 0)
+    buf = appendUint32(buf, 4, consistencyLevel);
+  const timeoutMs = Number(req.timeout_ms ?? 5e3);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0)
+      buf = appendLengthDelimited(buf, 5, durBytes);
+  }
+  const waitForResponses = req.wait_for_responses !== false;
+  if (waitForResponses) {
+    buf = appendUint32(buf, 6, 1);
+  }
+  return buf;
+}
+function decodeBulkUpdateShardGroupResponse(data) {
+  const result = {
+    request_id: "",
+    updates_sent: 0,
+    updates_succeeded: 0,
+    updates_failed: 0,
+    shard_stats: [],
+    errors: []
+  };
+  if (!data || data.length === 0)
+    return result;
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tagVal, n: tagN } = readVarint(data, pos);
+    pos += tagN;
+    const fieldNum = Number(tagVal >> BigInt(3));
+    const wireType = Number(tagVal & BigInt(7));
+    if (fieldNum === 1 && wireType === 2) {
+      const { value, nextPos } = readString(data, pos);
+      result.request_id = value;
+      pos = nextPos;
+    } else if (fieldNum === 2 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_sent = value;
+      pos = nextPos;
+    } else if (fieldNum === 3 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_succeeded = value;
+      pos = nextPos;
+    } else if (fieldNum === 4 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_failed = value;
+      pos = nextPos;
+    } else if (fieldNum === 5 && wireType === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      result.shard_stats.push(decodeShardUpdateStats(slice));
+      pos = nextPos;
+    } else if (fieldNum === 6 && wireType === 2) {
+      const { value, nextPos } = readString(data, pos);
+      result.errors.push(value);
+      pos = nextPos;
+    } else {
+      pos = skipField(data, pos, wireType);
+    }
+  }
+  return result;
+}
+function decodeShardUpdateStats(data) {
+  const result = {
+    shard_id: 0,
+    shard_actor_id: "",
+    updates_sent: 0,
+    updates_succeeded: 0,
+    updates_failed: 0
+  };
+  if (!data || data.length === 0)
+    return result;
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tagVal, n: tagN } = readVarint(data, pos);
+    pos += tagN;
+    const fieldNum = Number(tagVal >> BigInt(3));
+    const wireType = Number(tagVal & BigInt(7));
+    if (fieldNum === 1 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.shard_id = value;
+      pos = nextPos;
+    } else if (fieldNum === 2 && wireType === 2) {
+      const { value, nextPos } = readString(data, pos);
+      result.shard_actor_id = value;
+      pos = nextPos;
+    } else if (fieldNum === 3 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_sent = value;
+      pos = nextPos;
+    } else if (fieldNum === 4 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_succeeded = value;
+      pos = nextPos;
+    } else if (fieldNum === 5 && wireType === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      result.updates_failed = value;
+      pos = nextPos;
+    } else {
+      pos = skipField(data, pos, wireType);
+    }
+  }
+  return result;
+}
+function collectiveReductionEnum(s) {
+  switch ((s ?? "").toLowerCase()) {
+    case "sum":
+      return 1;
+    case "min":
+      return 2;
+    case "max":
+      return 3;
+    case "product":
+      return 4;
+    case "concat":
+      return 5;
+    case "bool_and":
+      return 6;
+    case "bool_or":
+      return 7;
+    default:
+      return 0;
+  }
+}
+function encodeBroadcastShardGroupRequest(req) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, req.group_id ?? "");
+  const message = req.message;
+  if (message && typeof message === "object") {
+    buf = appendLengthDelimited(buf, 3, encodeMessage(message));
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 3e4);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0)
+      buf = appendLengthDelimited(buf, 4, durBytes);
+  }
+  const minAcks = Number(req.min_acks ?? 0) >>> 0;
+  if (minAcks > 0)
+    buf = appendUint32(buf, 5, minAcks);
+  return buf;
+}
+function encodeReduceShardGroupRequest(req) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, req.group_id ?? "");
+  const mapFn = req.map_function;
+  if (mapFn && typeof mapFn === "object") {
+    buf = appendLengthDelimited(buf, 3, encodeMessage(mapFn));
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 3e4);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0)
+      buf = appendLengthDelimited(buf, 4, durBytes);
+  }
+  const minResponses = Number(req.min_responses ?? 0) >>> 0;
+  if (minResponses > 0)
+    buf = appendUint32(buf, 5, minResponses);
+  const reduction = collectiveReductionEnum(req.reduction);
+  if (reduction !== 0)
+    buf = appendUint32(buf, 6, reduction);
+  const target = req.target;
+  if (target) {
+    let targetField = new Uint8Array(0);
+    targetField = appendString(targetField, 1, target);
+    buf = appendLengthDelimited(buf, 7, targetField);
+  }
+  return buf;
+}
+function encodeAllReduceShardGroupRequest(req) {
+  return encodeReduceShardGroupRequest(req);
+}
+function encodeBarrierShardGroupRequest(req) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, req.group_id ?? "");
+  buf = appendString(buf, 3, req.barrier_id ?? "");
+  const round = Number(req.round ?? 0);
+  if (round > 0) {
+    buf = appendVarint(buf, 4 << 3 | 0);
+    buf = appendVarint(buf, round);
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 3e4);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0)
+      buf = appendLengthDelimited(buf, 5, durBytes);
+  }
+  const minAcks = Number(req.min_acks ?? 0) >>> 0;
+  if (minAcks > 0)
+    buf = appendUint32(buf, 6, minAcks);
+  return buf;
+}
+function encodeMapShardGroupRequest(req) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, req.group_id ?? "");
+  const mapFn = req.map_function;
+  if (mapFn && typeof mapFn === "object") {
+    buf = appendLengthDelimited(buf, 3, encodeMessage(mapFn));
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 3e4);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0)
+      buf = appendLengthDelimited(buf, 4, durBytes);
+  }
+  const minResponses = Number(req.min_responses ?? 0) >>> 0;
+  if (minResponses > 0)
+    buf = appendUint32(buf, 5, minResponses);
+  return buf;
+}
+function decodeBroadcastShardGroupResponse(data) {
+  return decodeBroadcastLikeResponse(data);
+}
+function decodeReduceShardGroupResponse(data) {
+  const shardResponses = [];
+  let result = {};
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 2 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      result = decodeMessagePayload(slice);
+    } else if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      shardResponses.push(decodeShardQueryResponse(slice));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { result, shard_responses: shardResponses };
+}
+function decodeAllReduceShardGroupResponse(data) {
+  return decodeReduceShardGroupResponse(data);
+}
+function decodeBarrierShardGroupResponse(data) {
+  return decodeBroadcastLikeResponse(data);
+}
+function decodeMapShardGroupResponse(data) {
+  const shardResults = [];
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 2 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      shardResults.push(decodeShardQueryResponse(slice));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { shard_results: shardResults };
 }
 function encodeApplicationMetrics(metrics) {
   let buf = new Uint8Array(0);
@@ -1520,6 +1881,7 @@ import { blobUpload as hostBlobUpload, blobDownload as hostBlobDownload, blobDel
 import { poolCheckout as hostPoolCheckout, poolCheckin as hostPoolCheckin, poolGetMetrics as hostPoolGetMetrics } from "plexspaces:actor/host-pool@0.1.0";
 import { createShardGroup as hostCreateShardGroup, bulkUpdateShardGroup as hostBulkUpdateShardGroup, mapShardGroup as hostMapShardGroup, broadcastShardGroup as hostBroadcastShardGroup, reduceShardGroup as hostReduceShardGroup, allReduceShardGroup as hostAllReduceShardGroup, barrierShardGroup as hostBarrierShardGroup, scatterGather as hostScatterGather, spawnActors as hostSpawnActors, applicationMetricsAdd as hostApplicationMetricsAdd, applicationGetMetrics as hostApplicationGetMetrics, applicationGetStatus as hostApplicationGetStatus } from "plexspaces:actor/host-shard@0.1.0";
 import { httpFetch as hostHttpFetch } from "plexspaces:actor/host-http@0.1.0";
+import { channelSend as hostChannelSend, channelSendWithOptions as hostChannelSendWithOptions, channelReceive as hostChannelReceive, channelPublish as hostChannelPublish, channelSubscribe as hostChannelSubscribe, channelUnsubscribe as hostChannelUnsubscribe, channelAck as hostChannelAck, channelNack as hostChannelNack, channelCreate as hostChannelCreate, channelDelete as hostChannelDelete, channelDepth as hostChannelDepth } from "plexspaces:actor/channels@0.1.0";
 import { register as hostRegistryRegister, unregister as hostRegistryUnregister, lookup as hostRegistryLookup, lookupByAlias as hostRegistryLookupByAlias, discover as hostRegistryDiscover, heartbeat as hostRegistryHeartbeat } from "plexspaces:actor/registry@0.1.0";
 function safeCall(fn, ...args) {
   if (typeof fn === "function") {
@@ -1944,6 +2306,133 @@ var BlobClient = class {
     return [];
   }
 };
+var Channel = class {
+  /** Send a message to a channel (queue semantics). Returns message ID. */
+  send(channelName, msgType, payload) {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== void 0 ? JSON.stringify(payload) : "{}");
+    const result = safeCall(hostChannelSend, "", channelName, msgType, payloadBytes);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+    return result;
+  }
+  /** Send with delay, TTL, and custom headers. Returns message ID. */
+  sendWithOptions(channelName, msgType, payload, delayMs = 0, ttlMs = 0, headers) {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== void 0 ? JSON.stringify(payload) : "{}");
+    const headersJson = JSON.stringify(headers ?? {});
+    const result = safeCall(hostChannelSendWithOptions, "", channelName, msgType, payloadBytes, BigInt(delayMs), BigInt(ttlMs), headersJson);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+    return result;
+  }
+  /** Receive one message from a channel. Returns null on timeout/empty. */
+  receive(channelName, timeoutMs = 0) {
+    const raw = safeCall(hostChannelReceive, "", channelName, BigInt(timeoutMs));
+    if (!raw || raw === "" || raw === void 0)
+      return null;
+    if (typeof raw === "string") {
+      if (raw.startsWith("ERROR:"))
+        throw new Error(raw);
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+    const msg = raw;
+    if (!msg || !msg.id)
+      return null;
+    let decodedPayload;
+    try {
+      const payloadStr = decodeWitPayloadUtf8(msg.payload);
+      decodedPayload = JSON.parse(payloadStr);
+    } catch {
+      decodedPayload = msg.payload;
+    }
+    const hdrs = {};
+    if (Array.isArray(msg.headers)) {
+      for (const [k, v] of msg.headers) {
+        hdrs[k] = v;
+      }
+    }
+    return {
+      id: msg.id,
+      msgType: msg.msgType,
+      payload: decodedPayload,
+      timestamp: typeof msg.timestamp === "bigint" ? Number(msg.timestamp) : Number(msg.timestamp ?? 0),
+      deliveryCount: msg.deliveryCount,
+      headers: hdrs
+    };
+  }
+  /** Publish a message to a channel (pub/sub — all subscribers receive). Returns message ID. */
+  publish(channelName, msgType, payload) {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== void 0 ? JSON.stringify(payload) : "{}");
+    const result = safeCall(hostChannelPublish, "", channelName, msgType, payloadBytes);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+    return result;
+  }
+  /** Subscribe to a channel (pub/sub). Returns subscription ID. */
+  subscribe(channelName, filter = "") {
+    const result = safeCall(hostChannelSubscribe, "", channelName, filter);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+    return result;
+  }
+  /** Cancel a subscription by ID. */
+  unsubscribe(subscriptionId) {
+    const result = safeCall(hostChannelUnsubscribe, subscriptionId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /** Acknowledge successful processing (prevents redelivery). */
+  ack(channelName, messageId) {
+    const result = safeCall(hostChannelAck, "", channelName, messageId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /** Negative-acknowledge a message. requeue=true retries; false sends to dead-letter. */
+  nack(channelName, messageId, requeue = true) {
+    const result = safeCall(hostChannelNack, "", channelName, messageId, requeue);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /** Create a channel if it does not exist. maxSize=0 means unbounded. */
+  create(channelName, maxSize = 0, messageTtlMs = 0) {
+    const result = safeCall(hostChannelCreate, "", channelName, maxSize, BigInt(messageTtlMs));
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /** Delete a channel and all pending messages. */
+  delete(channelName) {
+    const result = safeCall(hostChannelDelete, "", channelName);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /** Return the number of pending (unacked) messages in a channel. */
+  depth(channelName) {
+    const result = safeCall(hostChannelDepth, "", channelName);
+    if (typeof result === "bigint")
+      return Number(result);
+    if (typeof result === "number")
+      return result;
+    if (typeof result === "string") {
+      if (result.startsWith("ERROR:"))
+        throw new Error(result);
+      const n = parseInt(result, 10);
+      return isNaN(n) ? 0 : n;
+    }
+    return 0;
+  }
+};
 var Host = class {
   constructor() {
     this.processGroups = new ProcessGroups();
@@ -1953,6 +2442,7 @@ var Host = class {
     this.alarm = new AlarmClient();
     this.locks = new LockClient();
     this.blob = new BlobClient();
+    this.channel = new Channel();
   }
   /**
    * Create an ergonomic HTTP client for a named service link.
@@ -2196,70 +2686,170 @@ var Host = class {
     }
   }
   createShardGroup(request) {
-    const reqBytes = encodeCreateShardGroupRequest(request);
+    const wireReq = {
+      group_id: request.groupId,
+      actor_type: request.actorType,
+      shard_count: request.shardCount,
+      partition_strategy: request.partitionStrategy ?? "hash",
+      rebalance_policy: request.rebalancePolicy ?? "manual",
+      placement: request.placement ? {
+        strategy: request.placement.strategy ?? "from_registry",
+        node_ids: request.placement.nodeIds ?? [],
+        cluster: request.placement.cluster ?? ""
+      } : void 0,
+      initial_state: request.initialState,
+      metadata: request.metadata
+    };
+    const reqBytes = encodeCreateShardGroupRequest(wireReq);
     const result = safeCall(hostCreateShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
     const bytes = hostPayloadToBytes(result);
     if (bytes.length === 0)
-      return { shard_actor_ids: [] };
+      return { groupId: "", actorType: "", shardActorIds: [], shardCount: 0 };
     const decoded = decodeCreateShardGroupResponse(bytes);
     const group = decoded.group ?? {};
-    return { ...group, ...decoded };
+    const config = group.config ?? {};
+    return {
+      groupId: config.group_id ?? "",
+      actorType: group.actor_type ?? "",
+      shardActorIds: group.shard_actor_ids ?? [],
+      shardCount: config.shard_count ?? 0
+    };
   }
   bulkUpdateShardGroup(request) {
-    const result = safeCall(hostBulkUpdateShardGroup, JSON.stringify(request));
+    const wireReq = {
+      group_id: request.groupId,
+      updates: request.updates,
+      consistency_level: request.consistencyLevel === "strong" ? 2 : request.consistencyLevel === "sequential" ? 3 : 1,
+      timeout_ms: request.timeoutMs ?? 5e3,
+      wait_for_responses: request.waitForResponses ?? false
+    };
+    const reqBytes = encodeBulkUpdateShardGroupRequest(wireReq);
+    const result = safeCall(hostBulkUpdateShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { updates_sent: 0, updates_succeeded: 0, updates_failed: 0, errors: [] };
+    return decodeBulkUpdateShardGroupResponse(bytes);
   }
   mapShardGroup(request) {
-    const result = safeCall(hostMapShardGroup, JSON.stringify(request));
+    const wireReq = {
+      group_id: request.groupId,
+      map_function: request.mapFunction,
+      timeout_ms: request.timeoutMs ?? 3e4,
+      min_responses: request.minResponses ?? 0
+    };
+    const reqBytes = encodeMapShardGroupRequest(wireReq);
+    const result = safeCall(hostMapShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { shard_results: [] };
+    return decodeMapShardGroupResponse(bytes);
   }
   scatterGather(request) {
-    const reqBytes = encodeScatterGatherRequest(request);
+    const wireReq = {
+      group_id: request.groupId,
+      query: request.query,
+      aggregation: request.aggregation ?? "concat",
+      timeout_ms: request.timeoutMs ?? 3e4,
+      min_responses: request.minResponses ?? 0
+    };
+    const reqBytes = encodeScatterGatherRequest(wireReq);
     const result = safeCall(hostScatterGather, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
     const bytes = hostPayloadToBytes(result);
     if (bytes.length === 0)
-      return { shard_responses: [] };
-    return decodeScatterGatherResponse(bytes);
+      return { shardResponses: [] };
+    const decoded = decodeScatterGatherResponse(bytes);
+    return { shardResponses: decoded.shard_responses.map((r) => ({
+      shardId: r.shard_id ?? 0,
+      shardActorId: r.shard_actor_id ?? "",
+      payload: r.payload ?? {},
+      success: r.success ?? false,
+      error: r.error ?? ""
+    })) };
   }
   broadcastShardGroup(request) {
-    const result = safeCall(hostBroadcastShardGroup, JSON.stringify(request));
+    const wireReq = {
+      group_id: request.groupId,
+      message: request.message,
+      timeout_ms: request.timeoutMs ?? 3e4,
+      min_acks: request.minAcks ?? 0
+    };
+    const reqBytes = encodeBroadcastShardGroupRequest(wireReq);
+    const result = safeCall(hostBroadcastShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { shard_responses: [] };
+    return decodeBroadcastShardGroupResponse(bytes);
   }
   reduceShardGroup(request) {
-    const result = safeCall(hostReduceShardGroup, JSON.stringify(request));
+    const wireReq = {
+      group_id: request.groupId,
+      map_function: request.mapFunction,
+      reduction: request.reduction,
+      target: request.target,
+      timeout_ms: request.timeoutMs ?? 3e4,
+      min_responses: request.minResponses ?? 0
+    };
+    const reqBytes = encodeReduceShardGroupRequest(wireReq);
+    const result = safeCall(hostReduceShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { shard_responses: [] };
+    return decodeReduceShardGroupResponse(bytes);
   }
   allReduceShardGroup(request) {
-    const result = safeCall(hostAllReduceShardGroup, JSON.stringify(request));
+    const wireReq = {
+      group_id: request.groupId,
+      map_function: request.mapFunction,
+      reduction: request.reduction,
+      target: request.target,
+      timeout_ms: request.timeoutMs ?? 3e4,
+      min_responses: request.minResponses ?? 0
+    };
+    const reqBytes = encodeAllReduceShardGroupRequest(wireReq);
+    const result = safeCall(hostAllReduceShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { shard_responses: [] };
+    return decodeAllReduceShardGroupResponse(bytes);
   }
   barrierShardGroup(request) {
-    const result = safeCall(hostBarrierShardGroup, JSON.stringify(request));
+    const wireReq = {
+      group_id: request.groupId,
+      barrier_id: request.barrierId,
+      round: request.round ?? 0,
+      timeout_ms: request.timeoutMs ?? 3e4,
+      min_acks: request.minAcks ?? 0
+    };
+    const reqBytes = encodeBarrierShardGroupRequest(wireReq);
+    const result = safeCall(hostBarrierShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { shard_responses: [] };
+    return decodeBarrierShardGroupResponse(bytes);
   }
   spawnActors(request) {
     const result = safeCall(hostSpawnActors, JSON.stringify(request));
@@ -2618,6 +3208,44 @@ var PageFetcher = class extends PlexSpacesActor {
       shard_count: shardCount
     };
   }
+  // Worker-local benchmark: generates pages locally and runs num_passes of crawl simulation.
+  // Leader sends one broadcast SG — enables true weak/strong scaling with one round trip.
+  onBenchmark_crawl(payload) {
+    const pagesPerWorker = Number(payload.pages_per_worker ?? 200);
+    const numPasses = Number(payload.num_passes ?? 4);
+    const seed = Number(payload.seed ?? 42);
+    const compStart = host.nowMs();
+    const domains = ["example.com", "docs.example.com", "api.example.com", "blog.example.com"];
+    const sections = ["about", "docs", "api", "blog", "pricing", "features", "integrations", "changelog"];
+    const subpaths = ["overview", "quickstart", "reference", "guide", "examples", "faq", "support", "contact"];
+    const urls = [];
+    let h = seed;
+    for (let i = 0; i < pagesPerWorker; i++) {
+      h = h * 1103515245 + 12345 & 2147483647;
+      const d = domains[h % domains.length];
+      const s = sections[(h >> 8) % sections.length];
+      const p = subpaths[(h >> 16) % subpaths.length];
+      urls.push(`https://${d}/${s}/${p}/${i}`);
+    }
+    let totalWords = 0;
+    let totalLinks = 0;
+    for (let pass = 0; pass < numPasses; pass++) {
+      for (const url of urls) {
+        const wc = simulateWordCounts(url);
+        for (const c of Object.values(wc)) totalWords += c;
+        const links = simulateLinks(url);
+        totalLinks += links.length;
+      }
+    }
+    const computeMs = host.nowMs() - compStart;
+    return {
+      pages_crawled: pagesPerWorker,
+      total_words: totalWords,
+      total_links: totalLinks,
+      passes: numPasses,
+      compute_ms: computeMs
+    };
+  }
   onStatus_request() {
     return {
       fetch_count: this.state.fetch_count,
@@ -2833,120 +3461,127 @@ var WebCrawlOrchestrator = class extends PlexSpacesActor {
       parallel_fraction: parallelFraction
     };
   }
-  onBenchmark(payload) {
-    const workerCountsRaw = payload.worker_counts ?? [1, 4, 8, 16];
-    const workerCounts = workerCountsRaw.map(Number);
-    const pagesPerRound = Number(payload.pages_per_round ?? 200);
-    const domains = ["example.com", "docs.example.com", "api.example.com", "blog.example.com"];
-    const sections = ["about", "docs", "api", "blog", "pricing", "features", "integrations", "changelog"];
-    const subpaths = ["overview", "quickstart", "reference", "guide", "examples", "faq"];
-    const uniqueWords = domains.length * sections.length * subpaths.length;
-    const urls = [];
-    for (const d of domains) urls.push(`https://${d}`);
-    outer1: for (const d of domains) {
-      for (const s of sections) {
-        if (urls.length >= pagesPerRound) break outer1;
-        urls.push(`https://${d}/${s}`);
-      }
-    }
-    outer2: for (const d of domains) {
-      for (const s of sections) {
-        for (const p of subpaths) {
-          if (urls.length >= pagesPerRound) break outer2;
-          urls.push(`https://${d}/${s}/${p}`);
-        }
-      }
-    }
-    const subs = ["v1", "v2", "v3", "beta"];
-    for (let i = 0; urls.length < pagesPerRound; i++) {
-      urls.push(`https://${domains[i % domains.length]}/${sections[i % sections.length]}/${subpaths[i % subpaths.length]}/${subs[i % subs.length]}`);
-    }
-    urls.length = pagesPerRound;
+  runBenchmarkSg(workerCounts, getPagesPerWorker, numPasses, seedMultiplier, prefix) {
     const results = [];
     let baselinePps = 0;
     for (const numWorkers of workerCounts) {
-      const groupId = `bench-fetchers-${numWorkers}-${host.nowMs() % 1e5}`;
-      for (let i = 0; i < 4 && i < urls.length; i++) {
-        host.ts.write(["url_queue", urls[i], "pending", "0"]);
+      const groupId = `${prefix}-${numWorkers}-${host.nowMs() % 1e5}`;
+      try {
+        host.createShardGroup({
+          groupId,
+          actorType: "fetcher",
+          shardCount: numWorkers,
+          partitionStrategy: "hash",
+          rebalancePolicy: "manual",
+          placement: { strategy: "from_registry" },
+          initialState: {}
+        });
+      } catch (e) {
+        results.push({
+          workers: numWorkers,
+          pages: 0,
+          elapsed_ms: 0,
+          coord_ms: 0,
+          fetch_ms: 0,
+          pages_per_sec: 0,
+          speedup: 0,
+          efficiency_pct: 0,
+          total_words: 0,
+          error_count: 1,
+          error: String(e)
+        });
+        continue;
       }
-      let coordMs = 0;
-      let fetchMs = 0;
-      let totalWords = 0;
-      const workerFetches = new Array(numWorkers).fill(0);
+      const pagesPerWorker = getPagesPerWorker(numWorkers);
       const t0 = host.nowMs();
-      const tCoord0 = host.nowMs();
       let sgResult = null;
       try {
-        const sgGroup = host.createShardGroup({
-          group_id: groupId,
-          actor_type: "fetcher",
-          shard_count: numWorkers,
-          partition_strategy: "hash",
-          rebalance_policy: "manual",
-          placement: { strategy: "from_registry" },
-          initial_state: {}
+        sgResult = host.scatterGather({
+          groupId,
+          query: { op: "benchmark_crawl", pages_per_worker: pagesPerWorker, num_passes: numPasses, seed: numWorkers * seedMultiplier },
+          timeoutMs: 6e4
         });
-        coordMs += host.nowMs() - tCoord0;
-        if (sgGroup) {
-          const tFetch = host.nowMs();
-          sgResult = host.scatterGather({
-            group_id: groupId,
-            message_type: "fetch_batch",
-            query: { urls, shard_count: numWorkers, depth: 1 },
-            aggregation: "concat",
-            min_responses: numWorkers,
-            timeout_ms: 6e4
-          });
-          fetchMs += host.nowMs() - tFetch;
-        }
-      } catch {
-        coordMs += host.nowMs() - tCoord0;
+      } catch (e) {
+        const elapsed2 = host.nowMs() - t0;
+        results.push({
+          workers: numWorkers,
+          pages: 0,
+          elapsed_ms: elapsed2,
+          coord_ms: elapsed2,
+          fetch_ms: 0,
+          pages_per_sec: 0,
+          speedup: 0,
+          efficiency_pct: 0,
+          total_words: 0,
+          error_count: 1,
+          error: String(e)
+        });
+        continue;
       }
-      const tCoordPost = host.nowMs();
-      if (sgResult) {
-        const shardResponses = sgResult.shard_responses ?? [];
-        for (let si = 0; si < shardResponses.length; si++) {
-          const sr = shardResponses[si];
-          const p = normalizePayload(sr);
-          const fc = Number(p.pages_fetched ?? 0);
-          const tw = Number(p.total_words ?? 0);
-          if (si < numWorkers) workerFetches[si] = fc;
-          totalWords += tw;
-        }
-      } else {
-        for (const url of urls) {
-          const wc = simulateWordCounts(url);
-          for (const c of Object.values(wc)) totalWords += Number(c);
-        }
-        for (let i = 0; i < numWorkers; i++) {
-          workerFetches[i] = Math.floor(pagesPerRound / numWorkers);
-        }
-      }
-      for (let i = 0; i < 4 && i < urls.length; i++) {
-        host.ts.write(["url_queue", urls[i], "visited", "1"]);
-      }
-      coordMs += host.nowMs() - tCoordPost;
       const elapsed = host.nowMs() - t0;
-      const pps = elapsed > 0 ? pagesPerRound * 1e3 / elapsed : 0;
-      const parallelFraction = elapsed > 0 ? 1 - coordMs / Math.max(elapsed, 1) : 1;
+      let totalWords = 0;
+      let totalCrawled = 0;
+      let totalCompute = 0;
+      let errorCount = 0;
+      for (const sr of sgResult?.shardResponses ?? []) {
+        const p = normalizePayload(sr.payload ?? {});
+        if (!sr.success || p.error) {
+          errorCount++;
+          continue;
+        }
+        totalWords += Number(p.total_words ?? 0);
+        totalCrawled += Number(p.pages_crawled ?? 0);
+        totalCompute += Number(p.compute_ms ?? 0);
+      }
+      const avgComputeMs = numWorkers > 0 ? Math.round(totalCompute / numWorkers) : 0;
+      const coordMs = Math.max(elapsed - avgComputeMs, 1);
+      const pps = elapsed > 0 ? totalCrawled * 1e3 / elapsed : 0;
       if (!baselinePps && pps > 0) baselinePps = pps;
       const speedup = baselinePps > 0 ? pps / baselinePps : 1;
       const efficiency = speedup / numWorkers * 100;
       results.push({
         workers: numWorkers,
-        pages: pagesPerRound,
+        pages: totalCrawled,
         elapsed_ms: elapsed,
         coord_ms: coordMs,
-        fetch_ms: fetchMs,
+        fetch_ms: avgComputeMs,
         pages_per_sec: pps,
         speedup,
         efficiency_pct: efficiency,
-        parallel_fraction: parallelFraction,
-        worker_fetches: workerFetches,
         total_words: totalWords,
-        unique_words: uniqueWords
+        error_count: errorCount
       });
     }
+    return results;
+  }
+  // Strong scaling: fixed total 200 pages split across N workers (pages_per_worker=ceil(200/N))
+  onBenchmark(payload) {
+    const workerCountsRaw = payload.worker_counts ?? [2, 4, 8, 16];
+    const workerCounts = workerCountsRaw.map(Number);
+    const totalPages = Number(payload.pages_per_round ?? 200);
+    const numPasses = Number(payload.num_passes ?? 4);
+    const results = this.runBenchmarkSg(
+      workerCounts,
+      (n) => Math.ceil(totalPages / n),
+      numPasses,
+      100,
+      "bench-strong"
+    );
+    return { status: "ok", results };
+  }
+  // Weak scaling: fixed pages_per_worker (200) × N workers — total work grows with N.
+  onRun_weak_scaling_benchmark(payload) {
+    const shardCountsRaw = payload.shard_counts ?? [2, 4, 8, 16];
+    const shardCounts = shardCountsRaw.map(Number);
+    const pagesPerWorker = Number(payload.pages_per_worker ?? 200);
+    const numPasses = Number(payload.num_passes ?? 4);
+    const results = this.runBenchmarkSg(
+      shardCounts,
+      (_n) => pagesPerWorker,
+      numPasses,
+      200,
+      "bench-weak"
+    );
     return { status: "ok", results };
   }
   onStatus() {

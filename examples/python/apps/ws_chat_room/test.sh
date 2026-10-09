@@ -141,7 +141,7 @@ PY
 
 # ─── Step 0: Build ─────────────────────────────────────────────────────────────
 echo "Step 0: Ensure WASM artifact exists"
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   "$SCRIPT_DIR/build.sh"
 else
   echo "  Using existing $WASM_FILE"
@@ -160,7 +160,7 @@ echo ""
 
 # ─── Step 2: Deploy ────────────────────────────────────────────────────────────
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 

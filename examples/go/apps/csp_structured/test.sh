@@ -56,7 +56,7 @@ echo "Entry: ${ENTRY_HOST}:${ENTRY_PORT}"
 echo ""
 
 # Build if WASM not present
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   echo "Building WASM..."
   bash "$SCRIPT_DIR/build.sh"
 fi
@@ -69,7 +69,7 @@ sleep 2
 
 # Deploy
 echo "Deploying csp-structured-go..."
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 

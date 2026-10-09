@@ -32,7 +32,7 @@ TRAIN_ITERATIONS=10
 INPUT_DIM=100
 HIDDEN_DIM=64
 BATCH_SIZE=256
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
@@ -96,7 +96,7 @@ pathlib.Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
 PY
 }
 
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   "$SCRIPT_DIR/build.sh"
 fi
 
@@ -119,12 +119,13 @@ for node in "${NODE_LIST[@]}"; do
   fi
 done
 
-TEMP_CONFIG="$(mktemp -t python-parameter-server-app-config)"
-      trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-      APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+      trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+      APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-      zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 render_config "$TEMP_CONFIG"
+      zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Step 1: Undeploy from all nodes, then deploy to all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
@@ -145,7 +146,7 @@ for node in "${NODE_LIST[@]}"; do
         -F "version=1.0.0" \
         -F "app_file=@$APP_ZIP" 2>&1) || true
     else
-      APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+      APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
       zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
       response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
@@ -173,7 +174,7 @@ done
 _deployed=0
 for _attempt in 1 2 3; do
   if [ -n "$AUTH_HEADER" ]; then
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+    APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
     zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
@@ -184,7 +185,7 @@ rm -f "$APP_ZIP"
       -F "version=1.0.0" \
       -F "app_file=@$APP_ZIP" 2>&1) || true
   else
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+    APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
     zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
@@ -208,8 +209,8 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $body${NC}"
   exit 1
 fi
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 echo "Step 1b: Wait for cluster node discovery (async SWIM reconcile)"
 wait_for_registry_membership "${#NODE_LIST[@]}" 5 2
 echo -e "  ${GREEN:-}All ${#NODE_LIST[@]} nodes discovered${NC:-}"

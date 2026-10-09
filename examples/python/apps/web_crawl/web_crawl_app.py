@@ -19,6 +19,7 @@ Role is configured via args.role in app-config.toml:
 from __future__ import annotations
 
 from plexspaces import gen_server_actor, handler, host, init_handler, state
+from plexspaces import CreateShardGroupRequest, ScatterGatherRequest, NodePlacement
 
 FETCHER_POOL = "fetcher_pool"
 CRAWL_WORKERS_GROUP = "crawl_workers"
@@ -448,33 +449,32 @@ class WebCrawlOrchestrator:
             sg_result = None
             t_coord0 = host.now_ms()
             try:
-                host.create_shard_group({
-                    "group_id": group_id,
-                    "actor_type": "fetcher",
-                    "shard_count": num_workers,
-                    "partition_strategy": "hash",
-                    "rebalance_policy": "manual",
-                    "placement": {"strategy": "from_registry"},
-                    "initial_state": {},
-                })
+                host.create_shard_group(CreateShardGroupRequest(
+                    group_id=group_id,
+                    actor_type="fetcher",
+                    shard_count=num_workers,
+                    partition_strategy="hash",
+                    rebalance_policy="manual",
+                    placement=NodePlacement(strategy="from_registry"),
+                    initial_state={},
+                ))
                 coord_ms += host.now_ms() - t_coord0
 
                 t_fetch = host.now_ms()
-                sg_result = host.scatter_gather({
-                    "group_id": group_id,
-                    "message_type": "fetch_batch",
-                    "query": {"urls": urls, "shard_count": num_workers, "depth": 1},
-                    "aggregation": "concat",
-                    "min_responses": num_workers,
-                    "timeout_ms": 60000,
-                })
+                sg_result = host.scatter_gather(ScatterGatherRequest(
+                    group_id=group_id,
+                    query={"urls": urls, "shard_count": num_workers, "depth": 1},
+                    aggregation="concat",
+                    min_responses=num_workers,
+                    timeout_ms=60000,
+                ))
                 fetch_ms += host.now_ms() - t_fetch
             except Exception:
                 coord_ms += host.now_ms() - t_coord0
 
             t_coord_post = host.now_ms()
             if sg_result:
-                for si, sr in enumerate(sg_result.get("shard_responses") or []):
+                for si, sr in enumerate(sg_result.shard_responses or []):
                     p = _normalize_payload(sr)
                     fc = int(p.get("pages_fetched", 0))
                     tw = int(p.get("total_words", 0))

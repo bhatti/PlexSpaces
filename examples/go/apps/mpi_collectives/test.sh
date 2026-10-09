@@ -52,7 +52,7 @@ read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 
 grpc_seed_nodes() {
@@ -109,12 +109,13 @@ for node in "${NODE_LIST[@]}"; do
   fi
 done
 
-TEMP_CONFIG="$(mktemp -t mpi-collectives-go-app-config)"
-    trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+    trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+    APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-    zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 render_config "$TEMP_CONFIG"
+    zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Step 1: Undeploy from all nodes, then deploy to all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
@@ -151,7 +152,7 @@ for node in "${NODE_LIST[@]}"; do
 done
 _deployed=0
 for _attempt in 1 2 3; do
-  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+  APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
   zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
   deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
@@ -174,8 +175,8 @@ if [ "$_deployed" -eq 0 ]; then
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 sleep 2
 
 run_payload=$(cat <<EOF

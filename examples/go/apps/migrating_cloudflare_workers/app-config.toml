@@ -50,7 +50,10 @@ name = "AlarmDemo"
 actor_type = "AlarmDemo"
 restart = "permanent"
 shutdown_timeout_seconds = 5
-facets = ["virtual_actor", "reminder"]
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "1h", activation_strategy = "lazy" } },
+  { type = "reminder", priority = 80, config = {} }
+]
 tenant_id = "default"
 
 [supervisor.children.args]

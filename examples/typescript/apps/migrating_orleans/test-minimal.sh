@@ -42,7 +42,7 @@ APP_ID="orleans-batch-predictor"
 APP_NAME="orleans-batch-predictor"
 
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 if [ -f "$CONFIG_FILE" ]; then
   zip -j "$APP_ZIP" "${WASM_FILE}" "${CONFIG_FILE}" >/dev/null
 else

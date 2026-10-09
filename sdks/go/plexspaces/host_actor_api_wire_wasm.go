@@ -13,7 +13,6 @@
 package plexspaces
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -26,15 +25,6 @@ func mapAsStringAny(v any) (map[string]any, bool) {
 	return m, ok
 }
 
-func cfgGet(root map[string]any, key string) any {
-	if v, ok := root[key]; ok {
-		return v
-	}
-	if cfg, ok := root["config"].(map[string]any); ok {
-		return cfg[key]
-	}
-	return nil
-}
 
 func strVal(v any) string {
 	if v == nil {
@@ -47,14 +37,24 @@ func strVal(v any) string {
 		return strconv.FormatInt(int64(t), 10)
 	case int:
 		return strconv.Itoa(t)
+	case int32:
+		return strconv.FormatInt(int64(t), 10)
 	case int64:
 		return strconv.FormatInt(t, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(t), 10)
 	case uint64:
 		return strconv.FormatUint(t, 10)
-	case json.Number:
-		return string(t)
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
 	default:
-		return fmt.Sprint(t)
+		// Avoid fmt.Sprint: it calls fmtsort.Sort for maps which crashes in TinyGo WASM.
+		// All strVal callers pass string/numeric/nil values; unknown types return empty string.
+		_ = t
+		return ""
 	}
 }
 
@@ -122,25 +122,6 @@ func u64Val(v any) uint64 {
 	}
 }
 
-func stringMapFromAnyMap(m map[string]any) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = strVal(v)
-	}
-	return out
-}
-
-func u64StringMapFromNested(v any) map[string]uint64 {
-	m, ok := mapAsStringAny(v)
-	if !ok {
-		return nil
-	}
-	out := make(map[string]uint64, len(m))
-	for k, val := range m {
-		out[k] = u64Val(val)
-	}
-	return out
-}
 
 // --- protobuf wire (manual) ---
 
@@ -265,48 +246,46 @@ func nodePlacementEnum(s string) uint32 {
 	}
 }
 
-func wasmEncodeNodePlacement(v any) []byte {
-	m, ok := mapAsStringAny(v)
-	if !ok || len(m) == 0 {
+// wasmEncodeNodePlacementTyped encodes a typed NodePlacement into proto bytes.
+// Proto: strategy=1, cluster=2, node_ids=3, required_labels=4, avoid_node_ids=5, affinity_labels=7.
+func wasmEncodeNodePlacementTyped(p NodePlacement) []byte {
+	if p.Strategy == "" && len(p.NodeIDs) == 0 && p.Cluster == "" &&
+		len(p.RequiredLabels) == 0 && len(p.AvoidNodeIDs) == 0 && len(p.AffinityLabels) == 0 {
 		return nil
 	}
-	var p []byte
-	p = wasmAppendUInt32(p, 1, nodePlacementEnum(strVal(m["strategy"])))
-	if c := strVal(m["cluster"]); c != "" {
-		p = wasmAppendString(p, 2, c)
+	var pb []byte
+	pb = wasmAppendUInt32(pb, 1, nodePlacementEnum(p.Strategy))
+	if p.Cluster != "" {
+		pb = wasmAppendString(pb, 2, p.Cluster)
 	}
-	if raw, ok := m["node_ids"].([]any); ok {
-		for _, id := range raw {
-			s := strVal(id)
-			if s != "" {
-				p = wasmAppendString(p, 3, s)
-			}
+	for _, id := range p.NodeIDs {
+		if id != "" {
+			pb = wasmAppendString(pb, 3, id)
 		}
 	}
-	if rl, ok := mapAsStringAny(m["required_labels"]); ok {
-		p = wasmAppendStringMap(p, 4, stringMapFromAnyMap(rl))
+	if len(p.RequiredLabels) > 0 {
+		pb = wasmAppendStringMap(pb, 4, p.RequiredLabels)
 	}
-	if raw, ok := m["avoid_node_ids"].([]any); ok {
-		for _, id := range raw {
-			s := strVal(id)
-			if s != "" {
-				p = wasmAppendString(p, 5, s)
-			}
+	for _, id := range p.AvoidNodeIDs {
+		if id != "" {
+			pb = wasmAppendString(pb, 5, id)
 		}
 	}
-	if al, ok := mapAsStringAny(m["affinity_labels"]); ok {
-		p = wasmAppendStringMap(p, 7, stringMapFromAnyMap(al))
+	if len(p.AffinityLabels) > 0 {
+		pb = wasmAppendStringMap(pb, 7, p.AffinityLabels)
 	}
-	return p
+	return pb
 }
 
-func wasmEncodeDataParallelConfig(groupID string, shardCount uint32, part, reb uint32, placement any) []byte {
+// wasmEncodeDataParallelConfigTyped encodes a typed CreateShardGroupRequest config.
+// Proto: group_id=1, shard_count=2, partition_strategy=4, rebalance_policy=5, placement=6.
+func wasmEncodeDataParallelConfigTyped(groupID string, shardCount int, part, reb uint32, placement NodePlacement) []byte {
 	var c []byte
 	c = wasmAppendString(c, 1, groupID)
-	c = wasmAppendUInt32(c, 2, shardCount)
+	c = wasmAppendUInt32(c, 2, uint32(shardCount))
 	c = wasmAppendUInt32(c, 4, part)
 	c = wasmAppendUInt32(c, 5, reb)
-	if pb := wasmEncodeNodePlacement(placement); len(pb) > 0 {
+	if pb := wasmEncodeNodePlacementTyped(placement); len(pb) > 0 {
 		c = appendLengthDelimited(c, 6, pb)
 	}
 	return c
@@ -348,67 +327,64 @@ func reductionEnum(s string) uint32 {
 	}
 }
 
-func buildQueryPayload(m map[string]any) (msgType string, payload []byte) {
-	mt := strVal(m["message_type"])
-	q, hasQuery := mapAsStringAny(m["query"])
-	if !hasQuery {
-		q = map[string]any{}
-	}
+// encodeQueryPayload serialises q to proto payload bytes and derives the message type.
+// Does NOT mutate q. If message_type is derived from "op" and not present in q,
+// it is injected into the JSON payload so worker actors can route on it.
+func encodeQueryPayload(q map[string]any) (msgType string, payload []byte) {
+	mt, _ := q["message_type"].(string)
 	if mt == "" {
-		if op, ok := q["op"].(string); ok {
-			mt = op
-		}
+		mt, _ = q["op"].(string)
 	}
+	base := SafeMarshal(q)
 	if mt != "" {
 		if _, exists := q["message_type"]; !exists {
-			q["message_type"] = mt
+			// Inject message_type without mutating q.
+			if len(base) > 1 {
+				payload = []byte(`{"message_type":"` + mt + `",` + base[1:])
+			} else {
+				payload = []byte(`{"message_type":"` + mt + `"}`)
+			}
+		} else {
+			payload = []byte(base)
 		}
-	}
-	var err error
-	payload, err = json.Marshal(q)
-	if err != nil {
-		payload = []byte("{}")
+	} else {
+		payload = []byte(base)
 	}
 	return mt, payload
 }
 
-func buildBroadcastPayload(m map[string]any) (msgType string, payload []byte, ok bool) {
-	body, isMap := mapAsStringAny(m["message"])
-	if !isMap {
-		return "", nil, false
-	}
-	mt := strVal(m["message_type"])
+// encodeBroadcastPayload serialises a broadcast message map to proto payload bytes.
+func encodeBroadcastPayload(msg map[string]any) (msgType string, payload []byte) {
+	mt, _ := msg["message_type"].(string)
 	if mt == "" {
-		mt = strVal(body["op"])
+		mt, _ = msg["op"].(string)
 	}
-	var err error
-	payload, err = json.Marshal(body)
-	if err != nil {
-		payload = []byte("{}")
-	}
-	return mt, payload, true
+	payload = []byte(SafeMarshal(msg))
+	return mt, payload
 }
 
-func buildMapFunctionPayload(m map[string]any) (msgType string, payload []byte, ok bool) {
-	mt := strVal(m["message_type"])
-	body, isMap := mapAsStringAny(m["map_function"])
-	if !isMap {
-		body = map[string]any{}
-	}
+// encodeMapFunctionPayload serialises a map-function map to proto payload bytes.
+// Injects message_type if derived from "op" and not already present.
+func encodeMapFunctionPayload(fn map[string]any) (msgType string, payload []byte) {
+	mt, _ := fn["message_type"].(string)
 	if mt == "" {
-		mt = strVal(body["op"])
+		mt, _ = fn["op"].(string)
 	}
+	base := SafeMarshal(fn)
 	if mt != "" {
-		if _, exists := body["message_type"]; !exists {
-			body["message_type"] = mt
+		if _, exists := fn["message_type"]; !exists {
+			if len(base) > 1 {
+				payload = []byte(`{"message_type":"` + mt + `",` + base[1:])
+			} else {
+				payload = []byte(`{"message_type":"` + mt + `"}`)
+			}
+		} else {
+			payload = []byte(base)
 		}
+	} else {
+		payload = []byte(base)
 	}
-	var err error
-	payload, err = json.Marshal(body)
-	if err != nil {
-		payload = []byte("{}")
-	}
-	return mt, payload, true
+	return mt, payload
 }
 
 // --- decode helpers ---
@@ -461,6 +437,8 @@ func wasmParseDuration(data []byte) (ms int64) {
 }
 
 func wasmParseCommonMessage(data []byte) (msgType string, payload []byte) {
+	gParseCommonData = data // pin subslice so its GC block stays alive across string/[]byte allocations
+	data = gParseCommonData
 	pos := 0
 	for pos < len(data) {
 		tag, n, err := readVarint(data, pos)
@@ -500,32 +478,74 @@ func wasmPayloadToAny(payload []byte) any {
 	if len(payload) == 0 {
 		return nil
 	}
-	var parsed any
-	if err := json.Unmarshal(payload, &parsed); err != nil {
-		return string(payload)
-	}
-	return parsed
+	// Return raw JSON string. Callers that need a decoded map call json.Unmarshal
+	// themselves on the string. This avoids encoding/json in the WASM binary which
+	// links fmtsort and corrupts the actor interface dispatch table (TinyGo 0.40.x).
+	return string(payload)
 }
 
+// gReducedResultPin pins the string created inside wasmReducedResultFromMessagePayload
+// so TinyGo's conservative GC does not collect its backing array before TrimSpace reads it.
+// WASM locals are not scanned; globals always are.
+var gReducedResultPin string
+
 func wasmReducedResultFromMessagePayload(payload []byte) any {
-	raw := wasmPayloadToAny(payload)
-	switch v := raw.(type) {
-	case float64, int, int64, uint64, bool, string:
-		return v
-	case map[string]any:
-		for _, k := range []string{"partial_sum", "value", "result", "total", "reduced_value"} {
-			if x, ok := v[k]; ok {
-				return x
-			}
-		}
-		return v
-	default:
-		return raw
+	if len(payload) == 0 {
+		return nil
 	}
+	// Pin to global before any allocation can trigger GC (TinyGo 0.40 WASM local GC issue).
+	gReducedResultPin = string(payload)
+	s := gReducedResultPin
+	// Try to parse as a raw scalar (number, bool, null).
+	if f, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+		gReducedResultPin = ""
+		return f
+	}
+	// Try to extract a known numeric key from JSON object like {"value":42}.
+	for _, key := range []string{"partial_sum", "value", "result", "total", "reduced_value"} {
+		if f, ok := wasmExtractJSONNumber(s, key); ok {
+			gReducedResultPin = ""
+			return f
+		}
+	}
+	// Return s (backed by gReducedResultPin); caller stores in map so the string lives on.
+	return s
+}
+
+// wasmExtractJSONNumber extracts a numeric value for a JSON key without json.Unmarshal.
+// s is assumed to already be pinned (backed by gReducedResultPin or another global).
+func wasmExtractJSONNumber(s, key string) (float64, bool) {
+	needle := `"` + key + `":`
+	idx := strings.Index(s, needle)
+	if idx < 0 {
+		return 0, false
+	}
+	// Manually trim leading whitespace without strings.TrimSpace to avoid WASM local GC issue.
+	start := idx + len(needle)
+	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	end := start
+	for end < len(s) && s[end] != ',' && s[end] != '}' && s[end] != ']' {
+		end++
+	}
+	// Trim trailing whitespace inline without allocating a new string.
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	v := s[start:end]
+	if f, err := strconv.ParseFloat(v, 64); err == nil {
+		return f, true
+	}
+	return 0, false
 }
 
 func wasmParseShardQueryResponse(data []byte) map[string]any {
-	out := map[string]any{}
+	// Proto: request_id=1, shard_id=2, shard_actor_id=3, response=4, latency=5, success=6, error=7
+	gParseShardData = data // pin subslice to keep its GC block alive across map/string allocations
+	data = gParseShardData
+	gParseShardOut = map[string]any{}
+	out := gParseShardOut
 	pos := 0
 	for pos < len(data) {
 		tag, n, err := readVarint(data, pos)
@@ -536,21 +556,21 @@ func wasmParseShardQueryResponse(data []byte) map[string]any {
 		fn := int(tag >> 3)
 		wt := tag & 7
 		switch {
-		case fn == 1 && wt == 0:
+		case fn == 2 && wt == 0:
 			v, m, err := readVarint(data, pos)
 			if err != nil {
 				return out
 			}
 			pos += m
 			out["shard_id"] = float64(v)
-		case fn == 2 && wt == 2:
+		case fn == 3 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return out
 			}
 			out["shard_actor_id"] = string(sl)
 			pos = np
-		case fn == 3 && wt == 2:
+		case fn == 4 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return out
@@ -561,23 +581,22 @@ func wasmParseShardQueryResponse(data []byte) map[string]any {
 			out["payload"] = p
 			out["response"] = p
 			pos = np
-		case fn == 4 && wt == 2:
+		case fn == 5 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return out
 			}
 			ms := wasmParseDuration(sl)
 			out["latency_ms"] = float64(ms)
-			out["latency"] = map[string]any{"ms": float64(ms)}
 			pos = np
-		case fn == 5 && wt == 0:
+		case fn == 6 && wt == 0:
 			v, m, err := readVarint(data, pos)
 			if err != nil {
 				return out
 			}
 			pos += m
 			out["success"] = v != 0
-		case fn == 6 && wt == 2:
+		case fn == 7 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return out
@@ -620,7 +639,7 @@ func wasmParseScatterGatherStats(data []byte) map[string]any {
 				return out
 			}
 			ms := wasmParseDuration(sl)
-			out["max_latency"] = map[string]any{"ms": float64(ms)}
+			out["max_latency_ms"] = float64(ms)
 			pos = np
 			continue
 		}
@@ -639,6 +658,54 @@ func wasmParseScatterGatherStats(data []byte) map[string]any {
 		}
 	}
 	return out
+}
+
+// wasmParseScatterGatherStatsFlat parses scatter-gather stats proto bytes and
+// returns plain float64 values. Returns nothing into a map so that callers can
+// write the results directly into their own local map[string]any variables.
+//
+// TinyGo WASM bug: writing to a map[string]any that was passed as a function
+// parameter uses a broken code path (corrupted call_indirect via the interface
+// value type descriptor). Callers must do the map stores themselves in the same
+// scope where the map was declared as a local variable.
+func wasmParseScatterGatherStatsFlat(data []byte) (queried, responded, failed, maxLatencyMs float64) {
+	pos := 0
+	for pos < len(data) {
+		tag, n, err := readVarint(data, pos)
+		if err != nil {
+			return
+		}
+		pos += n
+		fn := int(tag >> 3)
+		wt := tag & 7
+		if wt != 0 && !(fn == 4 && wt == 2) {
+			pos, _ = skipField(data, pos, wt)
+			continue
+		}
+		if fn == 4 && wt == 2 {
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return
+			}
+			maxLatencyMs = float64(wasmParseDuration(sl))
+			pos = np
+			continue
+		}
+		v, m, err := readVarint(data, pos)
+		if err != nil {
+			return
+		}
+		pos += m
+		switch fn {
+		case 1:
+			queried = float64(v)
+		case 2:
+			responded = float64(v)
+		case 3:
+			failed = float64(v)
+		}
+	}
+	return
 }
 
 func wasmParseDataParallelConfig(data []byte) (groupID string, shardCount uint32, partStr, rebStr string) {
@@ -787,7 +854,7 @@ func wasmParseCreateShardGroupResponse(data []byte) (map[string]any, error) {
 		pos += n
 		fn := int(tag >> 3)
 		wt := tag & 7
-		if fn == 1 && wt == 2 {
+		if fn == 2 && wt == 2 {
 			sl, _, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
@@ -803,8 +870,9 @@ func wasmParseCreateShardGroupResponse(data []byte) (map[string]any, error) {
 }
 
 func wasmParseScatterGatherResponse(data []byte) (map[string]any, error) {
-	out := map[string]any{}
-	var shards []any
+	gParseOut = map[string]any{}
+	out := gParseOut
+	gParseShards = gParseShards[:0] // reset without re-allocating when possible
 	pos := 0
 	for pos < len(data) {
 		tag, n, err := readVarint(data, pos)
@@ -815,7 +883,7 @@ func wasmParseScatterGatherResponse(data []byte) (map[string]any, error) {
 		fn := int(tag >> 3)
 		wt := tag & 7
 		switch {
-		case fn == 1 && wt == 2:
+		case fn == 2 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
@@ -823,19 +891,73 @@ func wasmParseScatterGatherResponse(data []byte) (map[string]any, error) {
 			_, pl := wasmParseCommonMessage(sl)
 			out["result"] = wasmPayloadToAny(pl)
 			pos = np
+		case fn == 3 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return nil, err
+			}
+			gParseShards = append(gParseShards, wasmParseShardQueryResponse(sl))
+			pos = np
+		case fn == 4 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return nil, err
+			}
+			q, r, f, ml := wasmParseScatterGatherStatsFlat(sl)
+			out["_stat_shards_queried"] = q
+			out["_stat_shards_responded"] = r
+			out["_stat_shards_failed"] = f
+			out["_stat_max_latency_ms"] = ml
+			pos = np
+		default:
+			pos, err = skipField(data, pos, wt)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	out["shard_responses"] = gParseShards
+	if _, ok := out["_stat_shards_queried"]; !ok {
+		out["_stat_shards_queried"] = float64(0)
+		out["_stat_shards_responded"] = float64(0)
+		out["_stat_shards_failed"] = float64(0)
+		out["_stat_max_latency_ms"] = float64(0)
+	}
+	gParseOut = nil
+	return out, nil
+}
+
+func wasmParseBroadcastOrBarrierResponse(data []byte) (map[string]any, error) {
+	gParseOut = map[string]any{}
+	out := gParseOut
+	gParseShards = gParseShards[:0]
+	pos := 0
+	for pos < len(data) {
+		tag, n, err := readVarint(data, pos)
+		if err != nil {
+			return nil, err
+		}
+		pos += n
+		fn := int(tag >> 3)
+		wt := tag & 7
+		switch {
 		case fn == 2 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
 			}
-			shards = append(shards, wasmParseShardQueryResponse(sl))
+			gParseShards = append(gParseShards, wasmParseShardQueryResponse(sl))
 			pos = np
 		case fn == 3 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
 			}
-			out["stats"] = wasmParseScatterGatherStats(sl)
+			q, r, f, ml := wasmParseScatterGatherStatsFlat(sl)
+			out["_stat_shards_queried"] = q
+			out["_stat_shards_responded"] = r
+			out["_stat_shards_failed"] = f
+			out["_stat_max_latency_ms"] = ml
 			pos = np
 		default:
 			pos, err = skipField(data, pos, wt)
@@ -844,57 +966,22 @@ func wasmParseScatterGatherResponse(data []byte) (map[string]any, error) {
 			}
 		}
 	}
-	out["shard_responses"] = shards
-	if out["stats"] == nil {
-		out["stats"] = wasmParseScatterGatherStats(nil)
+	out["shard_responses"] = gParseShards
+	if _, ok := out["_stat_shards_queried"]; !ok {
+		out["_stat_shards_queried"] = float64(0)
+		out["_stat_shards_responded"] = float64(0)
+		out["_stat_shards_failed"] = float64(0)
+		out["_stat_max_latency_ms"] = float64(0)
 	}
-	return out, nil
-}
-
-func wasmParseBroadcastOrBarrierResponse(data []byte) (map[string]any, error) {
-	out := map[string]any{}
-	var shards []any
-	pos := 0
-	for pos < len(data) {
-		tag, n, err := readVarint(data, pos)
-		if err != nil {
-			return nil, err
-		}
-		pos += n
-		fn := int(tag >> 3)
-		wt := tag & 7
-		switch {
-		case fn == 1 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return nil, err
-			}
-			shards = append(shards, wasmParseShardQueryResponse(sl))
-			pos = np
-		case fn == 2 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return nil, err
-			}
-			out["stats"] = wasmParseScatterGatherStats(sl)
-			pos = np
-		default:
-			pos, err = skipField(data, pos, wt)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	out["shard_responses"] = shards
-	if out["stats"] == nil {
-		out["stats"] = wasmParseScatterGatherStats(nil)
-	}
+	gParseOut = nil
 	return out, nil
 }
 
 func wasmParseReduceOrAllReduceResponse(data []byte) (map[string]any, error) {
+	gRawResponseBytes = data // pin subslice to keep its GC block alive across allocations
+	data = gRawResponseBytes
 	out := map[string]any{}
-	var shards []any
+	var shards []map[string]any
 	pos := 0
 	for pos < len(data) {
 		tag, n, err := readVarint(data, pos)
@@ -905,7 +992,7 @@ func wasmParseReduceOrAllReduceResponse(data []byte) (map[string]any, error) {
 		fn := int(tag >> 3)
 		wt := tag & 7
 		switch {
-		case fn == 1 && wt == 2:
+		case fn == 2 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
@@ -913,19 +1000,23 @@ func wasmParseReduceOrAllReduceResponse(data []byte) (map[string]any, error) {
 			_, pl := wasmParseCommonMessage(sl)
 			out["result"] = wasmReducedResultFromMessagePayload(pl)
 			pos = np
-		case fn == 2 && wt == 2:
+		case fn == 3 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
 			}
 			shards = append(shards, wasmParseShardQueryResponse(sl))
 			pos = np
-		case fn == 3 && wt == 2:
+		case fn == 4 && wt == 2:
 			sl, np, err := wasmReadLengthDelimited(data, pos)
 			if err != nil {
 				return nil, err
 			}
-			out["stats"] = wasmParseScatterGatherStats(sl)
+			q, r, f, ml := wasmParseScatterGatherStatsFlat(sl)
+			out["_stat_shards_queried"] = q
+			out["_stat_shards_responded"] = r
+			out["_stat_shards_failed"] = f
+			out["_stat_max_latency_ms"] = ml
 			pos = np
 		default:
 			pos, err = skipField(data, pos, wt)
@@ -935,8 +1026,11 @@ func wasmParseReduceOrAllReduceResponse(data []byte) (map[string]any, error) {
 		}
 	}
 	out["shard_responses"] = shards
-	if out["stats"] == nil {
-		out["stats"] = wasmParseScatterGatherStats(nil)
+	if _, ok := out["_stat_shards_queried"]; !ok {
+		out["_stat_shards_queried"] = float64(0)
+		out["_stat_shards_responded"] = float64(0)
+		out["_stat_shards_failed"] = float64(0)
+		out["_stat_max_latency_ms"] = float64(0)
 	}
 	return out, nil
 }
@@ -977,18 +1071,234 @@ func wasmParseMapEntryUInt64(entry []byte) (key string, val uint64, ok bool) {
 	return key, val, key != ""
 }
 
-func wasmMergeU64MapField(out map[string]any, field string, entry []byte) {
-	k, v, ok := wasmParseMapEntryUInt64(entry)
-	if !ok {
-		return
+// wasmParseApplicationMetricsTyped decodes an ApplicationMetrics proto message into a typed struct.
+// Uses local map[string]uint64 fields — no map[string]any boxing — safe in TinyGo WASM.
+func wasmParseApplicationMetricsTyped(data []byte) ApplicationMetrics {
+	actorCounts := map[string]uint64{}
+	counterMetrics := map[string]uint64{}
+	latencyTotalsMs := map[string]uint64{}
+	latencyMaxMs := map[string]uint64{}
+	latencySamples := map[string]uint64{}
+	var supervisorCount, uptimeSeconds, messageCount, errorCount uint64
+	pos := 0
+	for pos < len(data) {
+		tag, n, err := readVarint(data, pos)
+		if err != nil {
+			break
+		}
+		pos += n
+		fn := int(tag >> 3)
+		wt := tag & 7
+		switch {
+		case fn == 1 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			k, v, ok := wasmParseMapEntryUInt64(sl)
+			if ok {
+				actorCounts[k] = v
+			}
+			pos = np
+		case fn == 2 && wt == 0:
+			v, m, err := readVarint(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			pos += m
+			supervisorCount = v
+		case fn == 3 && wt == 0:
+			v, m, err := readVarint(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			pos += m
+			uptimeSeconds = v
+		case fn == 4 && wt == 0:
+			v, m, err := readVarint(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			pos += m
+			messageCount = v
+		case fn == 5 && wt == 0:
+			v, m, err := readVarint(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			pos += m
+			errorCount = v
+		case fn == 6 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			k, v, ok := wasmParseMapEntryUInt64(sl)
+			if ok {
+				counterMetrics[k] = v
+			}
+			pos = np
+		case fn == 7 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			k, v, ok := wasmParseMapEntryUInt64(sl)
+			if ok {
+				latencyTotalsMs[k] = v
+			}
+			pos = np
+		case fn == 8 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			k, v, ok := wasmParseMapEntryUInt64(sl)
+			if ok {
+				latencyMaxMs[k] = v
+			}
+			pos = np
+		case fn == 9 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+			k, v, ok := wasmParseMapEntryUInt64(sl)
+			if ok {
+				latencySamples[k] = v
+			}
+			pos = np
+		default:
+			pos, err = skipField(data, pos, wt)
+			if err != nil {
+				return ApplicationMetrics{}
+			}
+		}
 	}
-	raw, exists := out[field]
-	acc, isMap := raw.(map[string]any)
-	if !exists || !isMap {
-		acc = map[string]any{}
-		out[field] = acc
+	return ApplicationMetrics{
+		ActorCounts:     actorCounts,
+		SupervisorCount: supervisorCount,
+		UptimeSeconds:   uptimeSeconds,
+		MessageCount:    messageCount,
+		ErrorCount:      errorCount,
+		CounterMetrics:  counterMetrics,
+		LatencyTotalsMs: latencyTotalsMs,
+		LatencyMaxMs:    latencyMaxMs,
+		LatencySamples:  latencySamples,
 	}
-	acc[k] = float64(v)
+}
+
+// wasmParseApplicationInfoInto fills ApplicationStatus fields from ApplicationInfo proto bytes.
+// Writes to a struct pointer — safe in TinyGo WASM (no map parameter writes).
+func wasmParseApplicationInfoInto(out *ApplicationStatus, data []byte) {
+	pos := 0
+	for pos < len(data) {
+		tag, n, err := readVarint(data, pos)
+		if err != nil {
+			return
+		}
+		pos += n
+		fn := int(tag >> 3)
+		wt := tag & 7
+		switch {
+		case fn == 1 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return
+			}
+			out.ApplicationID = string(sl)
+			pos = np
+		case fn == 2 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return
+			}
+			out.ApplicationName = string(sl)
+			pos = np
+		case fn == 3 && wt == 2:
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return
+			}
+			out.ApplicationVersion = string(sl)
+			pos = np
+		case fn == 4 && wt == 0:
+			v, m, err := readVarint(data, pos)
+			if err != nil {
+				return
+			}
+			pos += m
+			out.StatusCode = applicationStatusEnumString(v)
+		case fn == 5 && wt == 2:
+			_, np, err := wasmReadLengthDelimited(data, pos) // deployed_at timestamp — skip
+			if err != nil {
+				return
+			}
+			pos = np
+		case fn == 6 && wt == 2:
+			_, np, err := wasmReadLengthDelimited(data, pos) // metrics inside ApplicationInfo — skip
+			if err != nil {
+				return
+			}
+			pos = np
+		default:
+			pos, err = skipField(data, pos, wt)
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+// wasmParseApplicationStatusTyped decodes a GetApplicationStatusResponse proto into a typed struct.
+// Safe in TinyGo WASM: all writes target struct fields or local maps, never map parameters.
+func wasmParseApplicationStatusTyped(data []byte) (ApplicationStatus, error) {
+	var out ApplicationStatus
+	pos := 0
+	for pos < len(data) {
+		tag, n, err := readVarint(data, pos)
+		if err != nil {
+			return out, nil
+		}
+		pos += n
+		fn := int(tag >> 3)
+		wt := tag & 7
+		switch {
+		case fn == 1 && wt == 2: // application ApplicationInfo sub-message
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			wasmParseApplicationInfoInto(&out, sl)
+			pos = np
+		case fn == 3 && wt == 2: // error string
+			_, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			pos = np
+		case fn == 4 && wt == 2: // node_id
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			out.NodeID = string(sl)
+			pos = np
+		case fn == 5 && wt == 2: // node_address
+			sl, np, err := wasmReadLengthDelimited(data, pos)
+			if err != nil {
+				return out, nil
+			}
+			out.NodeAddress = string(sl)
+			pos = np
+		default:
+			pos, err = skipField(data, pos, wt)
+			if err != nil {
+				return out, nil
+			}
+		}
+	}
+	return out, nil
 }
 
 func applicationStatusEnumString(v uint64) string {
@@ -1012,90 +1322,6 @@ func applicationStatusEnumString(v uint64) string {
 	}
 }
 
-func wasmParseApplicationMetrics(data []byte) map[string]any {
-	out := map[string]any{}
-	pos := 0
-	for pos < len(data) {
-		tag, n, err := readVarint(data, pos)
-		if err != nil {
-			return out
-		}
-		pos += n
-		fn := int(tag >> 3)
-		wt := tag & 7
-		switch {
-		case fn == 1 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			wasmMergeU64MapField(out, "actor_counts", sl)
-			pos = np
-		case fn == 2 && wt == 0:
-			v, m, err := readVarint(data, pos)
-			if err != nil {
-				return out
-			}
-			pos += m
-			out["supervisor_count"] = float64(v)
-		case fn == 3 && wt == 0:
-			v, m, err := readVarint(data, pos)
-			if err != nil {
-				return out
-			}
-			pos += m
-			out["uptime_seconds"] = float64(v)
-		case fn == 4 && wt == 0:
-			v, m, err := readVarint(data, pos)
-			if err != nil {
-				return out
-			}
-			pos += m
-			out["message_count"] = float64(v)
-		case fn == 5 && wt == 0:
-			v, m, err := readVarint(data, pos)
-			if err != nil {
-				return out
-			}
-			pos += m
-			out["error_count"] = float64(v)
-		case fn == 6 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			wasmMergeU64MapField(out, "counter_metrics", sl)
-			pos = np
-		case fn == 7 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			wasmMergeU64MapField(out, "latency_totals_ms", sl)
-			pos = np
-		case fn == 8 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			wasmMergeU64MapField(out, "latency_max_ms", sl)
-			pos = np
-		case fn == 9 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			wasmMergeU64MapField(out, "latency_samples", sl)
-			pos = np
-		default:
-			pos, err = skipField(data, pos, wt)
-			if err != nil {
-				return out
-			}
-		}
-	}
-	return out
-}
 
 func wasmParseTimestamp(data []byte) int64 {
 	var sec int64
@@ -1127,329 +1353,226 @@ func wasmParseTimestamp(data []byte) int64 {
 	return sec
 }
 
-func wasmParseApplicationInfo(data []byte) map[string]any {
-	out := map[string]any{}
-	pos := 0
-	for pos < len(data) {
-		tag, n, err := readVarint(data, pos)
-		if err != nil {
-			return out
-		}
-		pos += n
-		fn := int(tag >> 3)
-		wt := tag & 7
-		switch {
-		case fn == 1 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			out["application_id"] = string(sl)
-			pos = np
-		case fn == 2 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			out["name"] = string(sl)
-			pos = np
-		case fn == 3 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			out["version"] = string(sl)
-			pos = np
-		case fn == 4 && wt == 0:
-			v, m, err := readVarint(data, pos)
-			if err != nil {
-				return out
-			}
-			pos += m
-			out["status"] = applicationStatusEnumString(v)
-		case fn == 5 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			out["deployed_at"] = float64(wasmParseTimestamp(sl))
-			pos = np
-		case fn == 6 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return out
-			}
-			out["metrics"] = wasmParseApplicationMetrics(sl)
-			pos = np
-		default:
-			pos, err = skipField(data, pos, wt)
-			if err != nil {
-				return out
-			}
-		}
-	}
-	return out
-}
-
-func wasmParseGetApplicationStatusResponse(data []byte) (map[string]any, error) {
-	out := map[string]any{}
-	pos := 0
-	for pos < len(data) {
-		tag, n, err := readVarint(data, pos)
-		if err != nil {
-			return nil, err
-		}
-		pos += n
-		fn := int(tag >> 3)
-		wt := tag & 7
-		switch {
-		case fn == 1 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return nil, err
-			}
-			out["application"] = wasmParseApplicationInfo(sl)
-			pos = np
-		case fn == 3 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return nil, err
-			}
-			out["error"] = string(sl)
-			pos = np
-		case fn == 4 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return nil, err
-			}
-			out["node_id"] = string(sl)
-			pos = np
-		case fn == 5 && wt == 2:
-			sl, np, err := wasmReadLengthDelimited(data, pos)
-			if err != nil {
-				return nil, err
-			}
-			out["node_address"] = string(sl)
-			pos = np
-		default:
-			pos, err = skipField(data, pos, wt)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return out, nil
-}
 
 // --- hostWire* / hostDecode* entry points ---
 
-func hostWireCreateShardGroupRequest(request any) (string, error) {
-	m, ok := mapAsStringAny(request)
-	if !ok {
-		return "", fmt.Errorf("create_shard_group: expected map[string]any")
-	}
-	if _, has := mapAsStringAny(m["shard_config"]); has {
-		return "", fmt.Errorf("create_shard_group: shard_config is not supported in TinyGo WASM (omit or use native Go)")
-	}
-	groupID := strVal(cfgGet(m, "group_id"))
-	shardCount := u32Val(cfgGet(m, "shard_count"))
-	part := partitionEnum(strVal(cfgGet(m, "partition_strategy")))
-	reb := rebalanceEnum(strVal(cfgGet(m, "rebalance_policy")))
-	cfg := wasmEncodeDataParallelConfig(groupID, shardCount, part, reb, cfgGet(m, "placement"))
+func hostWireCreateShardGroupRequest(req CreateShardGroupRequest) (string, error) {
+	part := partitionEnum(req.PartitionStrategy)
+	reb := rebalanceEnum(req.RebalancePolicy)
+	cfg := wasmEncodeDataParallelConfigTyped(req.GroupID, req.ShardCount, part, reb, req.Placement)
 	var out []byte
-	out = appendLengthDelimited(out, 1, cfg)
-	out = wasmAppendString(out, 2, strVal(cfgGet(m, "actor_type")))
-	switch st := cfgGet(m, "initial_state").(type) {
-	case nil:
-	case string:
-		out = wasmAppendBytes(out, 4, []byte(st))
-	case map[string]any:
-		b, err := json.Marshal(st)
-		if err != nil {
-			return "", fmt.Errorf("create_shard_group: initial_state: %w", err)
-		}
-		out = wasmAppendBytes(out, 4, b)
-	default:
-		b, err := json.Marshal(st)
-		if err != nil {
-			return "", fmt.Errorf("create_shard_group: initial_state: %w", err)
-		}
-		out = wasmAppendBytes(out, 4, b)
+	out = appendLengthDelimited(out, 2, cfg)
+	out = wasmAppendString(out, 3, req.ActorType)
+	if len(req.InitialState) > 0 {
+		out = wasmAppendBytes(out, 5, []byte(SafeMarshal(req.InitialState)))
 	}
-	if meta, ok := mapAsStringAny(cfgGet(m, "metadata")); ok && len(meta) > 0 {
-		out = wasmAppendStringMap(out, 5, stringMapFromAnyMap(meta))
+	if len(req.Metadata) > 0 {
+		out = wasmAppendStringMap(out, 6, req.Metadata)
 	}
 	return string(out), nil
 }
 
 func hostDecodeCreateShardGroupResponse(raw string) (map[string]any, error) {
-	return wasmParseCreateShardGroupResponse([]byte(raw))
+	return wasmPinDecodeRaw(raw, wasmParseCreateShardGroupResponse)
 }
 
-func hostWireScatterGatherRequest(request any) (string, error) {
-	m, ok := mapAsStringAny(request)
-	if !ok {
-		return "", fmt.Errorf("scatter_gather: expected map[string]any")
-	}
-	mt, payload := buildQueryPayload(m)
+func hostWireScatterGatherRequest(req ScatterGatherRequest) (string, error) {
+	mt, payload := encodeQueryPayload(req.Query)
 	if mt == "" && (len(payload) == 0 || string(payload) == "{}") {
-		return "", fmt.Errorf("scatter_gather: missing query/message_type")
+		return "", fmt.Errorf("scatter_gather: missing query/message_type (set op or message_type in Query)")
 	}
 	qm := wasmEncodeCommonMessage(mt, payload)
-	var req []byte
-	req = wasmAppendString(req, 1, strVal(m["group_id"]))
-	req = appendLengthDelimited(req, 2, qm)
-	if d := wasmEncodeDurationFromMs(u64Val(m["timeout_ms"])); len(d) > 0 {
-		req = appendLengthDelimited(req, 3, d)
+	var out []byte
+	out = wasmAppendString(out, 2, req.GroupID)
+	out = appendLengthDelimited(out, 3, qm)
+	if req.TimeoutMs > 0 {
+		if d := wasmEncodeDurationFromMs(uint64(req.TimeoutMs)); len(d) > 0 {
+			out = appendLengthDelimited(out, 4, d)
+		}
 	}
-	req = wasmAppendUInt32(req, 4, aggregationEnum(strVal(m["aggregation"])))
-	req = wasmAppendUInt32(req, 5, u32Val(m["min_responses"]))
-	return string(req), nil
+	out = wasmAppendUInt32(out, 5, aggregationEnum(req.Aggregation))
+	if req.MinResponses > 0 {
+		out = wasmAppendUInt32(out, 6, uint32(req.MinResponses))
+	}
+	return string(out), nil
+}
+
+// gScatterGatherRaw and gScatterGatherData pin the ScatterGather response bytes in
+// GC-visible linear memory (globals are always scanned). After asyncify resumes,
+// the raw string returned by the host call lives only in WASM locals; any allocation
+// inside wasmParseScatterGatherResponse can trigger GC that would free the backing
+// array. By assigning to globals FIRST we ensure GC sees and preserves the data.
+// Single-threaded TinyGo WASM: globals are safe as temporary pins.
+var gScatterGatherRaw string
+var gScatterGatherData []byte
+
+// gParseOut and gParseShards pin the map and slice being built during
+// wasmParseScatterGatherResponse / wasmParseShardQueryResponse. In TinyGo 0.40, the
+// conservative GC does not scan WASM locals. A local map[string]any{} created in one of
+// these functions can be freed by the NEXT allocation if it is only referenced by a WASM
+// local. Writing to a freed map corrupts the heap, causing crashes inside the GC scan on
+// subsequent iterations. Assigning to globals FIRST makes the objects GC-visible.
+// Safe because TinyGo WASM is single-threaded: parse calls are never nested.
+var gParseOut map[string]any
+var gParseShards []map[string]any
+var gParseShardOut map[string]any
+
+// gParseCommonData and gParseShardData pin the []byte slice passed to
+// wasmParseCommonMessage / wasmParseShardQueryResponse. These are subslices of
+// gScatterGatherData, so they share the same backing array. However, for large
+// proto responses the allocation spans multiple GC blocks: the global
+// gScatterGatherData only keeps the FIRST block alive. The interior blocks (where the
+// subslice points) can be collected unless we also store the subslice's base pointer
+// in a global. TinyGo 0.40 conservative GC marks any block that contains a pointer
+// found during scanning; storing the subslice in a global ensures the exact block
+// containing the subslice is scanned and marked live.
+var gParseCommonData []byte
+var gParseShardData []byte
+
+// gRawResponsePin and gRawResponseBytes are shared GC-pinning temporaries for all other
+// host-response string→[]byte conversions. Same reasoning as ScatterGather above.
+// Safe because TinyGo WASM is single-threaded: only one host response is decoded at a time.
+var gRawResponsePin string
+var gRawResponseBytes []byte
+
+// wasmPinDecodeRaw pins raw in GC-visible globals, converts to []byte, calls parse, then
+// releases the pins. Use for any host response decode that calls []byte(raw) before parsing.
+func wasmPinDecodeRaw(raw string, parse func([]byte) (map[string]any, error)) (map[string]any, error) {
+	gRawResponsePin = raw
+	gRawResponseBytes = []byte(raw)
+	gRawResponsePin = ""
+	result, err := parse(gRawResponseBytes)
+	gRawResponseBytes = nil
+	return result, err
 }
 
 func hostDecodeScatterGatherResponse(raw string) (map[string]any, error) {
-	return wasmParseScatterGatherResponse([]byte(raw))
+	gScatterGatherRaw = raw          // pin raw's backing array before []byte(raw) may trigger GC
+	gScatterGatherData = []byte(raw) // allocate a copy; GC safe because raw is pinned above
+	gScatterGatherRaw = ""           // raw backing array now duplicated in gScatterGatherData; release
+	result, err := wasmParseScatterGatherResponse(gScatterGatherData)
+	gScatterGatherData = nil // release pin after parsing is complete
+	return result, err
 }
 
-func hostWireBroadcastShardGroupRequest(request any) (string, error) {
-	m, ok := mapAsStringAny(request)
-	if !ok {
-		return "", fmt.Errorf("broadcast_shard_group: expected map[string]any")
+func hostWireBroadcastShardGroupRequest(req BroadcastShardGroupRequest) (string, error) {
+	if len(req.Message) == 0 {
+		return "", fmt.Errorf("broadcast_shard_group: Message must not be empty")
 	}
-	mt, payload, ok := buildBroadcastPayload(m)
-	if !ok {
-		return "", fmt.Errorf("broadcast_shard_group: missing message")
-	}
+	mt, payload := encodeBroadcastPayload(req.Message)
 	msg := wasmEncodeCommonMessage(mt, payload)
-	var req []byte
-	req = wasmAppendString(req, 1, strVal(m["group_id"]))
-	req = appendLengthDelimited(req, 2, msg)
-	if d := wasmEncodeDurationFromMs(u64Val(m["timeout_ms"])); len(d) > 0 {
-		req = appendLengthDelimited(req, 3, d)
+	var out []byte
+	out = wasmAppendString(out, 2, req.GroupID)
+	out = appendLengthDelimited(out, 3, msg)
+	if req.TimeoutMs > 0 {
+		if d := wasmEncodeDurationFromMs(uint64(req.TimeoutMs)); len(d) > 0 {
+			out = appendLengthDelimited(out, 4, d)
+		}
 	}
-	req = wasmAppendUInt32(req, 4, u32Val(m["min_acks"]))
-	return string(req), nil
+	if req.MinAcks > 0 {
+		out = wasmAppendUInt32(out, 5, uint32(req.MinAcks))
+	}
+	return string(out), nil
 }
 
 func hostDecodeBroadcastShardGroupResponse(raw string) (map[string]any, error) {
-	return wasmParseBroadcastOrBarrierResponse([]byte(raw))
+	return wasmPinDecodeRaw(raw, wasmParseBroadcastOrBarrierResponse)
 }
 
-func hostWireReduceShardGroupRequest(request any) (string, error) {
-	return wasmWireReduceLike(request, false)
+func hostWireReduceShardGroupRequest(req ReduceShardGroupRequest) (string, error) {
+	return wasmEncodeReduceLike(req)
 }
 
-func hostWireAllReduceShardGroupRequest(request any) (string, error) {
-	return wasmWireReduceLike(request, true)
+func hostWireAllReduceShardGroupRequest(req AllReduceShardGroupRequest) (string, error) {
+	return wasmEncodeReduceLike(req)
 }
 
-func wasmWireReduceLike(request any, allReduce bool) (string, error) {
-	m, ok := mapAsStringAny(request)
-	if !ok {
-		return "", fmt.Errorf("reduce_shard_group: expected map[string]any")
-	}
-	mt, payload, _ := buildMapFunctionPayload(m)
+func wasmEncodeReduceLike(req ReduceShardGroupRequest) (string, error) {
+	mt, payload := encodeMapFunctionPayload(req.MapFunction)
 	if mt == "" && len(payload) == 0 {
-		return "", fmt.Errorf("reduce_shard_group: missing map_function/message_type")
+		return "", fmt.Errorf("reduce_shard_group: MapFunction must contain op or message_type")
 	}
 	mf := wasmEncodeCommonMessage(mt, payload)
-	var req []byte
-	req = wasmAppendString(req, 1, strVal(m["group_id"]))
-	req = appendLengthDelimited(req, 2, mf)
-	if d := wasmEncodeDurationFromMs(u64Val(m["timeout_ms"])); len(d) > 0 {
-		req = appendLengthDelimited(req, 3, d)
+	var out []byte
+	out = wasmAppendString(out, 2, req.GroupID)
+	out = appendLengthDelimited(out, 3, mf)
+	if req.TimeoutMs > 0 {
+		if d := wasmEncodeDurationFromMs(uint64(req.TimeoutMs)); len(d) > 0 {
+			out = appendLengthDelimited(out, 4, d)
+		}
 	}
-	req = wasmAppendUInt32(req, 4, u32Val(m["min_responses"]))
-	req = wasmAppendUInt32(req, 5, reductionEnum(strVal(m["reduction"])))
-	if target := strVal(m["target"]); target != "" {
+	if req.MinResponses > 0 {
+		out = wasmAppendUInt32(out, 5, uint32(req.MinResponses))
+	}
+	out = wasmAppendUInt32(out, 6, reductionEnum(req.Reduction))
+	if req.Target != "" {
 		var tf []byte
-		tf = wasmAppendString(tf, 1, target)
-		req = appendLengthDelimited(req, 6, tf)
+		tf = wasmAppendString(tf, 1, req.Target)
+		out = appendLengthDelimited(out, 7, tf)
 	}
-	_ = allReduce
-	return string(req), nil
+	return string(out), nil
 }
 
 func hostDecodeReduceShardGroupResponse(raw string) (map[string]any, error) {
-	return wasmParseReduceOrAllReduceResponse([]byte(raw))
+	return wasmPinDecodeRaw(raw, wasmParseReduceOrAllReduceResponse)
 }
 
 func hostDecodeAllReduceShardGroupResponse(raw string) (map[string]any, error) {
-	return wasmParseReduceOrAllReduceResponse([]byte(raw))
+	return wasmPinDecodeRaw(raw, wasmParseReduceOrAllReduceResponse)
 }
 
-func hostWireBarrierShardGroupRequest(request any) (string, error) {
-	m, ok := mapAsStringAny(request)
-	if !ok {
-		return "", fmt.Errorf("barrier_shard_group: expected map[string]any")
+func hostWireBarrierShardGroupRequest(req BarrierShardGroupRequest) (string, error) {
+	var out []byte
+	out = wasmAppendString(out, 2, req.GroupID)
+	out = wasmAppendString(out, 3, req.BarrierID)
+	out = wasmAppendUInt64(out, 4, req.Round)
+	if req.TimeoutMs > 0 {
+		if d := wasmEncodeDurationFromMs(uint64(req.TimeoutMs)); len(d) > 0 {
+			out = appendLengthDelimited(out, 5, d)
+		}
 	}
-	var req []byte
-	req = wasmAppendString(req, 1, strVal(m["group_id"]))
-	req = wasmAppendString(req, 2, strVal(m["barrier_id"]))
-	req = wasmAppendUInt64(req, 3, u64Val(m["round"]))
-	if d := wasmEncodeDurationFromMs(u64Val(m["timeout_ms"])); len(d) > 0 {
-		req = appendLengthDelimited(req, 4, d)
+	if req.MinAcks > 0 {
+		out = wasmAppendUInt32(out, 6, uint32(req.MinAcks))
 	}
-	req = wasmAppendUInt32(req, 5, u32Val(m["min_acks"]))
-	return string(req), nil
+	return string(out), nil
 }
 
 func hostDecodeBarrierShardGroupResponse(raw string) (map[string]any, error) {
-	return wasmParseBroadcastOrBarrierResponse([]byte(raw))
+	return wasmPinDecodeRaw(raw, wasmParseBroadcastOrBarrierResponse)
 }
 
-func hostWireBulkUpdateShardGroupRequest(request any) (string, error) {
-	m, ok := mapAsStringAny(request)
-	if !ok {
-		return "", fmt.Errorf("bulk_update_shard_group: expected map[string]any")
-	}
-	var req []byte
-	req = wasmAppendString(req, 1, strVal(m["request_id"]))
-	req = wasmAppendString(req, 2, strVal(m["group_id"]))
-
-	// updates: list of {key, payload} OR map[string]any
-	updates := m["updates"]
-	var items []map[string]any
-	switch u := updates.(type) {
-	case []any:
-		for _, item := range u {
-			if entry, ok2 := item.(map[string]any); ok2 {
-				items = append(items, entry)
-			}
+func hostWireBulkUpdateShardGroupRequest(req BulkUpdateShardGroupRequest) (string, error) {
+	var out []byte
+	out = wasmAppendString(out, 2, req.GroupID)
+	for partitionKey, payloadDict := range req.Updates {
+		msgType, _ := payloadDict["op"].(string)
+		if msgType == "" {
+			msgType, _ = payloadDict["message_type"].(string)
 		}
-	case map[string]any:
-		for k, v := range u {
-			entry := map[string]any{"key": k, "payload": v}
-			items = append(items, entry)
-		}
-	}
-	for _, entry := range items {
-		partitionKey := strVal(entry["key"])
-		payloadDict, _ := entry["payload"].(map[string]any)
-		if payloadDict == nil {
-			payloadDict = map[string]any{}
-		}
-		msgType := strVal(payloadDict["op"])
-		payloadBytes, _ := json.Marshal(payloadDict)
+		payloadBytes := []byte(SafeMarshal(payloadDict))
 		msgBytes := wasmEncodeCommonMessage(msgType, payloadBytes)
 		var mapEntry []byte
 		mapEntry = wasmAppendString(mapEntry, 1, partitionKey)
 		mapEntry = appendLengthDelimited(mapEntry, 2, msgBytes)
-		req = appendLengthDelimited(req, 3, mapEntry)
+		out = appendLengthDelimited(out, 3, mapEntry)
 	}
-	req = wasmAppendUInt32(req, 4, u32Val(m["consistency_level"]))
-	if d := wasmEncodeDurationFromMs(u64Val(m["timeout_ms"])); len(d) > 0 {
-		req = appendLengthDelimited(req, 5, d)
+	if req.TimeoutMs > 0 {
+		if d := wasmEncodeDurationFromMs(uint64(req.TimeoutMs)); len(d) > 0 {
+			out = appendLengthDelimited(out, 5, d)
+		}
 	}
-	waitForResponses, _ := m["wait_for_responses"].(bool)
-	if waitForResponses {
-		req = wasmAppendBool(req, 6, true)
+	if req.WaitForResponses {
+		out = wasmAppendBool(out, 6, true)
 	}
-	return string(req), nil
+	return string(out), nil
 }
 
 func hostDecodeBulkUpdateShardGroupResponse(raw string) (map[string]any, error) {
-	data := []byte(raw)
+	gRawResponsePin = raw
+	gRawResponseBytes = []byte(raw)
+	gRawResponsePin = ""
+	data := gRawResponseBytes
+	defer func() { gRawResponseBytes = nil }()
 	out := map[string]any{
 		"updates_sent":      uint32(0),
 		"updates_succeeded": uint32(0),
@@ -1584,8 +1707,21 @@ func wasmParseShardUpdateStats(data []byte) map[string]any {
 	return out
 }
 
-func hostWireMapShardGroupRequest(request any) (string, error) {
-	return "", fmt.Errorf("map_shard_group: not supported in TinyGo WASM (manual wire not implemented)")
+func hostWireMapShardGroupRequest(req MapShardGroupRequest) (string, error) {
+	mt, payload := encodeMapFunctionPayload(req.MapFunction)
+	mf := wasmEncodeCommonMessage(mt, payload)
+	var out []byte
+	out = wasmAppendString(out, 2, req.GroupID)
+	out = appendLengthDelimited(out, 3, mf)
+	if req.TimeoutMs > 0 {
+		if d := wasmEncodeDurationFromMs(uint64(req.TimeoutMs)); len(d) > 0 {
+			out = appendLengthDelimited(out, 4, d)
+		}
+	}
+	if req.MinResponses > 0 {
+		out = wasmAppendUInt32(out, 5, uint32(req.MinResponses))
+	}
+	return string(out), nil
 }
 
 func hostDecodeMapShardGroupResponse(raw string) (map[string]any, error) {
@@ -1612,10 +1748,20 @@ func hostWireApplicationMetrics(metrics any) (string, error) {
 	return string(wire), nil
 }
 
-func hostDecodeApplicationMetricsResponse(raw string) (map[string]any, error) {
-	return wasmParseApplicationMetrics([]byte(raw)), nil
+func hostDecodeApplicationMetricsResponse(raw string) (ApplicationMetrics, error) {
+	gRawResponsePin = raw
+	gRawResponseBytes = []byte(raw)
+	gRawResponsePin = ""
+	result := wasmParseApplicationMetricsTyped(gRawResponseBytes)
+	gRawResponseBytes = nil
+	return result, nil
 }
 
-func hostDecodeApplicationGetStatusResponse(raw string) (map[string]any, error) {
-	return wasmParseGetApplicationStatusResponse([]byte(raw))
+func hostDecodeApplicationGetStatusResponse(raw string) (ApplicationStatus, error) {
+	gRawResponsePin = raw
+	gRawResponseBytes = []byte(raw)
+	gRawResponsePin = ""
+	result, err := wasmParseApplicationStatusTyped(gRawResponseBytes)
+	gRawResponseBytes = nil
+	return result, err
 }

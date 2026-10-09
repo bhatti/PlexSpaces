@@ -25,6 +25,15 @@ from plexspaces import (
     state,
     workflow_actor,
 )
+from plexspaces import (
+    AllReduceShardGroupRequest,
+    BarrierShardGroupRequest,
+    BroadcastShardGroupRequest,
+    CreateShardGroupRequest,
+    NodePlacement,
+    ReduceShardGroupRequest,
+    ScatterGatherRequest,
+)
 
 
 def actor_application_id(actor_id: str) -> str:
@@ -367,6 +376,8 @@ class InferenceWorkerActor:
 
 def _extract_shard_responses(response: Any) -> List[Dict[str, Any]]:
     """Normalize shard_responses from a scatter-gather response."""
+    if hasattr(response, "shard_responses"):
+        return response.shard_responses or []
     if not isinstance(response, dict):
         return []
     return response.get("shard_responses", [])
@@ -423,18 +434,15 @@ class BenchmarkActor:
                 num_shards = int(num_shards)
 
             group_id = f"bench-shard-{num_shards}-{host.now_ms()}"
-            group = host.create_shard_group(
-                {
-                    "group_id": group_id,
-                    "actor_type": "InferenceWorkerActor",
-                    "shard_count": num_shards,
-                    "partition_strategy": "hash",
-                    "rebalance_policy": "manual",
-                    "placement": {"strategy": "from_registry"},
-                    "initial_state": {},
-                }
-            )
-            shard_actor_ids = group.get("shard_actor_ids", [])
+            group = host.create_shard_group(CreateShardGroupRequest(
+                group_id=group_id,
+                actor_type="InferenceWorkerActor",
+                shard_count=num_shards,
+                partition_strategy="hash",
+                rebalance_policy="manual",
+                placement=NodePlacement(strategy="from_registry"),
+            ))
+            shard_actor_ids = group.shard_actor_ids
             if not shard_actor_ids:
                 benchmark_results.append({"shards": num_shards, "error": "failed to create shard group"})
                 continue
@@ -448,22 +456,20 @@ class BenchmarkActor:
 
             try:
                 for warmup_index in range(warmup_requests):
-                    host.scatter_gather(
-                        {
-                            "group_id": group_id,
-                            "query": {
-                                "op": "infer",
-                                "request_id": f"warmup-{num_shards}-{warmup_index}",
-                                "input": "x" * max(1, payload_size_bytes),
-                                "model_type": model_type,
-                                "work_multiplier": work_multiplier,
-                                "batch_size": batch_size,
-                            },
-                            "aggregation": "concat",
-                            "min_responses": num_shards,
-                            "timeout_ms": 30000,
-                        }
-                    )
+                    host.scatter_gather(ScatterGatherRequest(
+                        group_id=group_id,
+                        query={
+                            "op": "infer",
+                            "request_id": f"warmup-{num_shards}-{warmup_index}",
+                            "input": "x" * max(1, payload_size_bytes),
+                            "model_type": model_type,
+                            "work_multiplier": work_multiplier,
+                            "batch_size": batch_size,
+                        },
+                        aggregation="concat",
+                        min_responses=num_shards,
+                        timeout_ms=30000,
+                    ))
             except Exception as exc:
                 benchmark_results.append(
                     {
@@ -488,22 +494,20 @@ class BenchmarkActor:
             for i in range(scatter_gather_rounds):
                 request_start = host.now_ms()
                 try:
-                    response = host.scatter_gather(
-                        {
-                            "group_id": group_id,
-                            "query": {
-                                "op": "infer",
-                                "request_id": f"bench-{num_shards}-{i}",
-                                "input": "x" * max(1, payload_size_bytes),
-                                "model_type": model_type,
-                                "work_multiplier": work_multiplier,
-                                "batch_size": batch_size,
-                            },
-                            "aggregation": "concat",
-                            "min_responses": num_shards,
-                            "timeout_ms": 30000,
-                        }
-                    )
+                    response = host.scatter_gather(ScatterGatherRequest(
+                        group_id=group_id,
+                        query={
+                            "op": "infer",
+                            "request_id": f"bench-{num_shards}-{i}",
+                            "input": "x" * max(1, payload_size_bytes),
+                            "model_type": model_type,
+                            "work_multiplier": work_multiplier,
+                            "batch_size": batch_size,
+                        },
+                        aggregation="concat",
+                        min_responses=num_shards,
+                        timeout_ms=30000,
+                    ))
                 except Exception as exc:
                     total_errors += 1
                     benchmark_results.append(
@@ -870,18 +874,15 @@ class BenchmarkActor:
 
         self.benchmark_running = True
         group_id = f"bench-collective-{host.now_ms()}"
-        group = host.create_shard_group(
-            {
-                "group_id": group_id,
-                "actor_type": "InferenceWorkerActor",
-                "shard_count": num_shards,
-                "partition_strategy": "hash",
-                "rebalance_policy": "manual",
-                "placement": {"strategy": "from_registry"},
-                "initial_state": {},
-            }
-        )
-        shard_actor_ids = group.get("shard_actor_ids", [])
+        group = host.create_shard_group(CreateShardGroupRequest(
+            group_id=group_id,
+            actor_type="InferenceWorkerActor",
+            shard_count=num_shards,
+            partition_strategy="hash",
+            rebalance_policy="manual",
+            placement=NodePlacement(strategy="from_registry"),
+        ))
+        shard_actor_ids = group.shard_actor_ids
         if not shard_actor_ids:
             self.benchmark_running = False
             return {"status": "error", "error": "failed to create shard group for collective benchmark"}
@@ -890,51 +891,43 @@ class BenchmarkActor:
 
         # 1. BroadcastShardGroup – distribute reset signal to all workers
         t0 = host.now_ms()
-        broadcast_result = host.broadcast_shard_group(
-            {
-                "group_id": group_id,
-                "message": {"op": "reset"},
-                "min_acks": num_shards,
-                "timeout_ms": 10000,
-            }
-        )
+        broadcast_result = host.broadcast_shard_group(BroadcastShardGroupRequest(
+            group_id=group_id,
+            message={"op": "reset"},
+            min_acks=num_shards,
+            timeout_ms=10000,
+        ))
         timings["broadcast_ms"] = host.now_ms() - t0
 
         # 2. BarrierShardGroup – wait for all workers to be ready
         t0 = host.now_ms()
-        barrier_result = host.barrier_shard_group(
-            {
-                "group_id": group_id,
-                "timeout_ms": 10000,
-            }
-        )
+        barrier_result = host.barrier_shard_group(BarrierShardGroupRequest(
+            group_id=group_id,
+            timeout_ms=10000,
+        ))
         timings["barrier_ms"] = host.now_ms() - t0
 
         # 3. ReduceShardGroup – aggregate total requests across all workers (scalar SUM)
         # target extracts a single numeric field from each shard's response before reduction
         t0 = host.now_ms()
-        reduce_result = host.reduce_shard_group(
-            {
-                "group_id": group_id,
-                "map_function": {"op": "get_numeric_stats"},
-                "reduction": "sum",
-                "target": "requests_processed",
-                "timeout_ms": 10000,
-            }
-        )
+        reduce_result = host.reduce_shard_group(ReduceShardGroupRequest(
+            group_id=group_id,
+            map_function={"op": "get_numeric_stats"},
+            reduction="sum",
+            target="requests_processed",
+            timeout_ms=10000,
+        ))
         timings["reduce_ms"] = host.now_ms() - t0
 
         # 4. AllReduceShardGroup – consensus total requests (broadcast reduced scalar back to all shards)
         t0 = host.now_ms()
-        allreduce_result = host.all_reduce_shard_group(
-            {
-                "group_id": group_id,
-                "map_function": {"op": "get_numeric_stats"},
-                "reduction": "sum",
-                "target": "requests_processed",
-                "timeout_ms": 10000,
-            }
-        )
+        allreduce_result = host.all_reduce_shard_group(AllReduceShardGroupRequest(
+            group_id=group_id,
+            map_function={"op": "get_numeric_stats"},
+            reduction="sum",
+            target="requests_processed",
+            timeout_ms=10000,
+        ))
         timings["allreduce_ms"] = host.now_ms() - t0
 
         self.benchmark_running = False
@@ -946,8 +939,8 @@ class BenchmarkActor:
             "timings": timings,
             "broadcast_acks": broadcast_result.get("acks", 0) if isinstance(broadcast_result, dict) else 0,
             "barrier_reached": barrier_result.get("reached", False) if isinstance(barrier_result, dict) else False,
-            "reduce_responses": reduce_result.get("responses", 0) if isinstance(reduce_result, dict) else 0,
-            "allreduce_responses": allreduce_result.get("responses", 0) if isinstance(allreduce_result, dict) else 0,
+            "reduce_responses": len(reduce_result.get("shard_responses", [])),
+            "allreduce_responses": len(allreduce_result.get("shard_responses", [])),
         }
         self.results.append(result)
 
@@ -1032,18 +1025,15 @@ class OrchestratorWorkflow:
             return {"status": "error", "error": f"unknown mode: {mode}"}
 
     def _run_shard_mode(self, group_id: str, num_shards: int, num_requests: int) -> dict:
-        group = host.create_shard_group(
-            {
-                "group_id": group_id,
-                "actor_type": "InferenceWorkerActor",
-                "shard_count": num_shards,
-                "partition_strategy": "hash",
-                "rebalance_policy": "manual",
-                "placement": {"strategy": "from_registry"},
-                "initial_state": {},
-            }
-        )
-        shard_actor_ids = group.get("shard_actor_ids", [])
+        group = host.create_shard_group(CreateShardGroupRequest(
+            group_id=group_id,
+            actor_type="InferenceWorkerActor",
+            shard_count=num_shards,
+            partition_strategy="hash",
+            rebalance_policy="manual",
+            placement=NodePlacement(strategy="from_registry"),
+        ))
+        shard_actor_ids = group.shard_actor_ids
         if not shard_actor_ids:
             return {"status": "error", "error": "failed to create shard group"}
 
@@ -1052,19 +1042,17 @@ class OrchestratorWorkflow:
         total_ok = 0
 
         for i in range(num_requests):
-            response = host.scatter_gather(
-                {
-                    "group_id": group_id,
-                    "query": {
-                        "op": "infer",
-                        "request_id": f"orch-{i}",
-                        "input": "orchestrated-input",
-                    },
-                    "aggregation": "concat",
-                    "min_responses": num_shards,
-                    "timeout_ms": 30000,
-                }
-            )
+            response = host.scatter_gather(ScatterGatherRequest(
+                group_id=group_id,
+                query={
+                    "op": "infer",
+                    "request_id": f"orch-{i}",
+                    "input": "orchestrated-input",
+                },
+                aggregation="concat",
+                min_responses=num_shards,
+                timeout_ms=30000,
+            ))
             for shard in _extract_shard_responses(response):
                 payload = _unwrap_payload(shard.get("payload", {}))
                 if payload.get("status") == "ok":
@@ -1137,18 +1125,15 @@ class OrchestratorWorkflow:
         }
 
     def _run_collective_mode(self, group_id: str, num_shards: int) -> dict:
-        group = host.create_shard_group(
-            {
-                "group_id": group_id,
-                "actor_type": "InferenceWorkerActor",
-                "shard_count": num_shards,
-                "partition_strategy": "hash",
-                "rebalance_policy": "manual",
-                "placement": {"strategy": "from_registry"},
-                "initial_state": {},
-            }
-        )
-        shard_actor_ids = group.get("shard_actor_ids", [])
+        group = host.create_shard_group(CreateShardGroupRequest(
+            group_id=group_id,
+            actor_type="InferenceWorkerActor",
+            shard_count=num_shards,
+            partition_strategy="hash",
+            rebalance_policy="manual",
+            placement=NodePlacement(strategy="from_registry"),
+        ))
+        shard_actor_ids = group.shard_actor_ids
         if not shard_actor_ids:
             return {"status": "error", "error": "failed to create shard group for collective mode"}
 
@@ -1156,36 +1141,32 @@ class OrchestratorWorkflow:
 
         # Step 1: Broadcast model config reset to all workers
         t0 = host.now_ms()
-        host.broadcast_shard_group(
-            {
-                "group_id": group_id,
-                "message": {"op": "reset"},
-                "min_acks": num_shards,
-                "timeout_ms": 10000,
-            }
-        )
+        host.broadcast_shard_group(BroadcastShardGroupRequest(
+            group_id=group_id,
+            message={"op": "reset"},
+            min_acks=num_shards,
+            timeout_ms=10000,
+        ))
         timings["broadcast_ms"] = host.now_ms() - t0
 
         # Step 2: Barrier — synchronize all workers before inference
         t0 = host.now_ms()
-        host.barrier_shard_group({"group_id": group_id, "timeout_ms": 10000})
+        host.barrier_shard_group(BarrierShardGroupRequest(group_id=group_id, timeout_ms=10000))
         timings["barrier_ms"] = host.now_ms() - t0
 
         # Step 3: Scatter-gather one round of inference
         t0 = host.now_ms()
-        response = host.scatter_gather(
-            {
-                "group_id": group_id,
-                "query": {
-                    "op": "infer",
-                    "request_id": "collective-infer-0",
-                    "input": "collective-input",
-                },
-                "aggregation": "concat",
-                "min_responses": num_shards,
-                "timeout_ms": 30000,
-            }
-        )
+        response = host.scatter_gather(ScatterGatherRequest(
+            group_id=group_id,
+            query={
+                "op": "infer",
+                "request_id": "collective-infer-0",
+                "input": "collective-input",
+            },
+            aggregation="concat",
+            min_responses=num_shards,
+            timeout_ms=30000,
+        ))
         timings["scatter_gather_ms"] = host.now_ms() - t0
         total_ok = sum(
             1
@@ -1195,15 +1176,13 @@ class OrchestratorWorkflow:
 
         # Step 4: Reduce — aggregate numeric metrics across all workers
         t0 = host.now_ms()
-        host.reduce_shard_group(
-            {
-                "group_id": group_id,
-                "map_function": {"op": "get_numeric_stats"},
-                "reduction": "sum",
-                "target": "requests_processed",
-                "timeout_ms": 10000,
-            }
-        )
+        host.reduce_shard_group(ReduceShardGroupRequest(
+            group_id=group_id,
+            map_function={"op": "get_numeric_stats"},
+            reduction="sum",
+            target="requests_processed",
+            timeout_ms=10000,
+        ))
         timings["reduce_ms"] = host.now_ms() - t0
 
         self.total_processed = total_ok

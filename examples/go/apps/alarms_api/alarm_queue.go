@@ -145,19 +145,14 @@ func (q *RequestQueue) handleEnqueue(payloadJSON string) string {
 // handleStatus returns the current queue depth and next alarm timestamp.
 // Equivalent to Cloudflare DO: this.ctx.storage.getAlarm()
 func (q *RequestQueue) handleStatus() string {
-	fireAt, err := host.Alarm().Get()
-	errMsg := ""
-	if err != nil {
-		errMsg = err.Error()
-	}
+	alarmAt, _ := host.Alarm().Get()
 	return marshal(map[string]any{
 		"status":            "ok",
 		"count":             q.Count,
-		"alarm_at":          fireAt,
-		"alarm_set":         fireAt > 0,
+		"alarm_at":          alarmAt,
+		"alarm_set":         alarmAt > 0,
 		"total_processed":   q.TotalProcessed,
 		"total_alarm_fires": q.TotalAlarmFires,
-		"error":             errMsg,
 	})
 }
 

@@ -53,7 +53,7 @@ WS_TOKEN="${PLEXSPACES_TEST_TOKEN:-}"
 # ─── 2. Check node is reachable ───────────────────────────────────────────────
 log "Checking node at ${HTTP_URL}…"
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "${OUTPUT_WASM}" "${SCRIPT_DIR}/app-config.toml" >/dev/null
 (cd "${SCRIPT_DIR}" && zip "$APP_ZIP" static/ static/* 2>/dev/null || true)

@@ -386,16 +386,16 @@ func TestIsHostError(t *testing.T) {
 func TestHostCreateShardGroup(t *testing.T) {
 	ResetStubs()
 	host := NewHost()
-	out, err := host.CreateShardGroup(map[string]any{
-		"group_id":    "group-a",
-		"actor_type":  "worker",
-		"shard_count": 1,
+	out, err := host.CreateShardGroup(CreateShardGroupRequest{
+		GroupID:    "group-a",
+		ActorType:  "worker",
+		ShardCount: 1,
 	})
 	if err != nil {
 		t.Fatalf("CreateShardGroup returned error: %v", err)
 	}
-	if out["group_id"] != "mock-group" {
-		t.Fatalf("expected mock-group, got %v", out["group_id"])
+	if out.GroupID != "mock-group" {
+		t.Fatalf("expected mock-group, got %v", out.GroupID)
 	}
 }
 
@@ -406,8 +406,8 @@ func TestHostApplicationGetStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplicationGetStatus returned error: %v", err)
 	}
-	if out["node_id"] != "node-a" {
-		t.Fatalf("expected node-a, got %v", out["node_id"])
+	if out.NodeID != "node-a" {
+		t.Fatalf("expected node-a, got %v", out.NodeID)
 	}
 }
 
@@ -423,9 +423,8 @@ func TestHostApplicationMetricsAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplicationMetricsAdd returned error: %v", err)
 	}
-	mc, ok := out["message_count"].(float64)
-	if !ok || mc != 7 {
-		t.Fatalf("expected message_count 7, got %v", out["message_count"])
+	if out.MessageCount != 7 {
+		t.Fatalf("expected message_count 7, got %v", out.MessageCount)
 	}
 }
 
@@ -436,9 +435,8 @@ func TestHostApplicationGetMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplicationGetMetrics returned error: %v", err)
 	}
-	mc, ok := out["message_count"].(float64)
-	if !ok || mc != 0 {
-		t.Fatalf("expected message_count 0, got %v", out["message_count"])
+	if out.MessageCount != 0 {
+		t.Fatalf("expected message_count 0, got %v", out.MessageCount)
 	}
 }
 
@@ -1160,10 +1158,10 @@ func TestNormalizeRoleActorID(t *testing.T) {
 func TestHostBroadcastShardGroup(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	out, err := h.BroadcastShardGroup(map[string]any{
-		"group_id": "workers",
-		"message":  map[string]any{"op": "reset"},
-		"min_acks": 1,
+	out, err := h.BroadcastShardGroup(BroadcastShardGroupRequest{
+		GroupID: "workers",
+		Message: map[string]any{"op": "reset"},
+		MinAcks: 1,
 	})
 	if err != nil {
 		t.Fatalf("BroadcastShardGroup returned error: %v", err)
@@ -1180,11 +1178,11 @@ func TestHostBroadcastShardGroup(t *testing.T) {
 func TestHostReduceShardGroup(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	out, err := h.ReduceShardGroup(map[string]any{
-		"group_id":      "workers",
-		"query":         map[string]any{"action": "get_count"},
-		"reduction":     1,
-		"min_responses": 1,
+	out, err := h.ReduceShardGroup(ReduceShardGroupRequest{
+		GroupID:      "workers",
+		MapFunction:  map[string]any{"action": "get_count"},
+		Reduction:    ReductionSum,
+		MinResponses: 1,
 	})
 	if err != nil {
 		t.Fatalf("ReduceShardGroup returned error: %v", err)
@@ -1200,11 +1198,11 @@ func TestHostReduceShardGroup(t *testing.T) {
 func TestHostAllReduceShardGroup(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	out, err := h.AllReduceShardGroup(map[string]any{
-		"group_id":      "workers",
-		"query":         map[string]any{"action": "sum"},
-		"reduction":     1,
-		"min_responses": 1,
+	out, err := h.AllReduceShardGroup(ReduceShardGroupRequest{
+		GroupID:      "workers",
+		MapFunction:  map[string]any{"action": "sum"},
+		Reduction:    ReductionSum,
+		MinResponses: 1,
 	})
 	if err != nil {
 		t.Fatalf("AllReduceShardGroup returned error: %v", err)
@@ -1217,11 +1215,11 @@ func TestHostAllReduceShardGroup(t *testing.T) {
 func TestHostBarrierShardGroup(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	out, err := h.BarrierShardGroup(map[string]any{
-		"group_id":   "workers",
-		"barrier_id": "round-1",
-		"round":      1,
-		"min_acks":   1,
+	out, err := h.BarrierShardGroup(BarrierShardGroupRequest{
+		GroupID:   "workers",
+		BarrierID: "round-1",
+		Round:     1,
+		MinAcks:   1,
 	})
 	if err != nil {
 		t.Fatalf("BarrierShardGroup returned error: %v", err)
@@ -1299,9 +1297,9 @@ func TestHostSpawnActorsWithInstancesCount(t *testing.T) {
 func TestHostBulkUpdateShardGroup(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	out, err := h.BulkUpdateShardGroup(map[string]any{
-		"group_id": "workers",
-		"updates":  map[string]any{"key1": map[string]any{"payload": "data"}},
+	out, err := h.BulkUpdateShardGroup(BulkUpdateShardGroupRequest{
+		GroupID: "workers",
+		Updates: map[string]map[string]any{"key1": {"payload": "data"}},
 	})
 	if err != nil {
 		t.Fatalf("BulkUpdateShardGroup returned error: %v", err)
@@ -1314,9 +1312,9 @@ func TestHostBulkUpdateShardGroup(t *testing.T) {
 func TestHostMapShardGroup(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	out, err := h.MapShardGroup(map[string]any{
-		"group_id": "workers",
-		"query":    map[string]any{"action": "status"},
+	out, err := h.MapShardGroup(MapShardGroupRequest{
+		GroupID:     "workers",
+		MapFunction: map[string]any{"action": "status"},
 	})
 	if err != nil {
 		t.Fatalf("MapShardGroup returned error: %v", err)
@@ -1329,18 +1327,18 @@ func TestHostMapShardGroup(t *testing.T) {
 func TestHostScatterGather(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	out, err := h.ScatterGather(map[string]any{
-		"group_id": "workers",
-		"query":    map[string]any{"action": "get_all"},
+	out, err := h.ScatterGather(ScatterGatherRequest{
+		GroupID: "workers",
+		Query:   map[string]any{"action": "get_all"},
 	})
 	if err != nil {
 		t.Fatalf("ScatterGather returned error: %v", err)
 	}
-	if _, exists := out["stats"]; !exists {
-		t.Error("expected stats in response")
+	if out.Stats == nil {
+		t.Error("expected non-nil stats in response")
 	}
-	if _, exists := out["shard_responses"]; !exists {
-		t.Error("expected shard_responses in response")
+	if out.ShardResponses == nil {
+		t.Error("expected non-nil shard_responses in response")
 	}
 }
 
@@ -1836,5 +1834,109 @@ func TestChannelSendWithOptions(t *testing.T) {
 	depth, _ := h.Ch().Depth("", "delayed:q")
 	if depth != 1 {
 		t.Errorf("expected depth=1 after SendWithOptions, got %d", depth)
+	}
+}
+
+// ========================================================================
+// SafeMarshal Tests
+// ========================================================================
+
+func TestSafeMarshalNestedInt64Slice(t *testing.T) {
+	dW1 := [][]int64{{1000000, -2000000, 3000000}, {-4000000, 5000000}}
+	result := SafeMarshal(map[string]any{
+		"d_w1": dW1,
+		"d_w2": []int64{100, 200, 300},
+	})
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("SafeMarshal with [][]int64 produced invalid JSON: %v (got %q)", err, result)
+	}
+	rows, ok := parsed["d_w1"].([]any)
+	if !ok || len(rows) != 2 {
+		t.Fatalf("expected d_w1 with 2 rows, got %v", parsed["d_w1"])
+	}
+	row0, ok := rows[0].([]any)
+	if !ok || len(row0) != 3 {
+		t.Fatalf("expected first row with 3 elements, got %v", rows[0])
+	}
+	if row0[0].(float64) != 1000000 {
+		t.Errorf("expected 1000000, got %v", row0[0])
+	}
+}
+
+func TestSafeMarshalNestedMapInResponse(t *testing.T) {
+	response := map[string]any{
+		"status":    "ok",
+		"actor_id":  "actor://worker::ns@node1",
+		"gradients": map[string]any{"d_w1": [][]int64{{1, 2}, {3, 4}}, "d_w2": []int64{5, 6}},
+		"latency_ms": 42,
+	}
+	result := SafeMarshal(response)
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("SafeMarshal nested map response produced invalid JSON: %v", err)
+	}
+	gradients, ok := parsed["gradients"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected gradients as map[string]any, got %T", parsed["gradients"])
+	}
+	dW1, ok := gradients["d_w1"].([]any)
+	if !ok || len(dW1) != 2 {
+		t.Fatalf("expected d_w1 as 2-element slice, got %v", gradients["d_w1"])
+	}
+}
+
+func TestSafeMarshalEmptyNestedInt64Slice(t *testing.T) {
+	result := SafeMarshal(map[string]any{"matrix": [][]int64{}})
+	if result != `{"matrix":[]}` {
+		t.Errorf("expected empty matrix, got %q", result)
+	}
+}
+
+// ========================================================================
+// marshalPayload map path Tests
+// ========================================================================
+
+func TestMarshalPayloadMapUsesSafeMarshal(t *testing.T) {
+	// marshalPayload on map[string]any must use SafeMarshal (not json.Marshal)
+	// to avoid TinyGo WASM fmtsort crash. The result must be valid JSON.
+	payload := map[string]any{
+		"status":    "ok",
+		"gradients": map[string]any{"d_w1": [][]int64{{1, 2}}, "d_w2": []int64{3, 4}},
+	}
+	result := marshalPayload(payload)
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("marshalPayload(map) must produce valid JSON, got %q: %v", result, err)
+	}
+	if parsed["status"] != "ok" {
+		t.Errorf("expected status=ok, got %v", parsed["status"])
+	}
+}
+
+func TestMarshalPayloadNestedMapValid(t *testing.T) {
+	payload := map[string]any{
+		"nodes": map[string]any{
+			"node1": map[string]any{"actors": 3, "messages": 100},
+		},
+		"results": []map[string]any{
+			{"iteration": 1, "workers": 4},
+		},
+	}
+	result := marshalPayload(payload)
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("marshalPayload(nested map) produced invalid JSON: %v (got %q)", err, result)
+	}
+	nodes, ok := parsed["nodes"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nodes as map, got %T", parsed["nodes"])
+	}
+	node1, ok := nodes["node1"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected node1 as map, got %T", nodes["node1"])
+	}
+	if node1["actors"].(float64) != 3 {
+		t.Errorf("expected actors=3, got %v", node1["actors"])
 	}
 }

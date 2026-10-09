@@ -790,11 +790,13 @@ impl SwimProtocol {
                 }
             } else {
                 // New member
-                info!(
-                    node_id = %member.node_id,
-                    address = %member.address,
-                    "New member joined"
-                );
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    trace!(
+                        node_id = %member.node_id,
+                        address = %member.address,
+                        "New member joined"
+                    );
+                }
                 self.stats.joins.fetch_add(1, Ordering::Relaxed);
                 metrics::counter!(METRIC_JOINS).increment(1);
 

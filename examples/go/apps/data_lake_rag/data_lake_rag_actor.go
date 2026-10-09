@@ -50,12 +50,12 @@ type WorkerActor struct {
 
 func NewLeaderActor() plexspaces.Actor {
 	a := &LeaderActor{
-		WorkerCount:    8,
-		QueryCount:     12,
-		ChunksPerQuery: 48,
+		WorkerCount:    16,
+		QueryCount:     100,
+		ChunksPerQuery: 500,
 		ChunkSizeBytes: 2048,
 		EmbeddingDim:   384,
-		TopK:           5,
+		TopK:           10,
 	}
 	a.SetSelf(a)
 	return a
@@ -88,10 +88,14 @@ func (l *LeaderActor) Init(configJSON string) string {
 
 func (l *LeaderActor) Handle(fromActor, msgType, payloadJSON string) string {
 	host.Info(fmt.Sprintf("data_lake_rag leader Handle msgType=%s fromActor=%s payload_len=%d", msgType, fromActor, len(payloadJSON)))
-	if msgType != "run" {
+	switch msgType {
+	case "run":
+		return l.run(payloadJSON)
+	case "run_scaling_benchmark":
+		return l.runScalingBenchmark(payloadJSON)
+	default:
 		return marshal(map[string]any{"error": "unknown_op", "op": msgType})
 	}
-	return l.run(payloadJSON)
 }
 
 func (w *WorkerActor) Init(configJSON string) string {
@@ -133,19 +137,18 @@ func (l *LeaderActor) run(payloadJSON string) string {
 
 	groupID := fmt.Sprintf("data-lake-rag-go-%d", host.NowMs())
 	host.Info(fmt.Sprintf("data_lake_rag leader CreateShardGroup group_id=%s shard_count=%d", groupID, request.WorkerCount))
-	group, err := host.CreateShardGroup(map[string]any{
-		"group_id":           groupID,
-		"actor_type":         "worker",
-		"shard_count":        request.WorkerCount,
-		"partition_strategy": "hash",
-		"rebalance_policy":   "manual",
-		"placement":          map[string]any{"strategy": "from_registry"},
-		"initial_state":      map[string]any{},
+	group, err := host.CreateShardGroup(plexspaces.CreateShardGroupRequest{
+		GroupID:           groupID,
+		ActorType:         "worker",
+		ShardCount:        request.WorkerCount,
+		PartitionStrategy: "hash",
+		RebalancePolicy:   "manual",
+		Placement:         plexspaces.NodePlacement{Strategy: "from_registry"},
 	})
 	if err != nil {
 		return marshal(map[string]any{"error": err.Error()})
 	}
-	shardActorIDs := stringSlice(group["shard_actor_ids"])
+	shardActorIDs := group.ShardActorIDs
 	if len(shardActorIDs) == 0 {
 		return marshal(map[string]any{"error": "failed to create worker shard group"})
 	}
@@ -193,9 +196,9 @@ func (l *LeaderActor) run(payloadJSON string) string {
 
 	for queryIndex := 0; queryIndex < request.QueryCount; queryIndex++ {
 		coordStart := host.NowMs()
-		response, err := host.ScatterGather(map[string]any{
-			"group_id": groupID,
-			"query": map[string]any{
+		response, err := host.ScatterGather(plexspaces.ScatterGatherRequest{
+			GroupID: groupID,
+			Query: map[string]any{
 				"op":               "search_chunks",
 				"query_index":      queryIndex,
 				"chunks_per_query": request.ChunksPerQuery,
@@ -203,17 +206,16 @@ func (l *LeaderActor) run(payloadJSON string) string {
 				"embedding_dim":    request.EmbeddingDim,
 				"top_k":            request.TopK,
 			},
-			"aggregation":   "concat",
-			"min_responses": request.WorkerCount,
-			"timeout_ms":    30000,
+			Aggregation:  "concat",
+			MinResponses: request.WorkerCount,
+			TimeoutMs:    30000,
 		})
 		if err != nil {
 			return marshal(map[string]any{"error": err.Error()})
 		}
 		coordMs := host.NowMs() - coordStart
 
-		shards := anySlice(response["shard_responses"])
-		candidates := make([]retrievalCandidate, 0, len(shards)*request.TopK)
+		candidates := make([]retrievalCandidate, 0, len(response.ShardResponses)*request.TopK)
 		iterationErrors := 0
 		iterationResponses := 0
 		iterationLatencyMs := uint64(0)
@@ -222,8 +224,7 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		iterationEmbedOps := 0
 		iterationRetrievalOps := 0
 		iterationBytes := 0
-		for _, shard := range shards {
-			shardMap, _ := shard.(map[string]any)
+		for _, shardMap := range response.ShardResponses {
 			if shardTransportFailed(shardMap) {
 				iterationErrors++
 				totalErrors++
@@ -488,29 +489,21 @@ func (w *WorkerActor) searchChunks(payloadJSON string) string {
 	var payload map[string]any
 	_ = json.Unmarshal([]byte(payloadJSON), &payload)
 	queryIndex := anyToInt(payload["query_index"], 0)
-	chunksPerQuery := anyToInt(payload["chunks_per_query"], 48)
+	chunksPerQuery := anyToInt(payload["chunks_per_query"], 500)
 	chunkSizeBytes := anyToInt(payload["chunk_size_bytes"], 2048)
 	embeddingDim := anyToInt(payload["embedding_dim"], 384)
-	topK := anyToInt(payload["top_k"], 5)
+	topK := anyToInt(payload["top_k"], 10)
 	if topK <= 0 {
-		topK = 5
+		topK = 10
 	}
 
 	startMs := host.NowMs()
 	seed := workerSeed(w.ActorID())
-	candidates := make([]retrievalCandidate, 0, topK)
+	candidates := simulateEmbeddingSearch(chunksPerQuery, embeddingDim, topK, seed, queryIndex)
 	chunkOps := chunksPerQuery
 	embedOps := chunksPerQuery
 	retrievalOps := topK
 	bytesIngested := chunksPerQuery * chunkSizeBytes
-	for i := 0; i < topK; i++ {
-		score := math.Mod(float64(seed+queryIndex*31+i*17), 1000.0) / 1000.0
-		score += float64(embeddingDim%97) / 10_000.0
-		candidates = append(candidates, retrievalCandidate{
-			ChunkID: fmt.Sprintf("%s-q%d-c%d", actorRoleID(w.ActorID()), queryIndex, i),
-			Score:   score,
-		})
-	}
 	latencyMs := int(host.NowMs() - startMs)
 
 	if _, err := host.ApplicationMetricsAdd(w.ApplicationID(), map[string]any{
@@ -560,6 +553,208 @@ func (w *WorkerActor) searchChunks(payloadJSON string) string {
 		"bytes_ingested":       bytesIngested,
 		"top_chunks":           outCandidates,
 	})
+}
+
+// simulateEmbeddingSearch generates a query embedding and scores each chunk via dot product,
+// simulating real ANN retrieval compute for meaningful benchmark numbers.
+func simulateEmbeddingSearch(chunksPerQuery, embeddingDim, topK, seed, queryIndex int) []retrievalCandidate {
+	queryVec := make([]float64, embeddingDim)
+	qNorm := 0.0
+	for j := 0; j < embeddingDim; j++ {
+		v := math.Sin(float64(queryIndex*embeddingDim+j)*0.0017 + float64(seed)*0.0013)
+		queryVec[j] = v
+		qNorm += v * v
+	}
+	if qNorm > 0 {
+		qNorm = math.Sqrt(qNorm)
+		for j := range queryVec {
+			queryVec[j] /= qNorm
+		}
+	}
+
+	type scored struct {
+		idx   int
+		score float64
+	}
+	scores := make([]scored, chunksPerQuery)
+	for i := 0; i < chunksPerQuery; i++ {
+		dot := 0.0
+		norm := 0.0
+		for j := 0; j < embeddingDim; j++ {
+			cv := math.Cos(float64(i*embeddingDim+j)*0.0023 + float64(seed)*0.0019)
+			dot += queryVec[j] * cv
+			norm += cv * cv
+		}
+		if norm > 0 {
+			dot /= math.Sqrt(norm)
+		}
+		scores[i] = scored{i, dot}
+	}
+	sort.Slice(scores, func(a, b int) bool { return scores[a].score > scores[b].score })
+
+	candidates := make([]retrievalCandidate, 0, topK)
+	for i := 0; i < topK && i < len(scores); i++ {
+		candidates = append(candidates, retrievalCandidate{
+			ChunkID: fmt.Sprintf("c%d", scores[i].idx),
+			Score:   scores[i].score,
+		})
+	}
+	return candidates
+}
+
+type scalingBenchmarkRequest struct {
+	ShardCounts     []int `json:"shard_counts"`
+	QueriesPerCount int   `json:"queries_per_count"`
+	ChunksPerQuery  int   `json:"chunks_per_query"`
+	ChunkSizeBytes  int   `json:"chunk_size_bytes"`
+	EmbeddingDim    int   `json:"embedding_dim"`
+	TopK            int   `json:"top_k"`
+}
+
+func (l *LeaderActor) runScalingBenchmark(payloadJSON string) string {
+	var req scalingBenchmarkRequest
+	_ = json.Unmarshal([]byte(payloadJSON), &req)
+
+	if len(req.ShardCounts) == 0 {
+		req.ShardCounts = []int{2, 4, 8, 16}
+	}
+	if req.QueriesPerCount <= 0 {
+		req.QueriesPerCount = 20
+	}
+	if req.ChunksPerQuery <= 0 {
+		req.ChunksPerQuery = l.ChunksPerQuery
+	}
+	if req.ChunkSizeBytes <= 0 {
+		req.ChunkSizeBytes = l.ChunkSizeBytes
+	}
+	if req.EmbeddingDim <= 0 {
+		req.EmbeddingDim = l.EmbeddingDim
+	}
+	if req.TopK <= 0 {
+		req.TopK = l.TopK
+	}
+
+	results := make([]map[string]any, 0, len(req.ShardCounts))
+	var baselineQPS, baselineWorkers float64
+
+	for _, shardCount := range req.ShardCounts {
+		groupID := fmt.Sprintf("rag-scale-%d-%d", shardCount, host.NowMs())
+		group, err := host.CreateShardGroup(plexspaces.CreateShardGroupRequest{
+			GroupID:           groupID,
+			ActorType:         "worker",
+			ShardCount:        shardCount,
+			PartitionStrategy: "hash",
+			RebalancePolicy:   "manual",
+			Placement:         plexspaces.NodePlacement{Strategy: "from_registry"},
+		})
+		if err != nil {
+			return marshal(map[string]any{"error": fmt.Sprintf("CreateShardGroup shard_count=%d: %v", shardCount, err)})
+		}
+		if len(group.ShardActorIDs) == 0 {
+			return marshal(map[string]any{"error": fmt.Sprintf("no shard actors created for shard_count=%d", shardCount)})
+		}
+
+		var totalCoordMs, totalWorkerComputeMs, totalLeaderComputeMs uint64
+		totalErrors := 0
+		wallStart := host.NowMs()
+
+		for qi := 0; qi < req.QueriesPerCount; qi++ {
+			coordStart := host.NowMs()
+			response, sgErr := host.ScatterGather(plexspaces.ScatterGatherRequest{
+				GroupID: groupID,
+				Query: map[string]any{
+					"op":               "search_chunks",
+					"query_index":      qi,
+					"chunks_per_query": req.ChunksPerQuery,
+					"chunk_size_bytes": req.ChunkSizeBytes,
+					"embedding_dim":    req.EmbeddingDim,
+					"top_k":            req.TopK,
+				},
+				Aggregation:  "concat",
+				MinResponses: shardCount,
+				TimeoutMs:    30000,
+			})
+			totalCoordMs += host.NowMs() - coordStart
+			if sgErr != nil {
+				totalErrors++
+				continue
+			}
+
+			candidates := make([]retrievalCandidate, 0)
+			for _, shardMap := range response.ShardResponses {
+				if shardTransportFailed(shardMap) {
+					totalErrors++
+					continue
+				}
+				payloadMap := normalizeWorkerPayload(mapValue(shardMap, "payload"))
+				// Accumulate worker compute time reported by each shard
+				totalWorkerComputeMs += uint64(anyToInt(payloadMap["latency_ms"], 0))
+				for _, raw := range anySlice(payloadMap["top_chunks"]) {
+					m, _ := raw.(map[string]any)
+					candidates = append(candidates, retrievalCandidate{
+						ChunkID: stringValue(m["chunk_id"]),
+						Score:   anyToFloat(m["score"], 0.0),
+					})
+				}
+			}
+
+			computeStart := host.NowMs()
+			sort.SliceStable(candidates, func(i, j int) bool {
+				return candidates[i].Score > candidates[j].Score
+			})
+			if len(candidates) > req.TopK {
+				candidates = candidates[:req.TopK]
+			}
+			totalLeaderComputeMs += host.NowMs() - computeStart
+		}
+		totalComputeMs := totalWorkerComputeMs + totalLeaderComputeMs
+
+		wallMs := host.NowMs() - wallStart
+		if wallMs == 0 {
+			wallMs = 1
+		}
+		computePct := 0.0
+		if total := totalComputeMs + totalCoordMs; total > 0 {
+			computePct = float64(totalComputeMs) * 100.0 / float64(total)
+		}
+		granularity := ratio(int(totalComputeMs), int(totalCoordMs))
+		qps := float64(req.QueriesPerCount) * 1000.0 / float64(wallMs)
+
+		if baselineQPS == 0 {
+			baselineQPS = qps
+			baselineWorkers = float64(shardCount)
+		}
+		idealSpeedup := float64(shardCount) / baselineWorkers
+		speedup := 0.0
+		if baselineQPS > 0 {
+			speedup = qps / baselineQPS
+		}
+		effPct := 0.0
+		if idealSpeedup > 0 {
+			effPct = speedup * 100.0 / idealSpeedup
+		}
+		parallelFrac := 0.0
+		if speedup > 1 && idealSpeedup > 1 {
+			parallelFrac = (1.0 - 1.0/speedup) / (1.0 - 1.0/idealSpeedup)
+		}
+
+		results = append(results, map[string]any{
+			"workers":              shardCount,
+			"queries":              req.QueriesPerCount,
+			"queries_per_sec":      qps,
+			"wall_time_ms":         int(wallMs),
+			"compute_time_ms":      int(totalComputeMs),
+			"coordination_time_ms": int(totalCoordMs),
+			"compute_pct":          computePct,
+			"granularity_ratio":    granularity,
+			"speedup":              speedup,
+			"efficiency_pct":       effPct,
+			"parallel_fraction":    parallelFrac,
+			"error_count":          totalErrors,
+		})
+	}
+
+	return marshal(map[string]any{"status": "ok", "results": results})
 }
 
 func actorNodeID(actorID string) string {

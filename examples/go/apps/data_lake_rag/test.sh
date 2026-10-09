@@ -58,12 +58,14 @@ fi
 APP_ID="data-lake-rag-go"
 APP_NAME="data-lake-rag-go"
 LEADER_ACTOR="leader"
-WORKER_COUNT=8
-QUERY_COUNT=12
-CHUNKS_PER_QUERY=48
+WORKER_COUNT=16
+QUERY_COUNT=100
+CHUNKS_PER_QUERY=500
 CHUNK_SIZE_BYTES=2048
 EMBEDDING_DIM=384
-TOP_K=5
+TOP_K=10
+SCALING_WORKER_COUNTS="${SCALING_WORKER_COUNTS:-2,4,8,16}"
+SCALING_QUERIES_PER_COUNT="${SCALING_QUERIES_PER_COUNT:-20}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -74,7 +76,7 @@ read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 
 grpc_seed_nodes() {
@@ -134,11 +136,11 @@ for node in "${NODE_LIST[@]}"; do
   fi
 done
 
-TEMP_CONFIG="$(mktemp -t data-lake-rag-app-config)"
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
-rm -f "$APP_ZIP"
-    zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+    APP_ZIP="$TEMP_DIR/app.zip"
 render_config "$TEMP_CONFIG"
+    zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Step 1: Undeploy existing app from all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
@@ -181,9 +183,6 @@ done
 echo "  Deploying to ${ENTRY_HOST}:${ENTRY_PORT} (entry node)..."
 _deployed=0
 for _attempt in 1 2 3; do
-  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
-rm -f "$APP_ZIP"
-  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
   deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
     ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -F "application_id=$APP_ID" \
@@ -207,8 +206,8 @@ echo -e "  ${GREEN}Deployed to ${ENTRY_HOST}:${ENTRY_PORT}${NC}"
 # SWIM + async seed ping need time so each node's registry lists peers (not only self).
 # Override with DATA_LAKE_RAG_POST_DEPLOY_SECS if your cluster is slower.
 sleep "${DATA_LAKE_RAG_POST_DEPLOY_SECS:-5}"
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 
 # Extra settle immediately before listing nodes so peer IDs replace _unknown_ in HTTP registry output.
 # This is in addition to POST_DEPLOY_SECS. Override with DATA_LAKE_RAG_PRE_LIST_NODES_SECS (0 to skip).
@@ -429,5 +428,80 @@ PY
   echo -e "${RED}Metrics validation failed${NC}"
   exit 1
 }
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+echo "Step 4: Strong scaling benchmark (fixed total work, vary worker count)"
+SCALING_PAYLOAD=$(python3 - <<PY
+import json
+counts = [int(x.strip()) for x in "${SCALING_WORKER_COUNTS}".split(",") if x.strip()]
+print(json.dumps({
+    "op": "run_scaling_benchmark",
+    "shard_counts": counts,
+    "queries_per_count": int("${SCALING_QUERIES_PER_COUNT}"),
+    "chunks_per_query": int("${CHUNKS_PER_QUERY}"),
+    "chunk_size_bytes": int("${CHUNK_SIZE_BYTES}"),
+    "embedding_dim": int("${EMBEDDING_DIM}"),
+    "top_k": int("${TOP_K}"),
+}))
+PY
+)
+SCALING_RESPONSE=$(curl -s --max-time 300 -X POST \
+  "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=300" \
+  -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+  -d "$SCALING_PAYLOAD" 2>/dev/null || echo '{"error":"timeout"}')
+
+if ! echo "$SCALING_RESPONSE" | grep -q '"status":"ok"'; then
+  echo -e "${YELLOW}Scaling benchmark skipped or failed: $SCALING_RESPONSE${NC}"
+else
+SCALING_RESPONSE_JSON="$SCALING_RESPONSE" SCALING_WORKER_COUNTS="$SCALING_WORKER_COUNTS" SCALING_QUERIES_PER_COUNT="$SCALING_QUERIES_PER_COUNT" python3 - <<'PY'
+import json, os
+
+raw = json.loads(os.environ["SCALING_RESPONSE_JSON"])
+payload = raw.get("payload", raw)
+if isinstance(payload, str):
+    payload = json.loads(payload)
+rows = payload.get("results", [])
+if rows:
+    print(f"  Config: worker_counts={os.environ['SCALING_WORKER_COUNTS']}  queries_per_count={os.environ['SCALING_QUERIES_PER_COUNT']}")
+    print()
+    print(f"  {'Workers':>7}  {'Queries':>7}  {'Q/s':>7}  {'Wall ms':>7}  {'Compute ms':>10}  {'Coord ms':>8}  {'Comp%':>5}  {'Gran':>6}  {'Speedup':>7}  {'Eff%':>5}  {'Errs':>4}")
+    print("  " + "-" * 100)
+    for row in rows:
+        print(
+            f"  {row.get('workers', 0):>7}  "
+            f"{row.get('queries', 0):>7}  "
+            f"{row.get('queries_per_sec', 0):>7.2f}  "
+            f"{row.get('wall_time_ms', 0):>7}  "
+            f"{row.get('compute_time_ms', 0):>10}  "
+            f"{row.get('coordination_time_ms', 0):>8}  "
+            f"{row.get('compute_pct', 0):>5.1f}  "
+            f"{row.get('granularity_ratio', 0):>6.2f}  "
+            f"{row.get('speedup', 0):>7.2f}  "
+            f"{row.get('efficiency_pct', 0):>5.1f}  "
+            f"{row.get('error_count', 0):>4}"
+        )
+    print()
+    print("  Legend:")
+    print("    Q/s      = queries per second (throughput; higher is better)")
+    print("    Comp%    = compute_ms / (compute_ms + coord_ms) × 100  (higher = less coordination waste)")
+    print("    Gran     = compute_ms / coord_ms  (≥10x = compute dominates; ideal for scaling)")
+    print("    Speedup  = Q/s_N / Q/s_baseline  (ideal = N/baseline_workers)")
+    print("    Eff%     = speedup / ideal_speedup × 100  (100% = perfect linear scaling)")
+    print()
+    # Amdahl's Law estimation from best-fit parallel fraction
+    if len(rows) >= 2:
+        fracs = [r.get("parallel_fraction", 0.0) for r in rows[1:] if r.get("parallel_fraction", 0) > 0]
+        if fracs:
+            p = sum(fracs) / len(fracs)
+            print(f"  Amdahl's Law:")
+            print(f"    Estimated parallel fraction p ≈ {p:.3f}  (serial fraction s ≈ {1-p:.3f})")
+            print(f"    Theoretical max speedup = 1/s = {1.0/(1-p):.1f}x  (at infinite workers)")
+            for n in [4, 8, 16, 32, 64]:
+                predicted = 1.0 / ((1 - p) + p / n)
+                print(f"    Predicted speedup at {n:>2} workers: {predicted:.2f}x")
+PY
+fi
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e "${GREEN}Data lake RAG test passed.${NC}"

@@ -373,6 +373,26 @@ WIT files: `wit/plexspaces-actor/` (25 files).
 - **~137MB RSS per Python WASM actor**: CPython heap per Store; no sharing between instances. Near-term mitigation: `--max-wasm-instances N` cap.
 - **InstancePool excludes component instances**: `wasmtime::component::Instance` is not `Send` (`instance_pool.rs:292`). Fix needs wasmtime adding `Send` or per-thread pooling.
 
+### WASM Component Model — Canonical ABI Alignment Rules
+
+The Wasmtime canonical ABI **checks retptr alignment** at runtime and traps on misalignment. This is critical for Go (TinyGo) SDK host imports that use a shared return buffer.
+
+**Rule**: The `retArea` buffer in `sdks/go/plexspaces/host_imports.go` MUST be typed as `[2]uint64` (not `[16]byte`). A `[16]byte` has 1-byte natural alignment; TinyGo may place it at a 4-byte-aligned address, causing Wasmtime to trap when a host function returns `result<u64, ...>` (which requires 8-byte alignment).
+
+**Affected WIT return types and their alignment requirements:**
+
+| WIT return type | Canonical ABI alignment | Example functions |
+|---|---|---|
+| `result<_, actor-error>` | 4 bytes | `alarm-set`, `alarm-delete`, `kv-put`, `kv-delete` |
+| `result<string, actor-error>` | 4 bytes | `kv-get`, `ask`, `send-after` |
+| `result<u64, actor-error>` | **8 bytes** | `alarm-get`, `kv-get-ttl`, `kv-increment` |
+| `result<s64, actor-error>` | **8 bytes** | `kv-increment` |
+| `result<bool, actor-error>` | 4 bytes | `kv-cas` |
+
+**Symptom of violation**: Wasmtime traps with `error while executing at wasm backtrace: <unknown>!<wasm function N>` during a host import call. The trap originates in the component-model adapter's alignment check, not in the Rust host function or the Go code.
+
+**How to verify**: Use `wasm-tools print actor.wasm | grep -B2 'rawHostAlarmGet'` to find the retptr address (the `i32.const NNNNN` before the call). Check `NNNNN % 8 == 0`. If not, the buffer has insufficient alignment.
+
 ---
 
 ## 8. SDK Design Contract
@@ -434,6 +454,95 @@ actor_ref.tell(event).await?;
 ### Polyglot Consistency
 
 SDK behavior must be consistent across Rust, Python, TypeScript, and Go. Proto data models are compiled to Python/Go/TypeScript for polyglot type consistency. Same semantics and naming where the abstraction maps across languages.
+
+### ShardGroup SDK Typed API
+
+All four SDKs expose shard group operations through typed request structs derived from `actor_runtime.proto`. Raw dicts/maps are NOT accepted. The canonical field names follow each language's conventions:
+
+| Proto field | Python | Go | TypeScript | Rust |
+|---|---|---|---|---|
+| `group_id` | `group_id: str` | `GroupID string` | `groupId: string` | `group_id: String` |
+| `actor_type` | `actor_type: str` | `ActorType string` | `actorType: string` | `actor_type: String` |
+| `shard_count` | `shard_count: int` | `ShardCount int` | `shardCount: number` | `shard_count: u32` |
+| `query` (ScatterGather) | `query: dict` | `Query map[string]any` | `query: Record<string,unknown>` | `query: Value` |
+| `shard_responses` | `.shard_responses: list[dict]` | `.ShardResponses []map[string]any` | `.shardResponses: ShardQueryResult[]` | — |
+
+**Wrong** (old dict form): `host.create_shard_group({"group_id": ..., "actor_type": ...})`
+**Correct** (new typed form):
+
+```python
+# Python
+from plexspaces import CreateShardGroupRequest, ScatterGatherRequest, NodePlacement
+group = host.create_shard_group(CreateShardGroupRequest(
+    group_id=group_id, actor_type="WorkerActor", shard_count=8,
+    placement=NodePlacement(strategy="from_registry")
+))
+result = host.scatter_gather(ScatterGatherRequest(
+    group_id=group.group_id, query={"op": "process", "data": batch}
+))
+for resp in result.shard_responses:
+    payload = resp.get("payload", {})
+```
+
+```go
+// Go
+group, err := host.CreateShardGroup(plexspaces.CreateShardGroupRequest{
+    GroupID: groupID, ActorType: "WorkerActor", ShardCount: 8,
+    Placement: plexspaces.NodePlacement{Strategy: "from_registry"},
+})
+result, err := host.ScatterGather(plexspaces.ScatterGatherRequest{
+    GroupID: group.GroupID, Query: payload, TimeoutMs: 30000,
+})
+for _, resp := range result.ShardResponses { ... }
+```
+
+```typescript
+// TypeScript
+import type { CreateShardGroupOptions, ScatterGatherOptions } from '@plexspaces/sdk';
+const group = host.createShardGroup({
+    groupId, actorType: 'WorkerActor', shardCount: 8,
+    placement: { strategy: 'from_registry' },
+} as CreateShardGroupOptions);
+const result = host.scatterGather({
+    groupId: group.groupId, query: { op: 'process', data: batch }, timeoutMs: 30000,
+} as ScatterGatherOptions);
+for (const resp of result.shardResponses) { const payload = resp.payload; }
+```
+
+**Key invariants**:
+- `query` (not `payload`) is the canonical field for scatter-gather content
+- `shard_responses` (not `responses`) is the canonical key in ScatterGatherResponse
+- `CreateShardGroupResponse` returns typed struct — access `.group_id` (Python), `.GroupID` (Go), `.groupId` (TS) — not `.get("group_id")`
+
+### WASM Wire Layer — Proto-First Direct Encoding
+
+**Principle**: WASM wire functions accept **typed request structs directly** — no `map[string]any` intermediary. The old `shardReqToMap` conversion layer was removed.
+
+```go
+// OLD (removed): map[string]any intermediary
+m, _ := shardReqToMap(req)          // req → map[string]any
+hostWireScatterGatherRequest(m)     // map → proto bytes
+
+// NEW (current): direct proto encoding
+hostWireScatterGatherRequest(req)   // ScatterGatherRequest → proto bytes directly
+```
+
+**Why**: Eliminates a class of TinyGo WASM crashes. The intermediary map creation forced `map[string]any` values (like `req.Query`) to be stored as `any` in another `map[string]any` — which corrupts a function-table entry in TinyGo's hashmap runtime when `encoding/json` is linked in.
+
+**TinyGo WASM `map[string]any` rules** (DO NOT VIOLATE):
+1. Writing `m[key] = value` is safe ONLY when `m` was declared as a local variable in the **same function scope** (map literal or `make(map[string]any)`)
+2. Writing to a `map[string]any` passed as a function **parameter** — CRASHES (corrupted `call_indirect`)
+3. Storing a `map[string]any` returned from a function as an `any` **value** in another map — CRASHES
+4. Safe alternative for helpers that need to produce multiple values: return flat primitives (`float64`, `string`) and let the caller write them into its own local map
+5. `for k, v := range m` reads from a map — safe regardless of how `m` was acquired
+6. `append(slice, mapValue)` to `[]any` — safe (slice append uses a different code path)
+
+**Stats encoding fix** (applied 2026-10-03): `wasmParseScatterGatherStatsFlat(data []byte) (queried, responded, failed, maxLatencyMs float64)` returns primitives. Callers write `_stat_*` keys into their own local `out` map. The `host.go` `ScatterGather` reconstructs `Stats map[string]any` from these flat keys.
+
+**Proto-first roadmap** — next steps toward full proto adoption in Go SDK:
+- Current: `Query map[string]any` serialized via `SafeMarshal` → JSON bytes in proto `CommonMessage.payload`
+- Future: typed proto message for query content (actor-defined message types compiled from `.proto`), eliminating `map[string]any` for query/response payloads
+- Prerequisite: define per-actor proto schemas and generate Go types; actors use `proto.Marshal` / `proto.Unmarshal` instead of `json.Marshal` / `json.Unmarshal`
 
 ---
 

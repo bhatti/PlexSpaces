@@ -33,6 +33,13 @@ export {
   listWorkerNodeIds,
 } from "./leader_worker.js";
 export { ActorID } from "./actor_id.js";
+export type {
+  CreateShardGroupOptions, CreateShardGroupResult,
+  ScatterGatherOptions, ScatterGatherResult, ShardQueryResult,
+  BroadcastShardGroupOptions, ReduceShardGroupOptions, AllReduceShardGroupOptions,
+  BarrierShardGroupOptions, MapShardGroupOptions, BulkUpdateShardGroupOptions,
+  NodePlacementOptions,
+} from "./shard_types.js";
 export {
   WsThinClient,
   type ThinClientOptions,

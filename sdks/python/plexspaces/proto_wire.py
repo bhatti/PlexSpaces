@@ -602,8 +602,7 @@ def encode_scatter_gather_request(request: Dict[str, Any]) -> bytes:
     """
     m = request
     mt = str(m.get('message_type', ''))
-    # Accept both 'query' (canonical) and 'payload' (actor convention) as the message body.
-    query = m.get('query', m.get('payload', {}))
+    query = m.get('query', {})
     if isinstance(query, dict):
         if not mt:
             mt = str(query.get('op', ''))
@@ -635,8 +634,7 @@ def encode_broadcast_shard_group_request(request: Dict[str, Any]) -> bytes:
     }
     """
     m = request
-    # Accept 'message' (canonical) or 'payload' (actor convention).
-    body = m.get('message', m.get('payload', {}))
+    body = m.get('message', {})
     if not isinstance(body, dict):
         body = {}
     mt = str(m.get('message_type', '') or body.get('op', ''))
@@ -667,8 +665,7 @@ def _encode_reduce_like_request(request: Dict[str, Any]) -> bytes:
     """
     m = request
     mt = str(m.get('message_type', ''))
-    # Accept 'map_function' (canonical), 'payload', or 'query' (actor conventions).
-    body = m.get('map_function', m.get('payload', m.get('query', {})))
+    body = m.get('map_function', m.get('query', {}))
     if not isinstance(body, dict):
         body = {}
     if not mt:
@@ -682,11 +679,9 @@ def _encode_reduce_like_request(request: Dict[str, Any]) -> bytes:
     if d:
         req += _encode_length_delimited(4, d)
     req = _append_varint_field(req, 5, _to_int(m.get('min_responses')))
-    # Accept 'reduction' (canonical) or 'reduce_op' (actor convention).
-    reduction = str(m.get('reduction', m.get('reduce_op', '')))
+    reduction = str(m.get('reduction', ''))
     req = _append_varint_field(req, 6, _reduction_enum(reduction))
-    # Accept 'target' (canonical) or 'reduce_field' (actor convention).
-    target = str(m.get('target', m.get('reduce_field', '')))
+    target = str(m.get('target', ''))
     if target:
         tf = _encode_length_delimited(1, target.encode('utf-8'))
         req += _encode_length_delimited(7, tf)
@@ -717,8 +712,7 @@ def encode_map_shard_group_request(request: Dict[str, Any]) -> bytes:
     """
     m = request
     mt = str(m.get('message_type', ''))
-    # Accept 'map_function' (canonical) or 'payload' (actor convention).
-    body = m.get('map_function', m.get('payload', {}))
+    body = m.get('map_function', {})
     if not isinstance(body, dict):
         body = {}
     if not mt:

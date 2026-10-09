@@ -4,6 +4,14 @@
 # Tests for collective / parallel shard-group host operations.
 
 from plexspaces.host import host
+from plexspaces.shard_types import (
+    AllReduceShardGroupRequest,
+    BarrierShardGroupRequest,
+    BroadcastShardGroupRequest,
+    BulkUpdateShardGroupRequest,
+    MapShardGroupRequest,
+    ReduceShardGroupRequest,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -11,11 +19,11 @@ from plexspaces.host import host
 # ---------------------------------------------------------------------------
 
 def test_broadcast_shard_group_returns_stats():
-    response = host.broadcast_shard_group({
-        "group_id": "workers",
-        "message": {"op": "reset"},
-        "min_acks": 1,
-    })
+    response = host.broadcast_shard_group(BroadcastShardGroupRequest(
+        group_id="workers",
+        message={"op": "reset"},
+        min_acks=1,
+    ))
     assert "shard_responses" in response
     assert "stats" in response
     stats = response["stats"]
@@ -25,10 +33,10 @@ def test_broadcast_shard_group_returns_stats():
 
 
 def test_broadcast_shard_group_accepts_empty_message():
-    response = host.broadcast_shard_group({
-        "group_id": "g1",
-        "message": {},
-    })
+    response = host.broadcast_shard_group(BroadcastShardGroupRequest(
+        group_id="g1",
+        message={},
+    ))
     assert isinstance(response, dict)
 
 
@@ -37,24 +45,24 @@ def test_broadcast_shard_group_accepts_empty_message():
 # ---------------------------------------------------------------------------
 
 def test_reduce_shard_group_returns_result_and_stats():
-    response = host.reduce_shard_group({
-        "group_id": "workers",
-        "query": {"action": "get_count"},
-        "reduction": 1,  # SUM
-        "min_responses": 1,
-    })
+    response = host.reduce_shard_group(ReduceShardGroupRequest(
+        group_id="workers",
+        map_function={"action": "get_count"},
+        reduction="SUM",
+        min_responses=1,
+    ))
     assert "result" in response
     assert "stats" in response
     assert "shard_responses" in response
 
 
 def test_reduce_shard_group_with_target_field():
-    response = host.reduce_shard_group({
-        "group_id": "workers",
-        "query": {"action": "get_metrics"},
-        "reduction": 3,  # MAX
-        "target": {"value_path": "count"},
-    })
+    response = host.reduce_shard_group(ReduceShardGroupRequest(
+        group_id="workers",
+        map_function={"action": "get_metrics"},
+        reduction="MAX",
+        target="count",
+    ))
     assert isinstance(response, dict)
 
 
@@ -63,12 +71,12 @@ def test_reduce_shard_group_with_target_field():
 # ---------------------------------------------------------------------------
 
 def test_all_reduce_shard_group_returns_result_and_stats():
-    response = host.all_reduce_shard_group({
-        "group_id": "workers",
-        "query": {"action": "get_sum"},
-        "reduction": 1,  # SUM
-        "min_responses": 1,
-    })
+    response = host.all_reduce_shard_group(AllReduceShardGroupRequest(
+        group_id="workers",
+        map_function={"action": "get_sum"},
+        reduction="SUM",
+        min_responses=1,
+    ))
     assert "result" in response
     assert "stats" in response
     assert "shard_responses" in response
@@ -79,20 +87,20 @@ def test_all_reduce_shard_group_returns_result_and_stats():
 # ---------------------------------------------------------------------------
 
 def test_barrier_shard_group_returns_stats():
-    response = host.barrier_shard_group({
-        "group_id": "workers",
-        "barrier_id": "round-1",
-        "round": 1,
-        "min_acks": 1,
-    })
+    response = host.barrier_shard_group(BarrierShardGroupRequest(
+        group_id="workers",
+        barrier_id="round-1",
+        round=1,
+        min_acks=1,
+    ))
     assert "shard_responses" in response
     assert "stats" in response
 
 
 def test_barrier_shard_group_accepts_minimal_request():
-    response = host.barrier_shard_group({
-        "group_id": "g1",
-    })
+    response = host.barrier_shard_group(BarrierShardGroupRequest(
+        group_id="g1",
+    ))
     assert isinstance(response, dict)
 
 
@@ -146,10 +154,10 @@ def test_spawn_actors_with_instances_count():
 # ---------------------------------------------------------------------------
 
 def test_bulk_update_shard_group_returns_stats():
-    response = host.bulk_update_shard_group({
-        "group_id": "workers",
-        "updates": {"key1": {"payload": "data"}},
-    })
+    response = host.bulk_update_shard_group(BulkUpdateShardGroupRequest(
+        group_id="workers",
+        updates={"key1": {"payload": "data"}},
+    ))
     assert "updates_sent" in response
     assert "updates_succeeded" in response
 
@@ -159,10 +167,10 @@ def test_bulk_update_shard_group_returns_stats():
 # ---------------------------------------------------------------------------
 
 def test_map_shard_group_returns_results():
-    response = host.map_shard_group({
-        "group_id": "workers",
-        "query": {"action": "status"},
-    })
+    response = host.map_shard_group(MapShardGroupRequest(
+        group_id="workers",
+        map_function={"action": "status"},
+    ))
     assert "results" in response
     assert "stats" in response
 
@@ -172,9 +180,10 @@ def test_map_shard_group_returns_results():
 # ---------------------------------------------------------------------------
 
 def test_scatter_gather_returns_responses_and_stats():
-    response = host.scatter_gather({
-        "group_id": "workers",
-        "query": {"action": "get_all"},
-    })
-    assert "shard_responses" in response
-    assert "stats" in response
+    from plexspaces import ScatterGatherRequest
+    response = host.scatter_gather(ScatterGatherRequest(
+        group_id="workers",
+        query={"action": "get_all"},
+    ))
+    assert hasattr(response, "shard_responses")
+    assert hasattr(response, "stats")

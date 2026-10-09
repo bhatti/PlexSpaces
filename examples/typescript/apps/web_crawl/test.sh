@@ -31,7 +31,8 @@ fi
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
-  NODES="localhost:$1"
+  NODES=""
+  for _p in "$@"; do NODES="${NODES:+$NODES }localhost:$_p"; done
 else
   NODES="$*"
   NODES="${NODES//,/ }"
@@ -44,7 +45,7 @@ NC='\033[0m'
 
 APP_ID="ts-web-crawl"
 APP_NAME="ts-web-crawl"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
@@ -84,18 +85,37 @@ if [ "$http_code" = "000" ]; then
   exit 1
 fi
 
-TEMP_CONFIG="$(mktemp -t ts-web-crawl-config)"
-trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 cp "$CONFIG_FILE" "$TEMP_CONFIG"
+zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
-echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
-curl -s -X DELETE "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
+echo "Step 1: Deploy to all nodes"
+for _node in "${NODE_LIST[@]}"; do
+  _h="${_node%%:*}"; _p="${_node##*:}"
+  curl -s -X DELETE "http://${_h}:${_p}/api/v1/applications/$APP_ID" ${AUTH_HEADER:+-H "$AUTH_HEADER"} >/dev/null 2>&1 || true
+done
 sleep 1
+for _node in "${NODE_LIST[@]}"; do
+  if [ "$_node" = "$ENTRY_NODE" ]; then continue; fi
+  _h="${_node%%:*}"; _p="${_node##*:}"; _dep=0
+  for _attempt in 1 2 3; do
+    APP_ZIP="$(mktemp).zip"; zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
+    deploy_output=$(curl -s -w "\n%{http_code}" -X POST "http://${_h}:${_p}/api/v1/applications/deploy" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -F "application_id=$APP_ID" -F "name=$APP_NAME" -F "version=1.0.0" -F "app_file=@$APP_ZIP" 2>&1)
+    http_code=$(echo "$deploy_output" | tail -n1); response=$(echo "$deploy_output" | sed '$d')
+    if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then _dep=1; break; fi
+    sleep 3
+  done
+  if [ "$_dep" -eq 0 ]; then echo -e "${RED}Deploy to ${_h}:${_p} failed${NC}"; exit 1; fi
+done
 _deployed=0
 for _attempt in 1 2 3; do
+  APP_ZIP="$(mktemp).zip"; zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
   deploy_output=$(curl -s -w "\n%{http_code}" \
     -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
     ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
@@ -117,7 +137,7 @@ if [ "$_deployed" -eq 0 ]; then
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"
-rm -f "$TEMP_CONFIG"; TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"; TEMP_DIR=""
 sleep 2
 
 echo ""
@@ -312,56 +332,79 @@ done
 
 echo ""
 echo "================================================================"
-echo "  Phase 3: Scaling Benchmark (Amdahl's Law)"
+echo "  Phase 3: Scaling Benchmark"
 echo "================================================================"
-echo ""
-echo "Step 10: Benchmark — 1 / 4 / 8 / 16 concurrent workers, 200 pages each"
-bench_response=$(ask "orchestrator" '{
-  "op": "benchmark",
-  "worker_counts": [1, 4, 8, 16],
-  "pages_per_round": 200
-}' 300)
 
-if ! echo "$bench_response" | python3 -c "
+SCALING_SHARDS="${SCALING_SHARDS:-2,4,8,16}"
+
+echo ""
+echo "Step 10: Strong scaling (200 total pages / N workers, 4 passes)"
+STRONG_PAYLOAD=$(python3 -c "import json; print(json.dumps({'op':'benchmark','worker_counts':[int(s) for s in '${SCALING_SHARDS}'.split(',')],'pages_per_round':200,'num_passes':4}))")
+STRONG_RESPONSE=$(ask "orchestrator" "$STRONG_PAYLOAD" 300)
+
+if ! echo "$STRONG_RESPONSE" | python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
 p = d.get('payload', d)
 if isinstance(p, str): p = json.loads(p)
 exit(0 if p.get('status') == 'ok' else 1)
 " 2>/dev/null; then
-  echo -e "${RED}Benchmark failed: $bench_response${NC}"
+  echo -e "${RED}Strong scaling failed: $STRONG_RESPONSE${NC}"
   exit 1
 fi
 
-echo ""
-BENCH_RESPONSE="$bench_response" python3 - <<'PY'
+BENCH_RESPONSE="$STRONG_RESPONSE" python3 - <<'PY'
 import json, os
-
 d = json.loads(os.environ["BENCH_RESPONSE"])
 p = d.get("payload", d)
 if isinstance(p, str): p = json.loads(p)
 results = p.get("results", [])
-
-print("  ┌─────────┬────────┬───────────┬──────────┬──────────┬─────────────┬─────────┬──────────┬──────────────┬─────────────┐")
-print("  │ Workers │ Pages  │ Elapsed   │ Coord ms │ Fetch ms │  Pages/sec  │ Speedup │  Eff %   │ Parallel frac│  Word data  │")
-print("  ├─────────┼────────┼───────────┼──────────┼──────────┼─────────────┼─────────┼──────────┼──────────────┼─────────────┤")
+print("═" * 82)
+print("  Web Crawl (TypeScript) — Strong Scaling (200 total pages / N workers × 4 passes)")
+print("═" * 82)
+print(f"  {'Workers':>8} {'Pages':>7} {'Pg/s':>8} {'Wall':>8} {'Comp':>8} {'Coord':>7} {'Speed':>8} {'Eff%':>6} {'Errs':>5}")
+print("─" * 82)
 for r in results:
-    w        = r.get("workers", 0)
-    pages    = r.get("pages", 0)
-    elapsed  = r.get("elapsed_ms", 0)
-    coord    = r.get("coord_ms", 0)
-    fetch    = r.get("fetch_ms", 0)
-    pps      = r.get("pages_per_sec", 0.0)
-    speedup  = r.get("speedup", 1.0)
-    eff      = r.get("efficiency_pct", 100.0)
-    pf       = r.get("parallel_fraction", 0.0)
-    tw       = r.get("total_words", 0)
-    uw       = r.get("unique_words", 0)
-    print(f"  │ {w:>7} │ {pages:>6} │ {elapsed:>7} ms │ {coord:>8} │ {fetch:>8} │ {pps:>11.1f} │ {speedup:>7.2f}x │ {eff:>7.1f}% │ {pf:>11.1%} │ {tw:>5}w/{uw:>3}u │")
-print("  └─────────┴────────┴───────────┴──────────┴──────────┴─────────────┴─────────┴──────────┴──────────────┴─────────────┘")
-print()
-print("  Legend: Pages/sec = throughput,  Speedup = vs 1-worker baseline,  Eff % = speedup/N×100")
-print("          Parallel frac = 1 - coord/elapsed (Amdahl's Law)")
+    print(f"  {r.get('workers',0):>8} {r.get('pages',0):>7} {r.get('pages_per_sec',0):>8.0f} {r.get('elapsed_ms',0):>8} {r.get('fetch_ms',0):>8} {r.get('coord_ms',0):>7} {r.get('speedup',1):>7.2f}x {r.get('efficiency_pct',100):>5.1f}% {r.get('error_count',0):>5}")
+print("═" * 82)
+for r in results:
+    assert r.get("error_count",0) == 0, f"errors in workers={r.get('workers')}"
+print("  ✓ Passed")
+PY
+
+echo ""
+echo "Step 11: Weak scaling (200 pages/worker fixed, 4 passes — total grows with N)"
+WEAK_PAYLOAD=$(python3 -c "import json; print(json.dumps({'op':'run_weak_scaling_benchmark','shard_counts':[int(s) for s in '${SCALING_SHARDS}'.split(',')],'pages_per_worker':200,'num_passes':4}))")
+WEAK_RESPONSE=$(ask "orchestrator" "$WEAK_PAYLOAD" 300)
+
+if ! echo "$WEAK_RESPONSE" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())
+p = d.get('payload', d)
+if isinstance(p, str): p = json.loads(p)
+exit(0 if p.get('status') == 'ok' else 1)
+" 2>/dev/null; then
+  echo -e "${RED}Weak scaling failed: $WEAK_RESPONSE${NC}"
+  exit 1
+fi
+
+BENCH_RESPONSE="$WEAK_RESPONSE" python3 - <<'PY'
+import json, os
+d = json.loads(os.environ["BENCH_RESPONSE"])
+p = d.get("payload", d)
+if isinstance(p, str): p = json.loads(p)
+results = p.get("results", [])
+print("═" * 82)
+print("  Web Crawl (TypeScript) — Weak Scaling (200 pages/worker × 4 passes)")
+print("═" * 82)
+print(f"  {'Workers':>8} {'TotPg':>7} {'Pg/s':>8} {'Wall':>8} {'Comp':>8} {'Coord':>7} {'Speed':>8} {'Eff%':>6} {'Errs':>5}")
+print("─" * 82)
+for r in results:
+    print(f"  {r.get('workers',0):>8} {r.get('pages',0):>7} {r.get('pages_per_sec',0):>8.0f} {r.get('elapsed_ms',0):>8} {r.get('fetch_ms',0):>8} {r.get('coord_ms',0):>7} {r.get('speedup',1):>7.2f}x {r.get('efficiency_pct',100):>5.1f}% {r.get('error_count',0):>5}")
+print("═" * 82)
+for r in results:
+    assert r.get("error_count",0) == 0, f"errors in workers={r.get('workers')}"
+print("  ✓ Passed")
 PY
 
 echo ""
@@ -369,10 +412,10 @@ echo "================================================================"
 echo -e "  ${GREEN}Web Crawl (TypeScript WASM) Test Complete${NC}"
 echo ""
 echo "  Key behaviors demonstrated:"
-echo "    ✓ TupleSpace frontier — url_queue as live work frontier, ts.take() atomic claim"
-echo "    ✓ ElasticPool         — poolCheckout/poolCheckin, utilization metrics"
-echo "    ✓ ProcessGroup        — workers self-register, orchestrator discovers members"
-echo "    ✓ ShardGroup scatter  — interleaved scatter to 2 analyzer shards"
-echo "    ✓ Scaling benchmark   — 1/4/8/16 workers, ScatterGather parallel dispatch"
-echo "    ✓ Real work           — 12 links/page, 80+ words/page, 200-page corpus"
+echo "    ✓ TupleSpace frontier  — url_queue as live work frontier, ts.write() metadata"
+echo "    ✓ ElasticPool          — poolCheckout/poolCheckin, utilization metrics"
+echo "    ✓ ProcessGroup         — workers self-register, orchestrator discovers members"
+echo "    ✓ ShardGroup scatter   — interleaved scatter to 2 analyzer shards"
+echo "    ✓ Strong scaling       — 200 total pages / N workers, broadcast SG"
+echo "    ✓ Weak scaling         — 200 pages/worker fixed, super-linear efficiency"
 echo "================================================================"

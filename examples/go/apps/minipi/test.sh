@@ -81,6 +81,8 @@ import sys, json
 try:
     d = json.load(sys.stdin)
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print($expr)
 except:
     print('$default')
@@ -105,8 +107,8 @@ echo ""
 echo "Step 1: Check node"
 HTTP_CHECK="000"
 for _i in 1 2 3; do
-  trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+  trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+  APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
   zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
   HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
@@ -141,9 +143,8 @@ for _w in 1 2 3 4 5 6 7 8 9 10; do
   sleep 2
 done
 
-TEMP_CONFIG=$(mktemp -t minipi-go-config)
-mv "$TEMP_CONFIG" "${TEMP_CONFIG}.toml"
-TEMP_CONFIG="${TEMP_CONFIG}.toml"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
 python3 - <<EOF
 with open('$CONFIG_FILE') as f:
     lines = f.readlines()
@@ -178,7 +179,7 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $RESPONSE${NC}"
   exit 1
 fi
-rm -f "$TEMP_CONFIG"
+rm -rf "$TEMP_DIR"
 echo -e "  ${GREEN}✓${NC} Deployed — 12 actors registered under supervisor (one_for_one)"
 sleep 2
 echo ""
@@ -296,6 +297,8 @@ python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 rows = p.get('per_scenario') or p.get('scores', [])
 if rows:
     print('  Per-scenario breakdown:')
@@ -314,6 +317,8 @@ EVAL_SCORES=$(python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 scores = p.get('scores', [])
 out = []
 for s in scores:
@@ -328,6 +333,8 @@ EVAL_REPORT_PAYLOAD=$(python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 p['eval_run_id'] = 'eval-smoke-001'
 print(json.dumps({'op': 'report_eval', 'eval_run_id': 'eval-smoke-001', 'report': p}))
 " <<< "$R" 2>/dev/null || echo '{"op":"report_eval","eval_run_id":"eval-smoke-001"}')
@@ -387,6 +394,8 @@ python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 results = p.get('results', []) or p.get('comparison_table', [])
 if results:
     print('  Config comparison:')
@@ -478,6 +487,8 @@ python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 runs = p.get('runs', [])
 if runs:
     print('  Run breakdown:')

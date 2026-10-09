@@ -43,7 +43,7 @@ NC='\033[0m'
 
 APP_ID="go-ai-monitor-link-supervision"
 APP_NAME="go-ai-monitor-link-supervision"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
@@ -126,12 +126,13 @@ for node in "${NODE_LIST[@]}"; do
   fi
 done
 
-TEMP_CONFIG="$(mktemp -t ai-monitor-link-app-config)"
-  trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+  trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+  APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 render_config "$TEMP_CONFIG"
+  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Step 1: Undeploy from all nodes, then deploy to entry node"
 "$SCRIPT_DIR/undeploy.sh" $NODES
@@ -159,8 +160,8 @@ if [ "$_deployed" -eq 0 ]; then
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 sleep 2
 
 echo ""

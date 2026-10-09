@@ -1506,6 +1506,7 @@ impl Node {
                 namespace = %registration_ctx.namespace(),
                 cluster_name = ?cluster_name,
                 grpc_address = %grpc_address,
+                security_config = true,
                 "Node registered in NodeRegistry"
             );
         } else {
@@ -1616,8 +1617,6 @@ impl Node {
             let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
                 .parse::<std::net::SocketAddr>()
                 .unwrap_or_else(|_| "127.0.0.1:10000".parse().unwrap());
-
-            tracing::info!(addr = %http_addr, "Starting blob HTTP server");
 
             match tokio::net::TcpListener::bind(http_addr).await {
                 Ok(listener) => Some(tokio::spawn(async move {
@@ -1967,12 +1966,7 @@ impl Node {
                 tracing::warn!("Warning: Failed to register built-in dependencies: {}", e);
                 0
             });
-        tracing::warn!(
-            "Node {}: Starting gRPC server on {} (health_checkers={})",
-            self.id.as_str(),
-            addr,
-            deps_registered
-        );
+        let startup_health_checkers = deps_registered;
 
         // Register dependencies from object-registry if configured
         // This allows registering dependencies by name/type from the registry
@@ -2281,7 +2275,7 @@ impl Node {
 
         // Add UserService for OAuth login flow, tenant management, and API token management.
         // Also builds the AuthRouteState used by the HTTP auth routes module.
-        let (server_builder, auth_route_state) = {
+        let (server_builder, auth_route_state, auth_jwt_summary, auth_oidc_enabled) = {
             use crate::http_routes::AuthRouteState;
             use plexspaces_proto::security::v1::user_service_server::UserServiceServer;
             use plexspaces_services::user_service::{
@@ -2368,14 +2362,11 @@ impl Node {
                             None
                         };
 
-                    tracing::info!(
-                        jwt = auth_jwt_key_pair
-                            .as_ref()
-                            .map(|kp| format!("{:?}:{}", kp.algorithm(), kp.kid()))
-                            .unwrap_or_else(|| "none".into()),
-                        oidc = oidc_state.is_some(),
-                        "Auth configured"
-                    );
+                    let auth_jwt_summary = auth_jwt_key_pair
+                        .as_ref()
+                        .map(|kp| format!("{:?}:{}", kp.algorithm(), kp.kid()))
+                        .unwrap_or_else(|| "none".into());
+                    let auth_oidc_enabled = oidc_state.is_some();
 
                     let auth_state = AuthRouteState {
                         user_repo,
@@ -2387,11 +2378,11 @@ impl Node {
                         jwt_key_pair: auth_jwt_key_pair,
                     };
 
-                    (builder, Some(auth_state))
+                    (builder, Some(auth_state), auth_jwt_summary, auth_oidc_enabled)
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "UserService unavailable: failed to connect to database");
-                    (server_builder, None)
+                    (server_builder, None, "none".to_string(), false)
                 }
             }
         };
@@ -2573,11 +2564,18 @@ impl Node {
             .await
             .map_err(|e| NodeError::NetworkError(e.to_string()))?;
 
+        let effective_addr = listener.local_addr().unwrap_or(addr);
+        let blob_port = resolve_blob_http_port(&self.config);
         tracing::info!(
-            addr = %listener.local_addr().unwrap_or(addr),
+            node = %self.id.as_str(),
+            addr = %effective_addr,
+            blob_http_port = blob_port,
             mtls_inbound = mtls_server_config.is_some(),
             mtls_outbound = mtls_outbound,
-            "Single-port gRPC+HTTP server ready"
+            jwt = %auth_jwt_summary,
+            oidc = auth_oidc_enabled,
+            health_checkers = startup_health_checkers,
+            "Node initialization complete"
         );
 
         if let Some(wasm_apps_dir_str) = wasm_apps_directory {

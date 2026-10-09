@@ -76,17 +76,13 @@ Leader broadcasts a value to all shards.  Workers acknowledge with their
 response.
 
 ```go
-host.BroadcastShardGroup(map[string]any{
-    "group_id":     groupID,
-    "message_type": "apply_broadcast",          // worker Handle dispatch key
-    "message":      map[string]any{             // payload sent to each worker
-        "round": round,
-        "scale": scale,
-    },
-    "min_acks":   workerCount,
-    "timeout_ms": 30000,
+host.BroadcastShardGroup(plexspaces.BroadcastShardGroupRequest{
+    GroupID:   groupID,
+    Message:   map[string]any{"round": round, "scale": scale},
+    MinAcks:   workerCount,
+    TimeoutMs: 30000,
 })
-// response: {"shard_responses": [...], "stats": {shards_queried, shards_responded, shards_failed}}
+// response: map[string]any{"shard_responses": [...], "stats": {shards_queried, shards_responded, shards_failed}}
 ```
 
 Worker handler:
@@ -104,18 +100,17 @@ Each worker receives the same query descriptor but computes independently
 (scatter), then all responses are collected at the leader (gather).
 
 ```go
-host.ScatterGather(map[string]any{
-    "group_id":     groupID,
-    "message_type": "process_scatter_chunk",
-    "query": map[string]any{
+resp, err := host.ScatterGather(plexspaces.ScatterGatherRequest{
+    GroupID: groupID,
+    Query: map[string]any{
         "round": round, "elements_per_worker": N,
         "base_value": float64((round+1)*7), "scale": scale,
     },
-    "aggregation":   "concat",
-    "min_responses": workerCount,
-    "timeout_ms":    30000,
+    Aggregation:  "concat",
+    MinResponses: workerCount,
+    TimeoutMs:    30000,
 })
-// response: {"shard_responses": [...], "result": <aggregated>, "stats": {...}}
+// resp.ShardResponses is []map[string]any; resp.Stats is map[string]any
 ```
 
 Worker handler:
@@ -133,16 +128,15 @@ Framework queries all workers, extracts `target` path from each response, and
 applies the built-in `reduction`.  Result available **at the leader only**.
 
 ```go
-host.ReduceShardGroup(map[string]any{
-    "group_id":      groupID,
-    "message_type":  "partial_reduce",   // worker returns {partial_sum: X, ...}
-    "map_function":  map[string]any{"round": round},
-    "target":        "partial_sum",      // dot-path extracted from each response
-    "reduction":     "sum",              // built-in: sum | min | max | product | concat | bool_and | bool_or
-    "min_responses": workerCount,
-    "timeout_ms":    30000,
+result, err := host.ReduceShardGroup(plexspaces.ReduceShardGroupRequest{
+    GroupID:      groupID,
+    MapFunction:  map[string]any{"round": round},
+    Target:       "partial_sum",   // dot-path extracted from each response
+    Reduction:    "sum",           // built-in: sum | min | max | product | concat | bool_and | bool_or
+    MinResponses: workerCount,
+    TimeoutMs:    30000,
 })
-// response: {"result": <global_sum>, "shard_responses": [...], "stats": {...}}
+// result["result"] is the global sum; result["shard_responses"] is []any
 ```
 
 Worker handler:
@@ -159,16 +153,15 @@ Identical reduce semantics **plus** the framework automatically broadcasts the
 final result back to all workers as a `message_type="event"` message.
 
 ```go
-host.AllReduceShardGroup(map[string]any{
-    "group_id":      groupID,
-    "message_type":  "partial_reduce",
-    "map_function":  map[string]any{"round": round},
-    "target":        "partial_sum",
-    "reduction":     "sum",
-    "min_responses": workerCount,
-    "timeout_ms":    30000,
+result, err := host.AllReduceShardGroup(plexspaces.AllReduceShardGroupRequest{
+    GroupID:      groupID,
+    MapFunction:  map[string]any{"round": round},
+    Target:       "partial_sum",
+    Reduction:    "sum",
+    MinResponses: workerCount,
+    TimeoutMs:    30000,
 })
-// response: {"result": <global_sum>, "shard_responses": [...], "stats": {...}}
+// result["result"] is the global sum
 // Side-effect: each worker receives message_type="event" with payload=global_sum
 ```
 
@@ -188,14 +181,14 @@ Synchronisation point: leader blocks until `min_acks` workers have
 acknowledged, then the next round begins.
 
 ```go
-host.BarrierShardGroup(map[string]any{
-    "group_id":   groupID,
-    "barrier_id": fmt.Sprintf("barrier-round-%d", round),
-    "round":      uint64(round),
-    "min_acks":   workerCount,
-    "timeout_ms": 30000,
+_, err = host.BarrierShardGroup(plexspaces.BarrierShardGroupRequest{
+    GroupID:   groupID,
+    BarrierID: fmt.Sprintf("barrier-round-%d", round),
+    Round:     uint64(round),
+    MinAcks:   workerCount,
+    TimeoutMs: 30000,
 })
-// response: {"shard_responses": [...], "stats": {...}}
+// response: map[string]any{"shard_responses": [...], "stats": {...}}
 ```
 
 ---

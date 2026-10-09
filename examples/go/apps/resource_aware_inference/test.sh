@@ -39,7 +39,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 APP_ID="go-resource-aware-inference"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 send_op() {
   local actor="$1"
@@ -59,6 +59,8 @@ check_ok() {
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 assert p.get('status') == 'ok' or 'error' not in p, p
 " 2>/dev/null; then
     echo -e "  ${GREEN}PASS${NC} $label"
@@ -77,6 +79,8 @@ check_field() {
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 val = str(p.get('$field', ''))
 assert val == '$expected', f'expected $field=$expected, got {val}'
 " 2>/dev/null; then
@@ -96,6 +100,8 @@ check_field_contains() {
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 val = str(p.get('$field', ''))
 assert '$expected' in val, f'expected $field to contain $expected, got {val}'
 " 2>/dev/null; then
@@ -126,7 +132,8 @@ fi
 
 # gRPC and HTTP share a single port
 GRPC_PORT=$HTTP_PORT
-TEMP_CONFIG="$(mktemp -t resource-aware-inference-config)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
 python3 - "$CONFIG_FILE" "$TEMP_CONFIG" "$GRPC_PORT" <<'PY'
 import pathlib, sys
 source = pathlib.Path(sys.argv[1]).read_text()
@@ -139,8 +146,8 @@ for line in source.splitlines():
         lines.append(line)
 pathlib.Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
 PY
-trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
@@ -171,8 +178,8 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $BODY${NC}"
   exit 1
 fi
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 echo -e "  ${GREEN}Deployed${NC}"
 sleep 2
 echo ""
@@ -185,6 +192,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     models = p.get('models', [])
     count = p.get('count', len(models))
     print(f'  Models found: {count}')
@@ -197,6 +206,8 @@ if echo "$LIST_RESP" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 assert len(p.get('models', [])) == 3, f'expected 3 models, got {len(p.get(\"models\",[]))}'
 " 2>/dev/null; then
   echo -e "  ${GREEN}PASS${NC} list_models (3 models)"
@@ -234,6 +245,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Model: {p.get(\"model\",\"?\")} tier={p.get(\"tier\",\"?\")} tokens={p.get(\"tokens_used\",0)} cost=\${p.get(\"cost_usd\",0):.6f} latency={p.get(\"latency_ms\",0)}ms gpu={p.get(\"gpu_used\",False)}')
     print(f'  Result: {str(p.get(\"result\",\"\"))[:80]}')
 except Exception as e:
@@ -251,6 +264,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Model: {p.get(\"model\",\"?\")} tier={p.get(\"tier\",\"?\")} tokens={p.get(\"tokens_used\",0)} cost=\${p.get(\"cost_usd\",0):.6f} latency={p.get(\"latency_ms\",0)}ms gpu={p.get(\"gpu_used\",False)}')
 except Exception as e:
     print(f'  (parse error: {e})')
@@ -266,6 +281,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Budget: \${p.get(\"budget_usd\",0):.4f} Used: \${p.get(\"used_usd\",0):.6f} Remaining: \${p.get(\"remaining_usd\",0):.4f} Allowed: {p.get(\"allowed\",False)}')
 except Exception as e:
     print(f'  (parse error: {e})')
@@ -285,6 +302,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Status: {p.get(\"status\",\"?\")} model={p.get(\"model_selected\",\"?\")} tier={p.get(\"model_tier\",\"?\")} complexity={p.get(\"complexity\",0):.2f} cost=\${p.get(\"actual_cost_usd\",0):.6f}')
 except Exception as e:
     print(f'  (parse error: {e})')
@@ -294,6 +313,8 @@ if echo "$WF_SHORT" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 assert p.get('status') == 'ok', f'status={p.get(\"status\")}'
 assert p.get('model_tier') == 'small', f'expected small tier, got {p.get(\"model_tier\")}'
 " 2>/dev/null; then
@@ -316,6 +337,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     print(f'  Status: {p.get(\"status\",\"?\")} model={p.get(\"model_selected\",\"?\")} tier={p.get(\"model_tier\",\"?\")} complexity={p.get(\"complexity\",0):.2f} cost=\${p.get(\"actual_cost_usd\",0):.6f}')
 except Exception as e:
     print(f'  (parse error: {e})')
@@ -325,6 +348,8 @@ if echo "$WF_LONG" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 assert p.get('status') == 'ok', f'status={p.get(\"status\")}'
 tier = p.get('model_tier', '')
 assert tier in ('medium', 'large'), f'expected medium or large tier, got {tier}'
@@ -344,6 +369,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     report = p.get('report', [])
     print(f'  Tenants tracked: {p.get(\"tenant_count\", len(report))}')
     for entry in report:
@@ -371,6 +398,8 @@ if echo "$BUDGET_EXCEEDED" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 assert p.get('error') == 'budget_exceeded', f'expected budget_exceeded, got: {p}'
 " 2>/dev/null; then
   echo -e "  ${GREEN}PASS${NC} budget exceeded correctly rejected"
@@ -388,6 +417,8 @@ import sys, json
 try:
     d = json.loads(sys.stdin.read())
     p = d.get('payload', d)
+    if isinstance(p, str):
+        p = json.loads(p)
     wf_cost = p.get('workflow_total_cost_usd', 0)
     report = p.get('report', [])
     print(f'  Workflow total cost: \${wf_cost:.6f}')

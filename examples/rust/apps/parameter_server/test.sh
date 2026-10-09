@@ -64,7 +64,7 @@ read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 
 grpc_seed_nodes() {
@@ -131,12 +131,13 @@ for node in "${NODE_LIST[@]}"; do
   fi
 done
 
-TEMP_CONFIG="$(mktemp -t parameter-server-app-config)"
-      trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-      APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+      trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+      APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-      zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 render_config "$TEMP_CONFIG"
+      zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Step 1: Undeploy from all nodes, then deploy to all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
@@ -157,7 +158,7 @@ for node in "${NODE_LIST[@]}"; do
         -F "version=1.0.0" \
         -F "app_file=@$APP_ZIP" 2>&1) || true
     else
-      APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+      APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
       zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
       deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
@@ -185,7 +186,7 @@ done
 _deployed=0
 for _attempt in 1 2 3; do
   if [ -n "$AUTH_HEADER" ]; then
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+    APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
     zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
     deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
@@ -196,7 +197,7 @@ rm -f "$APP_ZIP"
       -F "version=1.0.0" \
       -F "app_file=@$APP_ZIP" 2>&1) || true
   else
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+    APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
     zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
     deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
@@ -224,8 +225,8 @@ echo -e "  ${GREEN}Deployed${NC}"
 echo "Step 1b: Wait for cluster node discovery (async SWIM reconcile)"
 wait_for_registry_membership "${#NODE_LIST[@]}" 5 2
 echo -e "  ${GREEN}All ${#NODE_LIST[@]} nodes discovered${NC}"
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 
 run_payload=$(cat <<EOF
 {"op":"run","param_count":$PARAM_COUNT,"worker_count":$WORKER_COUNT,"iterations":$ITERATIONS,"batch_size":$BATCH_SIZE}

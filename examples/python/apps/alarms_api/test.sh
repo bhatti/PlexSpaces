@@ -58,6 +58,8 @@ extract() {
 import json, os
 d = json.loads(os.environ['RAW'])
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 print(p.get(os.environ['KEY'], ''))
 " 2>/dev/null || echo ""
 }
@@ -70,7 +72,7 @@ echo "  HTTP: $HTTP_HOST:$HTTP_PORT  App: $APP_ID"
 echo ""
 
 # ── Build if needed ───────────────────────────────────────────────────────────
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   echo "Building WASM actor..."
   source "$HOME/venv/bin/activate" 2>/dev/null || true
   chmod +x "$SCRIPT_DIR/build.sh"
@@ -90,7 +92,8 @@ echo ""
 
 # ── Step 1: Deploy ────────────────────────────────────────────────────────────
 echo "Step 1: Deploy application"
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
+rm -f "$APP_ZIP"
 trap 'rm -f "$APP_ZIP"' EXIT
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 

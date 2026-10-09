@@ -96,7 +96,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 "$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT2" 2>/dev/null || true
 sleep 1
 
-APP_ZIP="$(mktemp /tmp/redis_cluster_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 trap 'rm -f "$APP_ZIP"' EXIT
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
@@ -250,12 +250,13 @@ check "SET TPS reported" "$R" '"tps"'
 check "SET p50 reported" "$R" '"p50_ms"'
 check "GET p50 reported" "$R" '"get"'
 if echo "$R" | grep -q '"tps"'; then
-    SET_TPS=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['set']['tps'])" 2>/dev/null || echo "?")
-    GET_TPS=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['get']['tps'])" 2>/dev/null || echo "?")
-    SET_P50=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['set']['p50_ms'])" 2>/dev/null || echo "?")
-    SET_P99=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['set']['p99_ms'])" 2>/dev/null || echo "?")
-    GET_P50=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['get']['p50_ms'])" 2>/dev/null || echo "?")
-    GET_P99=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['get']['p99_ms'])" 2>/dev/null || echo "?")
+    _unwrap() { python3 -c "import sys,json; raw=json.load(sys.stdin); d=raw.get('payload',raw); print($1)" 2>/dev/null || echo "?"; }
+    SET_TPS=$(echo "$R" | _unwrap "d['set']['tps']")
+    GET_TPS=$(echo "$R" | _unwrap "d['get']['tps']")
+    SET_P50=$(echo "$R" | _unwrap "d['set']['p50_ms']")
+    SET_P99=$(echo "$R" | _unwrap "d['set']['p99_ms']")
+    GET_P50=$(echo "$R" | _unwrap "d['get']['p50_ms']")
+    GET_P99=$(echo "$R" | _unwrap "d['get']['p99_ms']")
     echo ""
     echo "  ┌─────────────────────────────────────────────────────────────────┐"
     echo "  │  Redis Cluster Throughput (3-shard group, 2-node gRPC cluster)  │"

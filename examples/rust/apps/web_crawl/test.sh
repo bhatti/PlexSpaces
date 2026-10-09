@@ -45,7 +45,7 @@ NC='\033[0m'
 
 APP_ID="rust-web-crawl"
 APP_NAME="rust-web-crawl"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
@@ -85,12 +85,13 @@ if [ "$http_code" = "000" ]; then
   exit 1
 fi
 
-TEMP_CONFIG="$(mktemp -t rust-web-crawl-config)"
-trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 cp "$CONFIG_FILE" "$TEMP_CONFIG"
+zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
 curl -s -X DELETE "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
@@ -118,7 +119,7 @@ if [ "$_deployed" -eq 0 ]; then
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"
-rm -f "$TEMP_CONFIG"; TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"; TEMP_DIR=""
 sleep 2
 
 echo ""

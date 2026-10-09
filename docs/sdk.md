@@ -2185,6 +2185,37 @@ Access PlexSpaces capabilities via the `Host` singleton:
 | `host.Ch().Delete(ctx, name)` | Delete a channel and all pending messages. |
 | `host.Ch().Depth(ctx, name)` | Return number of pending (unacked) messages. |
 
+### TinyGo WASM JSON Safety (`SafeMarshal`)
+
+TinyGo's `encoding/json` has two known crashes in WASM builds:
+
+1. **`float64` in `map[string]any`** → `strconv.genericFtoa` WASM trap
+2. **Nested `map[string]any`** → `fmtsort.Sort` function-table mis-dispatch → `base64.decodeQuantum` trap
+
+The Go SDK provides `plexspaces.SafeMarshal` to avoid both. Use it as the `marshal` helper in your actor code:
+
+```go
+// Replace standard marshal in your actor file:
+func marshal(v any) string {
+    return plexspaces.SafeMarshal(v)  // safe for float64 and nested maps
+}
+
+// Float64 values and nested maps now work safely:
+return marshal(map[string]any{
+    "granularity_ratio": 2.8,      // float64 ✅
+    "results": []map[string]any{   // nested via []map[string]any ✅
+        {"shards": 4, "speedup": 1.0},
+        {"shards": 8, "speedup": 1.88},
+    },
+})
+```
+
+`SafeMarshal` handles: `nil`, `bool`, `int`/`int32`/`int64`, `uint`/`uint32`/`uint64`, `float32`/`float64`, `string`, `map[string]any`, `[]any`, `[]map[string]any`, `[]string`, `[]int`, `[]int64`, `[]float64`, `map[string]string`. For other types it falls back to `encoding/json`.
+
+**SDK parity**: Python actors use `json.dumps` (CPython runtime, no TinyGo bugs). TypeScript actors use `JSON.stringify`. Rust actors use `serde_json`. These do not have TinyGo's broken `strconv.genericFtoa` or `fmtsort.Sort` paths — `SafeMarshal` is a Go/TinyGo-only helper.
+
+For details and workarounds see [WASM Deployment: TinyGo JSON Traps](wasm-deployment.md#float64-in-mapstringany-causes-wasm-trap-critical).
+
 ### WASM Component Model Architecture
 
 The Go SDK implements the WASM Component Model canonical ABI directly in `exports.go`:
@@ -2198,11 +2229,12 @@ This eliminates the need for `--dummy-names legacy` in `wasm-tools component emb
 
 ### Testing
 
-The SDK includes comprehensive tests (`plexspaces_test.go`) that run natively (not in WASM) using stub implementations of all host functions. Tests cover:
+The SDK includes comprehensive tests that run natively (not in WASM) using stub implementations of all host functions. Tests cover:
 - Actor interface and BaseActor state round-trip
 - ActorRouter prefix matching and longest-match-wins logic
 - Host function stubs for all capabilities (KV, PG, Locks, Blobs, TupleSpace)
 - Error handling and HostError type
+- `SafeMarshal`: float64 values, nested maps, `[]map[string]any`, NaN/Inf, special string escapes, all primitive types
 
 ### Examples
 

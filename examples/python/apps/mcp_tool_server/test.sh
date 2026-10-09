@@ -42,7 +42,7 @@ APP_ID="python-mcp-tool-server"
 APP_NAME="python-mcp-tool-server"
 # actor_type must match the Python class name in app-config.toml exactly.
 REGISTRY_ACTOR="default:ToolRegistryActor"
-TEMP_CONFIG=""
+TEMP_DIR=""
 
 read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
@@ -95,7 +95,7 @@ pass() {
 }
 
 # ── Build if needed ──────────────────────────────────────────────────────────
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
   "$SCRIPT_DIR/build.sh"
 fi
 
@@ -111,12 +111,13 @@ for node in "${NODE_LIST[@]}"; do
 done
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
-TEMP_CONFIG="$(mktemp -t python-mcp-tool-server-app-config)"
-  trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
-  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+TEMP_DIR="$(mktemp -d)"
+TEMP_CONFIG="$TEMP_DIR/app-config.toml"
+  trap 'rm -rf "${TEMP_DIR:-}" "${APP_ZIP:-}"' EXIT
+  APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
-  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 render_config "$TEMP_CONFIG"
+  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 echo "Undeploy from all nodes, then deploy to entry node..."
 "$SCRIPT_DIR/undeploy.sh" $NODES
@@ -143,8 +144,8 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $body${NC}"
   exit 1
 fi
-rm -f "$TEMP_CONFIG"
-TEMP_CONFIG=""
+rm -rf "$TEMP_DIR"
+TEMP_DIR=""
 sleep 2
 
 echo ""

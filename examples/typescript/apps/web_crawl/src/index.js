@@ -155,6 +155,46 @@ class PageFetcher extends PlexSpacesActor {
             shard_count: shardCount,
         };
     }
+    // Worker-local benchmark: generates pages locally and runs num_passes of crawl simulation.
+    // Leader sends one broadcast SG — enables true weak/strong scaling with one round trip.
+    onBenchmark_crawl(payload) {
+        const pagesPerWorker = Number(payload.pages_per_worker ?? 200);
+        const numPasses = Number(payload.num_passes ?? 4);
+        const seed = Number(payload.seed ?? 42);
+        const compStart = host.nowMs();
+        // Generate a deterministic set of URLs for this worker
+        const domains = ["example.com", "docs.example.com", "api.example.com", "blog.example.com"];
+        const sections = ["about", "docs", "api", "blog", "pricing", "features", "integrations", "changelog"];
+        const subpaths = ["overview", "quickstart", "reference", "guide", "examples", "faq", "support", "contact"];
+        const urls = [];
+        let h = seed;
+        for (let i = 0; i < pagesPerWorker; i++) {
+            h = (h * 1103515245 + 12345) & 0x7fffffff;
+            const d = domains[h % domains.length];
+            const s = sections[(h >> 8) % sections.length];
+            const p = subpaths[(h >> 16) % subpaths.length];
+            urls.push(`https://${d}/${s}/${p}/${i}`);
+        }
+        let totalWords = 0;
+        let totalLinks = 0;
+        for (let pass = 0; pass < numPasses; pass++) {
+            for (const url of urls) {
+                const wc = simulateWordCounts(url);
+                for (const c of Object.values(wc))
+                    totalWords += c;
+                const links = simulateLinks(url);
+                totalLinks += links.length;
+            }
+        }
+        const computeMs = host.nowMs() - compStart;
+        return {
+            pages_crawled: pagesPerWorker,
+            total_words: totalWords,
+            total_links: totalLinks,
+            passes: numPasses,
+            compute_ms: computeMs,
+        };
+    }
     onStatus_request() {
         return {
             fetch_count: this.state.fetch_count,
@@ -400,133 +440,98 @@ class WebCrawlOrchestrator extends PlexSpacesActor {
             parallel_fraction: parallelFraction,
         };
     }
-    onBenchmark(payload) {
-        const workerCountsRaw = payload.worker_counts ?? [1, 4, 8, 16];
-        const workerCounts = workerCountsRaw.map(Number);
-        const pagesPerRound = Number(payload.pages_per_round ?? 200);
-        // Build URL corpus — same for all rounds
-        const domains = ["example.com", "docs.example.com", "api.example.com", "blog.example.com"];
-        const sections = ["about", "docs", "api", "blog", "pricing", "features", "integrations", "changelog"];
-        const subpaths = ["overview", "quickstart", "reference", "guide", "examples", "faq"];
-        const uniqueWords = domains.length * sections.length * subpaths.length;
-        const urls = [];
-        for (const d of domains)
-            urls.push(`https://${d}`);
-        outer1: for (const d of domains) {
-            for (const s of sections) {
-                if (urls.length >= pagesPerRound)
-                    break outer1;
-                urls.push(`https://${d}/${s}`);
-            }
-        }
-        outer2: for (const d of domains) {
-            for (const s of sections) {
-                for (const p of subpaths) {
-                    if (urls.length >= pagesPerRound)
-                        break outer2;
-                    urls.push(`https://${d}/${s}/${p}`);
-                }
-            }
-        }
-        const subs = ["v1", "v2", "v3", "beta"];
-        for (let i = 0; urls.length < pagesPerRound; i++) {
-            urls.push(`https://${domains[i % domains.length]}/${sections[i % sections.length]}/${subpaths[i % subpaths.length]}/${subs[i % subs.length]}`);
-        }
-        urls.length = pagesPerRound;
+    runBenchmarkSg(workerCounts, getPagesPerWorker, numPasses, seedMultiplier, prefix) {
         const results = [];
         let baselinePps = 0;
         for (const numWorkers of workerCounts) {
-            const groupId = `bench-fetchers-${numWorkers}-${host.nowMs() % 100000}`;
-            // Write seed tuples to TupleSpace (demonstrates the primitive)
-            for (let i = 0; i < 4 && i < urls.length; i++) {
-                host.ts.write(["url_queue", urls[i], "pending", "0"]);
+            const groupId = `${prefix}-${numWorkers}-${host.nowMs() % 100000}`;
+            try {
+                host.createShardGroup({
+                    groupId,
+                    actorType: "fetcher",
+                    shardCount: numWorkers,
+                    partitionStrategy: "hash",
+                    rebalancePolicy: "manual",
+                    placement: { strategy: "from_registry" },
+                    initialState: {},
+                });
             }
-            let coordMs = 0;
-            let fetchMs = 0;
-            let totalWords = 0;
-            const workerFetches = new Array(numWorkers).fill(0);
+            catch (e) {
+                results.push({ workers: numWorkers, pages: 0, elapsed_ms: 0, coord_ms: 0, fetch_ms: 0,
+                    pages_per_sec: 0, speedup: 0, efficiency_pct: 0, total_words: 0, error_count: 1,
+                    error: String(e) });
+                continue;
+            }
+            const pagesPerWorker = getPagesPerWorker(numWorkers);
             const t0 = host.nowMs();
-            // ── ScatterGather parallel dispatch ──
-            const tCoord0 = host.nowMs();
             let sgResult = null;
             try {
-                const sgGroup = host.createShardGroup({
-                    group_id: groupId,
-                    actor_type: "fetcher",
-                    shard_count: numWorkers,
-                    partition_strategy: "hash",
-                    rebalance_policy: "manual",
-                    placement: { strategy: "from_registry" },
-                    initial_state: {},
+                sgResult = host.scatterGather({
+                    groupId,
+                    query: { op: "benchmark_crawl", pages_per_worker: pagesPerWorker, num_passes: numPasses, seed: numWorkers * seedMultiplier },
+                    timeoutMs: 60000,
                 });
-                coordMs += host.nowMs() - tCoord0;
-                if (sgGroup) {
-                    const tFetch = host.nowMs();
-                    sgResult = host.scatterGather({
-                        group_id: groupId,
-                        message_type: "fetch_batch",
-                        query: { urls, shard_count: numWorkers, depth: 1 },
-                        aggregation: "concat",
-                        min_responses: numWorkers,
-                        timeout_ms: 60000,
-                    });
-                    fetchMs += host.nowMs() - tFetch;
-                }
             }
-            catch {
-                coordMs += host.nowMs() - tCoord0;
+            catch (e) {
+                const elapsed2 = host.nowMs() - t0;
+                results.push({ workers: numWorkers, pages: 0, elapsed_ms: elapsed2, coord_ms: elapsed2, fetch_ms: 0,
+                    pages_per_sec: 0, speedup: 0, efficiency_pct: 0, total_words: 0, error_count: 1,
+                    error: String(e) });
+                continue;
             }
-            const tCoordPost = host.nowMs();
-            if (sgResult) {
-                const shardResponses = sgResult.shard_responses ?? [];
-                for (let si = 0; si < shardResponses.length; si++) {
-                    const sr = shardResponses[si];
-                    const p = normalizePayload(sr);
-                    const fc = Number(p.pages_fetched ?? 0);
-                    const tw = Number(p.total_words ?? 0);
-                    if (si < numWorkers)
-                        workerFetches[si] = fc;
-                    totalWords += tw;
-                }
-            }
-            else {
-                // Fallback: compute locally
-                for (const url of urls) {
-                    const wc = simulateWordCounts(url);
-                    for (const c of Object.values(wc))
-                        totalWords += Number(c);
-                }
-                for (let i = 0; i < numWorkers; i++) {
-                    workerFetches[i] = Math.floor(pagesPerRound / numWorkers);
-                }
-            }
-            // TupleSpace writes for metadata demo
-            for (let i = 0; i < 4 && i < urls.length; i++) {
-                host.ts.write(["url_queue", urls[i], "visited", "1"]);
-            }
-            coordMs += host.nowMs() - tCoordPost;
             const elapsed = host.nowMs() - t0;
-            const pps = elapsed > 0 ? (pagesPerRound * 1000) / elapsed : 0;
-            const parallelFraction = elapsed > 0 ? 1.0 - coordMs / Math.max(elapsed, 1) : 1.0;
+            let totalWords = 0;
+            let totalCrawled = 0;
+            let totalCompute = 0;
+            let errorCount = 0;
+            for (const sr of (sgResult?.shardResponses ?? [])) {
+                const p = normalizePayload((sr.payload ?? {}));
+                if (!sr.success || p.error) {
+                    errorCount++;
+                    continue;
+                }
+                totalWords += Number(p.total_words ?? 0);
+                totalCrawled += Number(p.pages_crawled ?? 0);
+                totalCompute += Number(p.compute_ms ?? 0);
+            }
+            const avgComputeMs = numWorkers > 0 ? Math.round(totalCompute / numWorkers) : 0;
+            const coordMs = Math.max(elapsed - avgComputeMs, 1);
+            const pps = elapsed > 0 ? (totalCrawled * 1000) / elapsed : 0;
             if (!baselinePps && pps > 0)
                 baselinePps = pps;
             const speedup = baselinePps > 0 ? pps / baselinePps : 1.0;
             const efficiency = speedup / numWorkers * 100;
             results.push({
                 workers: numWorkers,
-                pages: pagesPerRound,
+                pages: totalCrawled,
                 elapsed_ms: elapsed,
                 coord_ms: coordMs,
-                fetch_ms: fetchMs,
+                fetch_ms: avgComputeMs,
                 pages_per_sec: pps,
                 speedup,
                 efficiency_pct: efficiency,
-                parallel_fraction: parallelFraction,
-                worker_fetches: workerFetches,
                 total_words: totalWords,
-                unique_words: uniqueWords,
+                error_count: errorCount,
             });
         }
+        return results;
+    }
+    // Strong scaling: fixed total 200 pages split across N workers (pages_per_worker=ceil(200/N))
+    onBenchmark(payload) {
+        const workerCountsRaw = payload.worker_counts ?? [2, 4, 8, 16];
+        const workerCounts = workerCountsRaw.map(Number);
+        const totalPages = Number(payload.pages_per_round ?? 200);
+        const numPasses = Number(payload.num_passes ?? 4);
+        const results = this.runBenchmarkSg(workerCounts, (n) => Math.ceil(totalPages / n), numPasses, 100, "bench-strong");
+        return { status: "ok", results };
+    }
+    // Weak scaling: fixed pages_per_worker (200) × N workers — total work grows with N.
+    onRun_weak_scaling_benchmark(payload) {
+        const shardCountsRaw = payload.shard_counts ?? [2, 4, 8, 16];
+        const shardCounts = shardCountsRaw.map(Number);
+        const pagesPerWorker = Number(payload.pages_per_worker ?? 200);
+        const numPasses = Number(payload.num_passes ?? 4);
+        const results = this.runBenchmarkSg(shardCounts, (_n) => pagesPerWorker, numPasses, 200, "bench-weak");
         return { status: "ok", results };
     }
     onStatus() {

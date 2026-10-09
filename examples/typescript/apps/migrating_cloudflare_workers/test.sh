@@ -63,7 +63,7 @@ echo "  Batch rate checks: $BATCH_RATE_CHECKS"
 echo ""
 
 # Build if needed
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
     echo "Building WASM actor..."
     chmod +x "$SCRIPT_DIR/build.sh"
     "$SCRIPT_DIR/build.sh" || { echo -e "${RED}Build failed${NC}"; exit 1; }
@@ -74,7 +74,7 @@ fi
 echo "Step 1: Check node status"
 echo "----------------------------------------------------------------"
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
@@ -262,6 +262,8 @@ if echo "$MSG_BATCH_RESP" | grep -q '"status":"ok"'; then
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 total = p.get('total_sent', 0)
 fan = p.get('total_fan_out', 0)
 compute = p.get('compute_ms', 0)
@@ -310,6 +312,8 @@ if echo "$BATCH_RL_RESP" | grep -q '"status":"ok"'; then
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 total = p.get('total_requests', 0)
 allowed = p.get('allowed', 0)
 denied = p.get('denied', 0)

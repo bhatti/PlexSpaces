@@ -39,7 +39,7 @@ start_node() {
     
     # Wait for node to start
     for i in {1..30}; do
-        APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+        APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
         zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
         HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
@@ -187,7 +187,7 @@ echo "📦 Re-deploying to reactivate actors..."
 curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" 2>/dev/null || true
 sleep 1
 
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \

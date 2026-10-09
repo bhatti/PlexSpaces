@@ -178,10 +178,13 @@ function ulid(): string {
 }
 
 function encodeMessage(query: Record<string, unknown>): Uint8Array {
+  const op = (query['op'] as string) || (query['message_type'] as string) || 'call';
   let buf: Uint8Array = new Uint8Array(0);
   buf = appendString(buf, 1, ulid());
-  buf = appendString(buf, 5, 'call');
-  const payloadBytes = new Uint8Array(encW.encode(JSON.stringify(query)));
+  buf = appendString(buf, 5, op);
+  // inject message_type into payload so the receiver can read it
+  const payloadObj: Record<string, unknown> = { ...query, message_type: op };
+  const payloadBytes = new Uint8Array(encW.encode(JSON.stringify(payloadObj)));
   buf = appendBytes(buf, 6, payloadBytes);
   return buf;
 }
@@ -190,15 +193,19 @@ function encodeMessage(query: Record<string, unknown>): Uint8Array {
 // CreateShardGroupRequest encoder
 //
 // message CreateShardGroupRequest {
-//   DataParallelConfig config = 1;   (embedded)
-//   string actor_type = 2;
-//   ActorConfig shard_config = 3;    (not used here)
-//   bytes initial_state = 4;
+//   string request_id = 1;
+//   DataParallelConfig config = 2;   (embedded)
+//   string actor_type = 3;
+//   ActorConfig shard_config = 4;    (not used here)
+//   bytes initial_state = 5;
+//   map<string, string> metadata = 6;
 // }
 // ---------------------------------------------------------------------------
 
 export function encodeCreateShardGroupRequest(req: Record<string, unknown>): Uint8Array {
   let buf: Uint8Array = new Uint8Array(0);
+
+  buf = appendString(buf, 1, ulid());
 
   // config = DataParallelConfig (fields: group_id, shard_count, partition_strategy, rebalance_policy, placement)
   const cfgFields: Record<string, unknown> = {
@@ -209,15 +216,25 @@ export function encodeCreateShardGroupRequest(req: Record<string, unknown>): Uin
     placement: req.placement,
   };
   const cfgBytes = encodeDataParallelConfig(cfgFields);
-  buf = appendLengthDelimited(buf, 1, cfgBytes);
+  buf = appendLengthDelimited(buf, 2, cfgBytes);
 
-  buf = appendString(buf, 2, (req.actor_type as string) ?? '');
+  buf = appendString(buf, 3, (req.actor_type as string) ?? '');
 
   const initialState = req.initial_state;
   if (initialState !== undefined && initialState !== null) {
     const stateBytes = new Uint8Array(encW.encode(JSON.stringify(initialState)));
     if (stateBytes.length > 0) {
-      buf = appendBytes(buf, 4, stateBytes);
+      buf = appendBytes(buf, 5, stateBytes);
+    }
+  }
+
+  const metadata = req.metadata as Record<string, string> | undefined;
+  if (metadata && typeof metadata === 'object') {
+    for (const [k, v] of Object.entries(metadata)) {
+      let entry: Uint8Array = new Uint8Array(0);
+      entry = appendString(entry, 1, k);
+      entry = appendString(entry, 2, String(v));
+      buf = appendLengthDelimited(buf, 6, entry);
     }
   }
 
@@ -228,11 +245,12 @@ export function encodeCreateShardGroupRequest(req: Record<string, unknown>): Uin
 // ScatterGatherRequest encoder
 //
 // message ScatterGatherRequest {
-//   string group_id = 1;
-//   Message query = 2;                              (embedded)
-//   google.protobuf.Duration timeout = 3;           (embedded)
-//   ShardGroupAggregationStrategy aggregation = 4;  (varint)
-//   uint32 min_responses = 5;
+//   string request_id = 1;
+//   string group_id = 2;
+//   Message query = 3;                              (embedded)
+//   google.protobuf.Duration timeout = 4;           (embedded)
+//   ShardGroupAggregationStrategy aggregation = 5;  (varint)
+//   uint32 min_responses = 6;
 // }
 //
 // google.protobuf.Duration { int64 seconds=1, int32 nanos=2 }
@@ -258,25 +276,26 @@ function encodeDurationMs(ms: number): Uint8Array {
 export function encodeScatterGatherRequest(req: Record<string, unknown>): Uint8Array {
   let buf: Uint8Array = new Uint8Array(0);
 
-  buf = appendString(buf, 1, (req.group_id as string) ?? '');
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, (req.group_id as string) ?? '');
 
   const query = req.query as Record<string, unknown> | undefined;
   if (query && typeof query === 'object') {
     const msgBytes = encodeMessage(query);
-    buf = appendLengthDelimited(buf, 2, msgBytes);
+    buf = appendLengthDelimited(buf, 3, msgBytes);
   }
 
   const timeoutMs = Number(req.timeout_ms ?? 30000);
   if (timeoutMs > 0) {
     const durBytes = encodeDurationMs(timeoutMs);
-    if (durBytes.length > 0) buf = appendLengthDelimited(buf, 3, durBytes);
+    if (durBytes.length > 0) buf = appendLengthDelimited(buf, 4, durBytes);
   }
 
   const agg = aggregationStrategyEnum(req.aggregation as string);
-  if (agg !== 0) buf = appendUint32(buf, 4, agg);
+  if (agg !== 0) buf = appendUint32(buf, 5, agg);
 
   const minResponses = Number(req.min_responses ?? 0) >>> 0;
-  if (minResponses > 0) buf = appendUint32(buf, 5, minResponses);
+  if (minResponses > 0) buf = appendUint32(buf, 6, minResponses);
 
   return buf;
 }
@@ -375,7 +394,7 @@ export function decodeCreateShardGroupResponse(data: Uint8Array): Record<string,
     pos += tn;
     const fn = Number(tag >> 3n);
     const wt = Number(tag & 7n);
-    if (fn === 1 && wt === 2) {
+    if (fn === 2 && wt === 2) {
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
       group = decodeShardGroup(slice);
@@ -390,17 +409,25 @@ export function decodeCreateShardGroupResponse(data: Uint8Array): Record<string,
 // ScatterGatherResponse decoder
 //
 // message ScatterGatherResponse {
-//   Message result = 1;
-//   repeated ShardQueryResponse shard_responses = 2;
-//   ScatterGatherStats stats = 3;
+//   string request_id = 1;
+//   Message result = 2;
+//   repeated ShardQueryResponse shard_responses = 3;
+//   ScatterGatherStats stats = 4;
 // }
 // message ShardQueryResponse {
-//   uint32 shard_id = 1;
-//   string shard_actor_id = 2;
-//   Message response = 3;
-//   Duration latency = 4;
-//   bool success = 5;
-//   string error = 6;
+//   string request_id = 1;
+//   uint32 shard_id = 2;
+//   string shard_actor_id = 3;
+//   Message response = 4;
+//   Duration latency = 5;
+//   bool success = 6;
+//   string error = 7;
+// }
+// message ScatterGatherStats {
+//   uint32 shards_queried = 1;
+//   uint32 shards_responded = 2;
+//   uint32 shards_failed = 3;
+//   Duration max_latency = 4;
 // }
 // message Message { ... bytes payload = 6; ... }
 // ---------------------------------------------------------------------------
@@ -430,6 +457,29 @@ function decodeMessagePayload(data: Uint8Array): unknown {
   }
 }
 
+function decodeScatterGatherStats(data: Uint8Array): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    shards_queried: 0, shards_responded: 0, shards_failed: 0, max_latency_ms: 0,
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos); result.shards_queried = value; pos = nextPos;
+    } else if (fn === 2 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos); result.shards_responded = value; pos = nextPos;
+    } else if (fn === 3 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos); result.shards_failed = value; pos = nextPos;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return result;
+}
+
 function decodeShardQueryResponse(data: Uint8Array): Record<string, unknown> {
   const result: Record<string, unknown> = {
     shard_id: 0,
@@ -444,24 +494,23 @@ function decodeShardQueryResponse(data: Uint8Array): Record<string, unknown> {
     pos += tn;
     const fn = Number(tag >> 3n);
     const wt = Number(tag & 7n);
-    if (fn === 1 && wt === 0) {
+    if (fn === 2 && wt === 0) {
       const { value, nextPos } = readUint32(data, pos);
       pos = nextPos;
       result.shard_id = value;
-    } else if (fn === 2 && wt === 2) {
+    } else if (fn === 3 && wt === 2) {
       const { value, nextPos } = readString(data, pos);
       pos = nextPos;
       result.shard_actor_id = value;
-    } else if (fn === 3 && wt === 2) {
+    } else if (fn === 4 && wt === 2) {
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
-      // Expose the message payload directly so normalizeWorkerPayload can find it
       result.payload = decodeMessagePayload(slice);
-    } else if (fn === 5 && wt === 0) {
+    } else if (fn === 6 && wt === 0) {
       const { value, nextPos } = readUint32(data, pos);
       pos = nextPos;
       result.success = value !== 0;
-    } else if (fn === 6 && wt === 2) {
+    } else if (fn === 7 && wt === 2) {
       const { value, nextPos } = readString(data, pos);
       pos = nextPos;
       result.error = value;
@@ -474,6 +523,33 @@ function decodeShardQueryResponse(data: Uint8Array): Record<string, unknown> {
 
 export function decodeScatterGatherResponse(data: Uint8Array): Record<string, unknown> {
   const shardResponses: Record<string, unknown>[] = [];
+  let stats: Record<string, unknown> | null = null;
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      shardResponses.push(decodeShardQueryResponse(slice));
+    } else if (fn === 4 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      stats = decodeScatterGatherStats(slice);
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { shard_responses: shardResponses, stats: stats ?? {} };
+}
+
+// BroadcastShardGroupResponse and BarrierShardGroupResponse have shard_responses at field 2
+// (not field 3 like ScatterGatherResponse) — they lack the aggregated result field.
+function decodeBroadcastLikeResponse(data: Uint8Array): Record<string, unknown> {
+  const shardResponses: Record<string, unknown>[] = [];
+  let stats: Record<string, unknown> | null = null;
   let pos = 0;
   while (pos < data.length) {
     const { value: tag, n: tn } = readVarint(data, pos);
@@ -484,11 +560,15 @@ export function decodeScatterGatherResponse(data: Uint8Array): Record<string, un
       const { slice, nextPos } = readLengthDelimited(data, pos);
       pos = nextPos;
       shardResponses.push(decodeShardQueryResponse(slice));
+    } else if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      stats = decodeScatterGatherStats(slice);
     } else {
       pos = skipField(data, pos, wt);
     }
   }
-  return { shard_responses: shardResponses };
+  return { shard_responses: shardResponses, stats: stats ?? {} };
 }
 
 // ---------------------------------------------------------------------------
@@ -847,6 +927,263 @@ function decodeShardUpdateStats(data: Uint8Array): Record<string, unknown> {
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// collectiveReductionEnum — maps JS string names to proto CollectiveReduction values
+// sum=1, min=2, max=3, product=4, concat=5, bool_and=6, bool_or=7
+// ---------------------------------------------------------------------------
+
+function collectiveReductionEnum(s: string | undefined): number {
+  switch ((s ?? '').toLowerCase()) {
+    case 'sum': return 1;
+    case 'min': return 2;
+    case 'max': return 3;
+    case 'product': return 4;
+    case 'concat': return 5;
+    case 'bool_and': return 6;
+    case 'bool_or': return 7;
+    default: return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BroadcastShardGroupRequest encoder
+//
+// message BroadcastShardGroupRequest {
+//   string request_id = 1;
+//   string group_id = 2;
+//   Message message = 3;
+//   google.protobuf.Duration timeout = 4;
+//   uint32 min_acks = 5;
+// }
+// ---------------------------------------------------------------------------
+
+export function encodeBroadcastShardGroupRequest(req: Record<string, unknown>): Uint8Array {
+  let buf: Uint8Array = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, (req.group_id as string) ?? '');
+  const message = req.message as Record<string, unknown> | undefined;
+  if (message && typeof message === 'object') {
+    buf = appendLengthDelimited(buf, 3, encodeMessage(message));
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 30000);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0) buf = appendLengthDelimited(buf, 4, durBytes);
+  }
+  const minAcks = Number(req.min_acks ?? 0) >>> 0;
+  if (minAcks > 0) buf = appendUint32(buf, 5, minAcks);
+  return buf;
+}
+
+// ---------------------------------------------------------------------------
+// ReduceShardGroupRequest encoder
+//
+// message ReduceShardGroupRequest {
+//   string request_id = 1;
+//   string group_id = 2;
+//   Message map_function = 3;
+//   google.protobuf.Duration timeout = 4;
+//   uint32 min_responses = 5;
+//   CollectiveReduction reduction = 6;  (varint)
+//   CollectiveTargetField target = 7;   (embedded: string value_path = 1)
+// }
+// ---------------------------------------------------------------------------
+
+export function encodeReduceShardGroupRequest(req: Record<string, unknown>): Uint8Array {
+  let buf: Uint8Array = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, (req.group_id as string) ?? '');
+  const mapFn = req.map_function as Record<string, unknown> | undefined;
+  if (mapFn && typeof mapFn === 'object') {
+    buf = appendLengthDelimited(buf, 3, encodeMessage(mapFn));
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 30000);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0) buf = appendLengthDelimited(buf, 4, durBytes);
+  }
+  const minResponses = Number(req.min_responses ?? 0) >>> 0;
+  if (minResponses > 0) buf = appendUint32(buf, 5, minResponses);
+  const reduction = collectiveReductionEnum(req.reduction as string);
+  if (reduction !== 0) buf = appendUint32(buf, 6, reduction);
+  const target = req.target as string | undefined;
+  if (target) {
+    let targetField: Uint8Array = new Uint8Array(0);
+    targetField = appendString(targetField, 1, target);
+    buf = appendLengthDelimited(buf, 7, targetField);
+  }
+  return buf;
+}
+
+// ---------------------------------------------------------------------------
+// AllReduceShardGroupRequest encoder — identical shape to ReduceShardGroupRequest
+// ---------------------------------------------------------------------------
+
+export function encodeAllReduceShardGroupRequest(req: Record<string, unknown>): Uint8Array {
+  return encodeReduceShardGroupRequest(req);
+}
+
+// ---------------------------------------------------------------------------
+// BarrierShardGroupRequest encoder
+//
+// message BarrierShardGroupRequest {
+//   string request_id = 1;
+//   string group_id = 2;
+//   string barrier_id = 3;
+//   uint64 round = 4;  (varint)
+//   google.protobuf.Duration timeout = 5;
+//   uint32 min_acks = 6;
+// }
+// ---------------------------------------------------------------------------
+
+export function encodeBarrierShardGroupRequest(req: Record<string, unknown>): Uint8Array {
+  let buf: Uint8Array = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, (req.group_id as string) ?? '');
+  buf = appendString(buf, 3, (req.barrier_id as string) ?? '');
+  const round = Number(req.round ?? 0);
+  if (round > 0) {
+    buf = appendVarint(buf, (4 << 3) | 0);
+    buf = appendVarint(buf, round);
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 30000);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0) buf = appendLengthDelimited(buf, 5, durBytes);
+  }
+  const minAcks = Number(req.min_acks ?? 0) >>> 0;
+  if (minAcks > 0) buf = appendUint32(buf, 6, minAcks);
+  return buf;
+}
+
+// ---------------------------------------------------------------------------
+// MapShardGroupRequest encoder
+//
+// message MapShardGroupRequest {
+//   string request_id = 1;
+//   string group_id = 2;
+//   Message map_function = 3;
+//   google.protobuf.Duration timeout = 4;
+//   uint32 min_responses = 5;
+// }
+// ---------------------------------------------------------------------------
+
+export function encodeMapShardGroupRequest(req: Record<string, unknown>): Uint8Array {
+  let buf: Uint8Array = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 2, (req.group_id as string) ?? '');
+  const mapFn = req.map_function as Record<string, unknown> | undefined;
+  if (mapFn && typeof mapFn === 'object') {
+    buf = appendLengthDelimited(buf, 3, encodeMessage(mapFn));
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 30000);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0) buf = appendLengthDelimited(buf, 4, durBytes);
+  }
+  const minResponses = Number(req.min_responses ?? 0) >>> 0;
+  if (minResponses > 0) buf = appendUint32(buf, 5, minResponses);
+  return buf;
+}
+
+// ---------------------------------------------------------------------------
+// BroadcastShardGroupResponse decoder
+//
+// message BroadcastShardGroupResponse {
+//   string request_id = 1;
+//   repeated ShardQueryResponse shard_responses = 2;
+//   ScatterGatherStats stats = 3;
+// }
+// ---------------------------------------------------------------------------
+
+export function decodeBroadcastShardGroupResponse(data: Uint8Array): Record<string, unknown> {
+  return decodeBroadcastLikeResponse(data);
+}
+
+// ---------------------------------------------------------------------------
+// ReduceShardGroupResponse decoder
+//
+// message ReduceShardGroupResponse {
+//   string request_id = 1;
+//   Message result = 2;
+//   repeated ShardQueryResponse shard_responses = 3;
+// }
+// ---------------------------------------------------------------------------
+
+export function decodeReduceShardGroupResponse(data: Uint8Array): Record<string, unknown> {
+  const shardResponses: Record<string, unknown>[] = [];
+  let result: unknown = {};
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 2 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      result = decodeMessagePayload(slice);
+    } else if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      shardResponses.push(decodeShardQueryResponse(slice));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { result, shard_responses: shardResponses };
+}
+
+// ---------------------------------------------------------------------------
+// AllReduceShardGroupResponse decoder — same shape as ReduceShardGroupResponse
+// ---------------------------------------------------------------------------
+
+export function decodeAllReduceShardGroupResponse(data: Uint8Array): Record<string, unknown> {
+  return decodeReduceShardGroupResponse(data);
+}
+
+// ---------------------------------------------------------------------------
+// BarrierShardGroupResponse decoder — same shape as BroadcastShardGroupResponse
+//
+// message BarrierShardGroupResponse {
+//   string request_id = 1;
+//   repeated ShardQueryResponse shard_responses = 2;
+//   ScatterGatherStats stats = 3;
+// }
+// ---------------------------------------------------------------------------
+
+export function decodeBarrierShardGroupResponse(data: Uint8Array): Record<string, unknown> {
+  return decodeBroadcastLikeResponse(data);
+}
+
+// ---------------------------------------------------------------------------
+// MapShardGroupResponse decoder
+//
+// message MapShardGroupResponse {
+//   string request_id = 1;
+//   repeated ShardQueryResponse shard_results = 2;
+// }
+// ---------------------------------------------------------------------------
+
+export function decodeMapShardGroupResponse(data: Uint8Array): Record<string, unknown> {
+  const shardResults: Record<string, unknown>[] = [];
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 2 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      shardResults.push(decodeShardQueryResponse(slice));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { shard_results: shardResults };
 }
 
 export function encodeApplicationMetrics(metrics: Record<string, unknown>): Uint8Array {

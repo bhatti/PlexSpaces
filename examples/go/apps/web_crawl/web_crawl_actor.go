@@ -392,18 +392,17 @@ func (a *webCrawlActor) handleBenchmark(payload map[string]any) string {
 		t0 := host.NowMs()
 
 		// Create shard group from the first numWorkers fetchers
-		sgResp, sgErr := host.CreateShardGroup(map[string]any{
-			"group_id":           groupID,
-			"actor_type":         "fetcher",
-			"shard_count":        numWorkers,
-			"partition_strategy": "hash",
-			"rebalance_policy":   "manual",
-			"placement":          map[string]any{"strategy": "from_registry"},
-			"initial_state":      map[string]any{},
+		_, sgErr := host.CreateShardGroup(plexspaces.CreateShardGroupRequest{
+			GroupID:           groupID,
+			ActorType:         "fetcher",
+			ShardCount:        numWorkers,
+			PartitionStrategy: "hash",
+			RebalancePolicy:   "manual",
+			Placement:         plexspaces.NodePlacement{Strategy: "from_registry"},
 		})
 		coordMs += host.NowMs() - tCoord0
 
-		if sgErr != nil || sgResp == nil {
+		if sgErr != nil {
 			// Fallback to sequential dispatch if ScatterGather setup fails
 			workerIDs := make([]string, numWorkers)
 			for i := 0; i < numWorkers; i++ {
@@ -441,26 +440,23 @@ func (a *webCrawlActor) handleBenchmark(payload map[string]any) string {
 			// Each shard receives the full URL list and processes its own slice
 			// (shard i handles urls[i], urls[i+N], urls[i+2N], ...)
 			tFetch := host.NowMs()
-			sgResult, sgErr2 := host.ScatterGather(map[string]any{
-				"group_id":     groupID,
-				"message_type": "fetch_batch",
-				"query": map[string]any{
+			sgResult, sgErr2 := host.ScatterGather(plexspaces.ScatterGatherRequest{
+				GroupID: groupID,
+				Query: map[string]any{
 					"urls":        urlsAny,
 					"shard_count": numWorkers,
 					"depth":       1,
 				},
-				"aggregation":   "concat",
-				"min_responses": numWorkers,
-				"timeout_ms":    60000,
+				Aggregation:  "concat",
+				MinResponses: numWorkers,
+				TimeoutMs:    60000,
 			})
 			fetchMs += host.NowMs() - tFetch
 
 			tCoordPost := host.NowMs()
-			if sgErr2 == nil && sgResult != nil {
+			if sgErr2 == nil {
 				// Parse shard_responses to count fetches and words
-				shardResponses, _ := sgResult["shard_responses"].([]any)
-				for si, sr := range shardResponses {
-					srMap, _ := sr.(map[string]any)
+				for si, srMap := range sgResult.ShardResponses {
 					payload := normalizePayload(srMap)
 					fc := intField(payload, "pages_fetched", 0)
 					tw := intField(payload, "total_words", 0)

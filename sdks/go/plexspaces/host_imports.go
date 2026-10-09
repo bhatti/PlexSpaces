@@ -25,13 +25,18 @@
 package plexspaces
 
 import (
-	"encoding/json"
+	"strings"
 	"unsafe"
 )
 
-// retArea is the canonical return buffer for host imports. Most WIT functions
-// return result<..., actor-error> (variant); self-id returns string only.
-var retArea [16]byte
+// retArea is the canonical return buffer for host imports.
+// Typed as [2]uint64 so TinyGo places it at an 8-byte-aligned address.
+// The component-model canonical ABI requires the retptr to be aligned to
+// the maximum alignment of the result variant's cases; result<u64, string>
+// needs 8-byte alignment (for the u64 ok-case).  A [16]byte only guarantees
+// 1-byte alignment — TinyGo may place it at a 4-byte boundary, causing a
+// Wasmtime alignment trap on any host import that returns u64.
+var retArea [2]uint64
 
 const maxHostReturnBytes = 64 << 20
 
@@ -118,11 +123,18 @@ func readResultListStringJSON(retptr unsafe.Pointer) string {
 		sl := wasmLoadU32(elemBase + 4)
 		members = append(members, wasmBytesToString(sp, sl))
 	}
-	b, err := json.Marshal(members)
-	if err != nil {
-		return errorPrefix + err.Error()
+	// Build JSON string array manually — avoids encoding/json.Marshal which links
+	// fmtsort into the WASM function table, corrupting actor interface dispatch.
+	var sb strings.Builder
+	sb.WriteByte('[')
+	for i, s := range members {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		writeJSONString(&sb, s)
 	}
-	return string(b)
+	sb.WriteByte(']')
+	return sb.String()
 }
 
 // ========================================================================

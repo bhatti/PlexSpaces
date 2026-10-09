@@ -617,8 +617,8 @@ impl PlexSpacesHealthReporter {
             .await;
         }
 
-        tracing::warn!(
-            "✅ Startup complete in {:?}, node SERVING",
+        tracing::info!(
+            "Startup complete in {:?}, node SERVING",
             startup_duration
         );
 

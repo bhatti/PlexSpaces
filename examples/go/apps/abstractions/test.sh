@@ -177,7 +177,7 @@ if [ ! -f "$WASM_FILE" ]; then
 fi
 
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
@@ -200,7 +200,7 @@ for _attempt in 1 2 3; do
     -F "version=1.0.0" \
     -F "app_file=@$APP_ZIP" 2>&1) || true
   else
-    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+    APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
     zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
     DEPLOY_OUT=$(curl -s --max-time 500 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \

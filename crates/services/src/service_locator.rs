@@ -646,7 +646,6 @@ impl ServiceLocatorImpl {
 
         let mut config_guard = self.security_config.lock().await;
         *config_guard = Some(config);
-        tracing::info!("Security configuration registered and validated successfully");
     }
 
     /// Register a service by name
@@ -2459,7 +2458,6 @@ async fn initialize_services_impl(
             {
                 match base_manager.with_mtls(&ca, &cert, &key) {
                     Ok(m) => {
-                        tracing::info!("mTLS enabled for node-to-node gRPC connections");
                         Arc::new(m)
                     }
                     Err(e) => {

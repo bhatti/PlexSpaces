@@ -61,15 +61,16 @@ def test_service_http_client_delete():
 
 
 def test_create_shard_group_uses_host_wrapper_shape():
+    from plexspaces import CreateShardGroupRequest
     response = host.create_shard_group(
-        {
-            "group_id": "group-a",
-            "actor_type": "worker",
-            "shard_count": 2,
-        }
+        CreateShardGroupRequest(
+            group_id="group-a",
+            actor_type="worker",
+            shard_count=2,
+        )
     )
-    assert response["group_id"] == "mock-group"
-    assert response["actor_type"] == "worker"
+    assert response.group_id == "group-a"
+    assert response.actor_type == "worker"
 
 
 def test_application_get_status_returns_dict():

@@ -4,6 +4,7 @@ import math
 from typing import Any, Dict, List, Mapping
 
 from plexspaces import actor, handler, host, init_handler, state
+from plexspaces import CreateShardGroupRequest, ScatterGatherRequest, NodePlacement
 
 
 def worker_seed(actor_id: str) -> int:
@@ -270,18 +271,16 @@ class Leader:
         if not isinstance(iterations, int):
             iterations = int(iterations)
         group_id = f"python-parameter-server-{host.now_ms()}"
-        group = host.create_shard_group(
-            {
-                "group_id": group_id,
-                "actor_type": "worker",
-                "shard_count": self.num_workers,
-                "partition_strategy": "hash",
-                "rebalance_policy": "manual",
-                "placement": {"strategy": "from_registry"},
-                "initial_state": {},
-            }
-        )
-        shard_actor_ids = group.get("shard_actor_ids", [])
+        group = host.create_shard_group(CreateShardGroupRequest(
+            group_id=group_id,
+            actor_type="worker",
+            shard_count=self.num_workers,
+            partition_strategy="hash",
+            rebalance_policy="manual",
+            placement=NodePlacement(strategy="from_registry"),
+            initial_state={},
+        ))
+        shard_actor_ids = group.shard_actor_ids
         if not shard_actor_ids:
             return {"status": "error", "error": "failed to create worker shard group"}
 
@@ -318,27 +317,25 @@ class Leader:
 
         for _ in range(iterations):
             coord_start = host.now_ms()
-            response = host.scatter_gather(
-                {
-                    "group_id": group_id,
-                    "query": {
-                        "op": "compute_gradient",
-                        "weights": {"w1": self.w1, "w2": self.w2},
-                        "input_dim": self.input_dim,
-                        "hidden_dim": self.hidden_dim,
-                    },
-                    "aggregation": "concat",
-                    "min_responses": self.num_workers,
-                    "timeout_ms": 30000,
-                }
-            )
+            response = host.scatter_gather(ScatterGatherRequest(
+                group_id=group_id,
+                query={
+                    "op": "compute_gradient",
+                    "weights": {"w1": self.w1, "w2": self.w2},
+                    "input_dim": self.input_dim,
+                    "hidden_dim": self.hidden_dim,
+                },
+                aggregation="concat",
+                min_responses=self.num_workers,
+                timeout_ms=30000,
+            ))
             gradients = []
             iteration_errors = 0
             iteration_responses = 0
             iteration_latency_ms = 0
             iteration_max_latency_ms = 0
             iteration_samples = 0
-            for shard in response.get("shard_responses", []):
+            for shard in response.shard_responses:
                 payload = normalize_worker_payload(shard.get("payload", {}))
                 if payload.get("status") == "ok":
                     gradients.append(payload.get("gradients", {}))

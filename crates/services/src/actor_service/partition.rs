@@ -1137,9 +1137,14 @@ impl ActorServiceImpl {
         }
 
         if shards_responded < req.min_responses as usize {
+            let failed_details: Vec<String> = shard_responses
+                .iter()
+                .filter(|r| !r.success)
+                .map(|r| format!("shard {}({}): {}", r.shard_id, r.shard_actor_id, r.error))
+                .collect();
             let error_msg = format!(
-                "Scatter-gather failed: only {} shards responded, minimum required: {}",
-                shards_responded, req.min_responses
+                "Scatter-gather failed: only {} shards responded, minimum required: {}. Failed: [{}]",
+                shards_responded, req.min_responses, failed_details.join("; ")
             );
             tracing::error!(
                 group_id = %group_id,

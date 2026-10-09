@@ -60,7 +60,7 @@ echo "  Poll rounds:     $POLL_ROUNDS"
 echo ""
 
 # Build if needed
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || find "$SCRIPT_DIR" -maxdepth 3 \( -name '*.go' -o -name '*.py' -o -name '*.rs' -o -name '*.ts' -o -name 'Cargo.toml' \) -newer "$WASM_FILE" -print -quit 2>/dev/null | grep -q .; then
     echo "Building WASM actor..."
     chmod +x "$SCRIPT_DIR/build.sh"
     "$SCRIPT_DIR/build.sh" || { echo -e "${RED}Build failed${NC}"; exit 1; }
@@ -71,7 +71,7 @@ fi
 echo "Step 1: Check node status"
 echo "----------------------------------------------------------------"
 trap 'rm -f "${APP_ZIP:-}"' EXIT
-APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+APP_ZIP="$(mktemp).zip"
 rm -f "$APP_ZIP"
 zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
@@ -170,6 +170,8 @@ for SENSOR in "sensor-dc-zone-a" "sensor-dc-zone-b" "sensor-server-room" "sensor
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 r = p.get('reading', {})
 print(f'  {r.get(\"sensor_id\",\"?\"):25s}  temp={r.get(\"temp_c\",0):6.2f}C  humidity={r.get(\"humidity\",0):5.2f}%')
 " 2>/dev/null || echo "  $SENSOR: reading received"
@@ -214,6 +216,8 @@ if echo "$NET_RESP" | grep -q '"status":"ok"'; then
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 ts = p.get('network_temp', {})
 hs = p.get('network_humid', {})
 
@@ -250,6 +254,8 @@ for SENSOR in "sensor-dc-zone-a" "sensor-dc-zone-b" "sensor-server-room" "sensor
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 sensor = '$SENSOR'
 dur = float(p.get('duration_ms', 0))
 ops = float(p.get('ops_per_sec', 0))
@@ -281,6 +287,8 @@ for SENSOR in "sensor-dc-zone-a" "sensor-server-room"; do
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 readings = p.get('readings', [])
 print(json.dumps({'op':'ingest_batch','readings':readings}))
 " 2>/dev/null)
@@ -295,6 +303,8 @@ print(json.dumps({'op':'ingest_batch','readings':readings}))
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 ingested = p.get('ingested', 0)
 compute = float(p.get('compute_ms', 0))
 ops = float(p.get('ops_per_sec', 0))
@@ -326,6 +336,8 @@ if echo "$ALERTS_RESP" | grep -q '"status":"ok"'; then
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 total = p.get('total_alerts', 0)
 sensors_with = p.get('sensors_with_anomalies', 0)
 alerts = p.get('alerts', [])
@@ -351,6 +363,8 @@ if echo "$STATS_RESP" | grep -q '"status":"ok"'; then
 import sys, json
 d = json.load(sys.stdin)
 p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
 counters = p.get('counters', {})
 bench = p.get('benchmarks', {})
 

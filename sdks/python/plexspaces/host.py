@@ -26,9 +26,23 @@ Usage:
     host.process_groups.broadcast("room", "chat", {"msg": "hello"})
 """
 
+import dataclasses
 import json
 from typing import Any, Dict, List, Optional, Union
 from .decorators import _desanitize_from_wasm
+from .shard_types import (
+    NodePlacement,
+    CreateShardGroupRequest,
+    CreateShardGroupResponse,
+    ScatterGatherRequest,
+    ScatterGatherResponse,
+    BroadcastShardGroupRequest,
+    ReduceShardGroupRequest,
+    AllReduceShardGroupRequest,
+    BarrierShardGroupRequest,
+    MapShardGroupRequest,
+    BulkUpdateShardGroupRequest,
+)
 from .proto_wire import (
     encode_write_request,
     encode_read_request,
@@ -581,10 +595,14 @@ class _MockHost:
         })
 
     def create_shard_group(self, request_json: str) -> str:
+        req = json.loads(request_json) if request_json else {}
+        shard_count = req.get("shard_count", 1)
+        shard_actor_ids = [f"worker-{i}@test-node" for i in range(shard_count)]
         return json.dumps({
-            "group_id": "mock-group",
-            "actor_type": "worker",
-            "shard_actor_ids": ["worker-0@test-node"],
+            "group_id": req.get("group_id", "mock-group"),
+            "actor_type": req.get("actor_type", "worker"),
+            "shard_actor_ids": shard_actor_ids,
+            "shard_count": shard_count,
         })
 
     def bulk_update_shard_group(self, request_json: str) -> str:
@@ -1945,36 +1963,43 @@ class Host:
         name: str,
         encode_fn,
         decode_fn,
-        request: Dict[str, Any],
+        request,
     ) -> Dict[str, Any]:
         """Call a shard-group host function with proto encoding/decoding."""
         h = _get_host_shard()
         fn = getattr(h, name, None) or getattr(h, name.replace("_", "-"), None)
         if fn is None:
             raise RuntimeError(f"{name} not available")
+        req_dict = dataclasses.asdict(request) if dataclasses.is_dataclass(request) else request
         if _host_shard_is_wit:
-            wire = encode_fn(request)
+            wire = encode_fn(req_dict)
             raw = fn(wire)
             result_bytes = bytes(raw) if raw else b""
             return decode_fn(result_bytes)
         else:
             # Mock host takes/returns JSON strings
-            raw = fn(json.dumps(request))
+            raw = fn(json.dumps(req_dict))
             result = _from_payload_bytes(raw)
             if isinstance(result, str) and result.startswith("ERROR:"):
                 raise RuntimeError(result)
             return json.loads(result)
 
-    def create_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a shard group."""
-        return self._call_shard_fn(
+    def create_shard_group(self, request: CreateShardGroupRequest) -> CreateShardGroupResponse:
+        """Create a shard group. Returns CreateShardGroupResponse with group_id and shard_actor_ids."""
+        result = self._call_shard_fn(
             "create_shard_group",
             encode_create_shard_group_request,
             decode_create_shard_group_response,
             request,
         )
+        return CreateShardGroupResponse(
+            group_id=result.get("group_id", ""),
+            actor_type=result.get("actor_type", ""),
+            shard_actor_ids=result.get("shard_actor_ids", []),
+            shard_count=result.get("shard_count", 0),
+        )
 
-    def bulk_update_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def bulk_update_shard_group(self, request: BulkUpdateShardGroupRequest) -> Dict[str, Any]:
         """Bulk update a shard group — routes N key-value updates to their shards in one call."""
         return self._call_shard_fn(
             "bulk_update_shard_group",
@@ -1983,7 +2008,7 @@ class Host:
             request,
         )
 
-    def map_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def map_shard_group(self, request: MapShardGroupRequest) -> Dict[str, Any]:
         """Map across shards."""
         return self._call_shard_fn(
             "map_shard_group",
@@ -1992,16 +2017,20 @@ class Host:
             request,
         )
 
-    def scatter_gather(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Scatter/gather across a shard group."""
-        return self._call_shard_fn(
+    def scatter_gather(self, request: ScatterGatherRequest) -> ScatterGatherResponse:
+        """Scatter/gather across a shard group. Returns ScatterGatherResponse with shard_responses list."""
+        result = self._call_shard_fn(
             "scatter_gather",
             encode_scatter_gather_request,
             decode_scatter_gather_response,
             request,
         )
+        return ScatterGatherResponse(
+            shard_responses=result.get("shard_responses", []),
+            stats=result.get("stats", {}),
+        )
 
-    def broadcast_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def broadcast_shard_group(self, request: BroadcastShardGroupRequest) -> Dict[str, Any]:
         """Broadcast a message to every shard in a group."""
         return self._call_shard_fn(
             "broadcast_shard_group",
@@ -2010,7 +2039,7 @@ class Host:
             request,
         )
 
-    def reduce_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def reduce_shard_group(self, request: ReduceShardGroupRequest) -> Dict[str, Any]:
         """Reduce values returned by a shard-group map operation."""
         return self._call_shard_fn(
             "reduce_shard_group",
@@ -2019,7 +2048,7 @@ class Host:
             request,
         )
 
-    def all_reduce_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def all_reduce_shard_group(self, request: AllReduceShardGroupRequest) -> Dict[str, Any]:
         """Reduce values across a shard group and broadcast the reduced result."""
         return self._call_shard_fn(
             "all_reduce_shard_group",
@@ -2028,7 +2057,7 @@ class Host:
             request,
         )
 
-    def barrier_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def barrier_shard_group(self, request: BarrierShardGroupRequest) -> Dict[str, Any]:
         """Synchronize a shard group at a barrier round."""
         return self._call_shard_fn(
             "barrier_shard_group",

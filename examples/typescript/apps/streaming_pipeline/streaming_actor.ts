@@ -78,17 +78,18 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
       return { error: "worker_count, batch_count, and events_per_batch must be positive" };
     }
 
+    const wallStart = host.nowMs();
     const groupId = `${STREAM_PREFIX}-${host.nowMs()}`;
     const group = host.createShardGroup({
-      group_id: groupId,
-      actor_type: "worker",
-      shard_count: request.worker_count,
-      partition_strategy: "hash",
-      rebalance_policy: "manual",
+      groupId,
+      actorType: "streaming-worker",
+      shardCount: request.worker_count,
+      partitionStrategy: "hash",
+      rebalancePolicy: "manual",
       placement: { strategy: "from_registry" },
-      initial_state: {},
+      initialState: {},
     });
-    const shardActorIds = stringArray(group.shard_actor_ids);
+    const shardActorIds = group.shardActorIds;
     if (shardActorIds.length === 0) {
       return { error: "failed to create worker shard group" };
     }
@@ -116,7 +117,7 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
       const runId = `${groupId}-batch-${batchIndex}`;
       const coordStart = host.nowMs();
       const response = host.scatterGather({
-        group_id: groupId,
+        groupId,
         query: {
           op: "process_batch",
           run_id: runId,
@@ -126,13 +127,13 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
           enrich_fields: request.enrich_fields,
         },
         aggregation: "concat",
-        min_responses: request.worker_count,
-        timeout_ms: 30000,
+        minResponses: request.worker_count,
+        timeoutMs: 30000,
       });
       const coordMs = host.nowMs() - coordStart;
 
       const candidates: RetrievalLikeCandidate[] = [];
-      const shardResponses = anyArray(response.shard_responses);
+      const shardResponses = response.shardResponses;
       let iterationErrors = 0;
       let iterationResponses = 0;
       let iterationLatencyMs = 0;
@@ -146,8 +147,7 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
       let iterationTupleOps = 0;
 
       for (const shard of shardResponses) {
-        const shardMap = recordValue(shard);
-        const payloadMap = normalizeWorkerPayload(shardMap.payload);
+        const payloadMap = normalizeWorkerPayload(shard.payload);
         if (stringValue(payloadMap.status) === "ok") {
           iterationResponses += 1;
           totalWorkerResponses += 1;
@@ -373,10 +373,133 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
       error_count: totalErrors,
       remote_nodes_with_work: Array.from(remoteNodesWithWork).sort(),
       actor_distribution_skew: actorDistributionSkew,
+      wall_time_ms: host.nowMs() - wallStart,
+      events_per_sec: Math.round(totalEventCount * 1000 / Math.max(1, host.nowMs() - wallStart)),
       results,
       nodes,
       roles,
     };
+  }
+
+  onRun_scaling_benchmark(payload: Record<string, unknown>): Record<string, unknown> {
+    const eventsPerBatch = intValue(payload.events_per_batch, 1200);
+    const batchCount = intValue(payload.batch_count, 18);
+    const shardCounts = intArrayValue(payload.shard_counts, [2, 4, 8, 16]);
+    const benchmarkRounds = intValue(payload.benchmark_rounds, 1);
+    const dropRate = floatValue(payload.drop_rate, 0.08);
+    const enrichFields = intValue(payload.enrich_fields, 6);
+
+    const results: Record<string, unknown>[] = [];
+    let baselineEvtPerSec = 0;
+
+    for (const shardCount of shardCounts) {
+      let totalWall = 0, totalCompute = 0, totalCoord = 0, totalEvents = 0, errorCount = 0;
+
+      for (let r = 0; r < benchmarkRounds; r++) {
+        const result = this.onRun({ worker_count: shardCount, batch_count: batchCount, events_per_batch: eventsPerBatch, drop_rate: dropRate, enrich_fields: enrichFields });
+        totalWall += intValue(result.wall_time_ms, 0);
+        totalCompute += intValue(result.compute_time_ms, 0);
+        totalCoord += intValue(result.coordination_time_ms, 0);
+        totalEvents += intValue(result.event_count, 0);
+        errorCount += intValue(result.error_count, 0);
+      }
+
+      const avgWall = Math.round(totalWall / benchmarkRounds);
+      const avgCompute = Math.round(totalCompute / benchmarkRounds);
+      const avgCoord = Math.round(totalCoord / benchmarkRounds);
+      const avgEvents = Math.round(totalEvents / benchmarkRounds);
+      const evtPerSec = avgWall > 0 ? Math.round(avgEvents * 1000 / avgWall) : 0;
+
+      if (baselineEvtPerSec === 0) baselineEvtPerSec = evtPerSec;
+      const speedup = baselineEvtPerSec > 0 && evtPerSec > 0 ? evtPerSec / baselineEvtPerSec : 1;
+      const efficiency = (speedup / (shardCount / shardCounts[0]!)) * 100;
+
+      results.push({
+        shards: shardCount,
+        events_per_sec: evtPerSec,
+        wall_time_ms: avgWall,
+        compute_time_ms: avgCompute,
+        coordination_time_ms: avgCoord,
+        granularity_ratio: avgCoord > 0 ? Math.round((avgCompute / avgCoord) * 10) / 10 : 0,
+        speedup: Math.round(speedup * 100) / 100,
+        efficiency_pct: Math.round(efficiency * 10) / 10,
+        error_count: errorCount,
+      });
+    }
+
+    return { status: "ok", events_per_batch: eventsPerBatch, batch_count: batchCount, results };
+  }
+
+  onRun_weak_scaling_benchmark(payload: Record<string, unknown>): Record<string, unknown> {
+    const eventsPerWorker = intValue(payload.events_per_worker, 1200);
+    const numPasses = intValue(payload.num_passes, 4);
+    const shardCounts = intArrayValue(payload.shard_counts, [2, 4, 8, 16]);
+    const benchmarkRounds = intValue(payload.benchmark_rounds, 1);
+
+    const results: Record<string, unknown>[] = [];
+    let baselineEvtPerSec = 0;
+
+    for (const shardCount of shardCounts) {
+      const groupId = `${STREAM_PREFIX}-bench-${host.nowMs()}`;
+      host.createShardGroup({
+        groupId,
+        actorType: "streaming-worker",
+        shardCount,
+        partitionStrategy: "hash",
+        rebalancePolicy: "manual",
+        placement: { strategy: "from_registry" },
+        initialState: {},
+      });
+
+      let totalCompute = 0, totalCoord = 0, totalEvents = 0, errorCount = 0;
+
+      for (let r = 0; r < benchmarkRounds; r++) {
+        const wallStart = host.nowMs();
+        // Single broadcast SG — all workers process their own events in parallel
+        const sgResult = host.scatterGather({
+          groupId,
+          query: { op: "benchmark_batch", events_per_worker: eventsPerWorker, num_passes: numPasses, seed: r + shardCount * 100 },
+          timeoutMs: 60000,
+        });
+        const wallMs = host.nowMs() - wallStart;
+
+        let roundCompute = 0;
+        let roundEvents = 0;
+        for (const resp of sgResult.shardResponses) {
+          const result = recordValue(resp.payload ?? resp);
+          if (result.error) { errorCount++; continue; }
+          roundCompute += intValue(result.compute_ms, 0);
+          roundEvents += intValue(result.events_processed, 0);
+        }
+        totalCoord += wallMs;
+        totalCompute += roundCompute;
+        totalEvents += roundEvents;
+      }
+
+      const avgWall = Math.round(totalCoord / benchmarkRounds);
+      const avgCompute = Math.round(totalCompute / benchmarkRounds);
+      const avgCoord = Math.max(avgWall - Math.round(avgCompute / shardCount), 1);
+      const avgEvents = Math.round(totalEvents / benchmarkRounds);
+      const evtPerSec = avgWall > 0 ? Math.round(avgEvents * 1000 / avgWall) : 0;
+      const granularity = avgCoord > 0 ? Math.round((Math.round(avgCompute / shardCount) / avgCoord) * 10) / 10 : 0;
+
+      if (baselineEvtPerSec === 0) baselineEvtPerSec = evtPerSec;
+      const efficiency = baselineEvtPerSec > 0 ? (evtPerSec / baselineEvtPerSec) * 100 : 100;
+
+      results.push({
+        shards: shardCount,
+        total_events: avgEvents,
+        events_per_sec: evtPerSec,
+        wall_time_ms: avgWall,
+        compute_time_ms: avgCompute,
+        coordination_time_ms: avgCoord,
+        granularity_ratio: granularity,
+        efficiency_pct: Math.round(efficiency * 10) / 10,
+        error_count: errorCount,
+      });
+    }
+
+    return { status: "ok", events_per_worker: eventsPerWorker, num_passes: numPasses, results };
   }
 
   private requestFromPayload(payload: Record<string, unknown>): Required<RunRequest> {
@@ -477,6 +600,38 @@ class WorkerActor extends PlexSpacesActor<WorkerState> {
       bytes_processed: bytesProcessed,
       tuple_operations: 1,
       top_streams: topStreams,
+    };
+  }
+
+  // Worker-local benchmark: processes events locally for num_passes without cross-shard data.
+  // Leader sends one broadcast SG — enables true weak scaling with one round trip.
+  onBenchmark_batch(payload: Record<string, unknown>): Record<string, unknown> {
+    const eventsPerWorker = intValue(payload.events_per_worker, 1200);
+    const numPasses = intValue(payload.num_passes, 4);
+    const seed = intValue(payload.seed, 42);
+
+    const compStart = host.nowMs();
+    let totalEvents = 0;
+
+    for (let p = 0; p < numPasses; p++) {
+      const filteredEvents = Math.max(0, Math.floor(eventsPerWorker * 0.92));
+      const enrichedEvents = filteredEvents;
+      const transformedEvents = filteredEvents;
+      const bytesProcessed = transformedEvents * (180 + 6 * 24);
+      // Drive some computation proportional to event count
+      const streams = topStreamCounts(seed + p, p, transformedEvents);
+      void streams;
+      void bytesProcessed;
+      totalEvents += eventsPerWorker;
+    }
+
+    const computeMs = host.nowMs() - compStart;
+    try { host.applicationMetricsAdd(this.state.application_id, { counter_metrics: { "worker.bench_compute": computeMs } }); } catch (_e) {}
+
+    return {
+      events_processed: totalEvents,
+      passes: numPasses,
+      compute_ms: computeMs,
     };
   }
 }
@@ -742,6 +897,16 @@ function workerSeed(actorId: string): number {
   return value;
 }
 
+function intArrayValue(value: unknown, fallback: number[]): number[] {
+  if (!Array.isArray(value)) return fallback;
+  const result: number[] = [];
+  for (const v of value) {
+    const n = typeof v === "number" ? Math.trunc(v) : Number.parseInt(String(v), 10);
+    result.push(Number.isFinite(n) ? n : 0);
+  }
+  return result.length > 0 ? result : fallback;
+}
+
 function intValue(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.trunc(value);
@@ -785,6 +950,8 @@ function stringArray(value: unknown): string[] {
 const router = new ActorRouter({
   leader: () => new LeaderActor(),
   worker: () => new WorkerActor(),
+  "streaming-leader": () => new LeaderActor(),
+  "streaming-worker": () => new WorkerActor(),
 });
 
 export const actor = {

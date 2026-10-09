@@ -53,6 +53,19 @@ from .decorators import (
 )
 from .agent import AgentLoop, AgentConfig, AgentTrajectory, AgentStep, AgentStepKind
 from .host import host, pg_first, ServiceHttpClient, ActorRef, get_actor_ref
+from .shard_types import (
+    NodePlacement,
+    CreateShardGroupRequest,
+    CreateShardGroupResponse,
+    ScatterGatherRequest,
+    ScatterGatherResponse,
+    BroadcastShardGroupRequest,
+    ReduceShardGroupRequest,
+    AllReduceShardGroupRequest,
+    BarrierShardGroupRequest,
+    MapShardGroupRequest,
+    BulkUpdateShardGroupRequest,
+)
 from .workflow import default_retry_config, with_retry
 from .leader_worker import LeaderWorkerClient, list_worker_node_ids
 from .actor_id import ActorID
@@ -65,6 +78,12 @@ __all__ = [
     "AgentStep",
     "AgentStepKind",
     "AgentTrajectory",
+    "AllReduceShardGroupRequest",
+    "BarrierShardGroupRequest",
+    "BroadcastShardGroupRequest",
+    "BulkUpdateShardGroupRequest",
+    "CreateShardGroupRequest",
+    "CreateShardGroupResponse",
     "default_retry_config",
     "event_actor",
     "gen_server_actor",
@@ -77,7 +96,12 @@ __all__ = [
     "signal_handler",
     "query_handler",
     "host",
+    "MapShardGroupRequest",
+    "NodePlacement",
     "pg_first",
+    "ReduceShardGroupRequest",
+    "ScatterGatherRequest",
+    "ScatterGatherResponse",
     "ServiceHttpClient",
     "ActorRef",
     "get_actor_ref",

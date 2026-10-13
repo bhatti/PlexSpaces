@@ -822,6 +822,11 @@ impl ApplicationService for ApplicationServiceImpl {
                 Status::internal(format!("Failed to unregister application: {}", e))
             })?;
 
+        // Terminate all virtual actors and clean up namespace registrations.
+        // Without this, CreateShardGroup workers accumulate in memory indefinitely.
+        self.cleanup_namespace_for_undeploy(&tenant_id, &req.application_id)
+            .await?;
+
         // Evict WASM module from cache to avoid memory leaks
         if let Some(ref hash) = module_hash {
             if let Ok(wasm_runtime) = self.get_wasm_runtime().await {

@@ -101,14 +101,14 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
     let sup_id = test_runtime_actor_id("remote-s", "demonitor-node1");
 
     let (sup_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), sup_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), sup_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let sup_mailbox = Arc::new(sup_mailbox_inner);
     register_actor_with_message_sender(&node1, &sup_id, sup_mailbox).await;
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -197,12 +197,12 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
     let b_id = test_runtime_actor_id("link-b", "link-node2");
 
     let (ma_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), a_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), a_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let ma = Arc::new(ma_inner);
     let (mb_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), b_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), b_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let mb = Arc::new(mb_inner);
@@ -319,14 +319,14 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
     let supervisor_id = test_runtime_actor_id("down-supervisor", "down-node1");
 
     let (supervisor_mailbox_inner, mut supervisor_rx) =
-        Mailbox::new(MailboxConfig::default(), supervisor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), supervisor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let supervisor_mailbox = Arc::new(supervisor_mailbox_inner);
     register_actor_with_message_sender(&node1, &supervisor_id, supervisor_mailbox.clone()).await;
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);

@@ -885,6 +885,15 @@ test-package:
 test-examples:
 	@echo "Building all Rust examples (using shared target directory)..."
 	@echo "Target directory: $$(pwd)/target (shared across all examples)"
+	@echo ""
+	@echo "NOTE: This target builds Rust embedded examples only."
+	@echo "      Go/Python/TypeScript WASM examples are NOT verified here."
+	@echo "      To verify WASM examples, run test.sh for each one:"
+	@echo "        cd examples/go/apps/<name>   && HTTP_PORT=8091 bash test.sh"
+	@echo "        cd examples/python/apps/<name> && HTTP_PORT=8091 bash test.sh"
+	@echo "        cd examples/typescript/apps/<name> && HTTP_PORT=8091 bash test.sh"
+	@echo "      Requires a running PlexSpaces node with JWT configured."
+	@echo ""
 	@MAX_CONCURRENT=$${TEST_EXAMPLES_CONCURRENT:-2}; \
 	CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
@@ -902,7 +911,7 @@ test-examples:
 	# Update after each example is marked as completed/rewritten in the plan \
 	# Include all Rust embedded examples that should be tested (exclude migrating_* comparison examples) \
 	# From plan: Completed (Verified Working) + Recently Completed sections \
-	EXAMPLES="rust/embedded/byzantine rust/embedded/matrix_vector_mpi rust/embedded/matrix_multiply rust/embedded/heat_diffusion rust/embedded/webhook_handler rust/embedded/timers rust/embedded/reminders rust/embedded/durable_actor rust/embedded/chat_room rust/embedded/document_approval rust/embedded/timeseries_forecasting rust/embedded/genomic_workflow_pipeline rust/embedded/genomics_pipeline rust/embedded/order_processing rust/embedded/entity_recognition rust/embedded/supervision_tree rust/embedded/actor_groups_sharding rust/embedded/player_session"; \
+	EXAMPLES="rust/embedded/byzantine rust/embedded/matrix_vector_mpi rust/embedded/matrix_multiply rust/embedded/heat_diffusion rust/embedded/webhook_handler rust/embedded/timers rust/embedded/reminders rust/embedded/durable_actor rust/embedded/chat_room rust/embedded/document_approval rust/embedded/timeseries_forecasting rust/embedded/genomic_workflow_pipeline rust/embedded/genomics_pipeline rust/embedded/order_processing rust/embedded/entity_recognition rust/embedded/supervision_tree rust/embedded/actor_groups_sharding rust/embedded/player_session rust/embedded/web_crawl rust/embedded/event_analytics rust/embedded/metrics_aggregation rust/embedded/minipi rust/embedded/csp_channels rust/embedded/bank_account rust/embedded/realtime_stream_processor rust/embedded/redis_cluster rust/embedded/job_queue"; \
 	FAILED=0; \
 	PIDS=(); \
 	EXAMPLE_NAMES=(); \

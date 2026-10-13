@@ -12,6 +12,7 @@ world plexspaces-actor {
     import messaging;
     import tuplespace;
     import channels;
+    import outbox;
     import durability;
     import workflow;
     import blob;
@@ -19,7 +20,7 @@ world plexspaces-actor {
     import process-groups;
     import locks;
     import registry;
-    
+
     // Actor-implemented interfaces (exports)
     export native-actor;
 }
@@ -36,6 +37,7 @@ world actor-world {
     import host-shard;
     import host-http;
     import channels;
+    import outbox;
     import registry;
     export actor;
 }

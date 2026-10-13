@@ -44,7 +44,7 @@
 
 use plexspaces_channel::{Channel, ChannelError, ChannelResult};
 use plexspaces_proto::channel::v1::{ChannelStats, *};
-use plexspaces_proto::common::v1::Message;
+use plexspaces_proto::common::v1::{Message, RetryPolicy};
 
 // Helper to create test config with retry/DLQ
 fn create_test_config_with_retry_dlq(
@@ -59,7 +59,10 @@ fn create_test_config_with_retry_dlq(
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
-        max_retries,
+        retry_policy: Some(RetryPolicy {
+            max_attempts: max_retries,
+            ..Default::default()
+        }),
         dlq_enabled,
         dead_letter_queue: if dlq_enabled {
             format!("{}-dlq", name)
@@ -364,7 +367,10 @@ mod redis_tests {
             capacity: 100,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
-            max_retries,
+            retry_policy: Some(RetryPolicy {
+                max_attempts: max_retries,
+                ..Default::default()
+            }),
             dlq_enabled,
             dead_letter_queue: if dlq_enabled {
                 format!("{}-dlq", name)
@@ -813,7 +819,10 @@ async fn test_sqlite_ack_message_not_found() {
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
-        max_retries: 3,
+        retry_policy: Some(RetryPolicy {
+            max_attempts: 3,
+            ..Default::default()
+        }),
         dlq_enabled: true,
         dead_letter_queue: "test-dlq".to_string(),
         backend_config: Some(channel_config::BackendConfig::Sqlite(SqliteConfig {

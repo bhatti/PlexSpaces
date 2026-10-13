@@ -198,7 +198,7 @@ async fn perf_actor_spawn_throughput_50() {
 // ---------------------------------------------------------------------------
 
 /// 100 sequential ask/reply round-trips over local node routing.
-/// Asserts p50 < 50 ms and prints p50 / p95 / p99.
+/// Asserts p95 < 50 ms and prints p95 / p99.
 #[tokio::test]
 #[ignore]
 async fn perf_ask_reply_latency_100() {
@@ -241,21 +241,19 @@ async fn perf_ask_reply_latency_100() {
     }
 
     latencies_us.sort_unstable();
-    let p50 = latencies_us[N / 2];
     let p95 = latencies_us[(N as f64 * 0.95) as usize];
     let p99 = latencies_us[(N as f64 * 0.99) as usize];
 
     println!(
-        "[perf_ask_reply_latency_100] {} round-trips  p50={:.3}ms  p95={:.3}ms  p99={:.3}ms",
+        "[perf_ask_reply_latency_100] {} round-trips  p95={:.3}ms  p99={:.3}ms",
         N,
-        p50 as f64 / 1_000.0,
         p95 as f64 / 1_000.0,
         p99 as f64 / 1_000.0,
     );
 
     assert!(
-        p50 < 50_000,
-        "p50 latency {} µs exceeds 50 ms threshold",
-        p50
+        p95 < 50_000,
+        "p95 latency {} µs exceeds 50 ms threshold",
+        p95
     );
 }

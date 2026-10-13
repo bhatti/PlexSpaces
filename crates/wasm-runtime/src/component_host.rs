@@ -182,6 +182,11 @@ pub fn add_plexspaces_host_to_linker(
         &mut ctx.registry_impl
     })?;
 
+    // Implement outbox interface
+    plexspaces::actor::outbox::add_to_linker(linker, |ctx: &mut ComponentContext| {
+        &mut ctx.outbox_impl
+    })?;
+
     Ok(())
 }
 
@@ -5419,5 +5424,60 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
                 ))
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Outbox host implementation
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "component-model")]
+pub struct OutboxImpl {
+    actor_id: ActorId,
+    host_functions: Arc<HostFunctions>,
+}
+
+#[cfg(feature = "component-model")]
+impl OutboxImpl {
+    pub fn new(actor_id: ActorId, host_functions: Arc<HostFunctions>) -> Self {
+        Self {
+            actor_id,
+            host_functions,
+        }
+    }
+}
+
+#[cfg(feature = "component-model")]
+#[async_trait::async_trait]
+impl plexspaces::actor::outbox::Host for OutboxImpl {
+    async fn outbox_dispatch(
+        &mut self,
+        _ctx: String,
+        _dispatcher_id: String,
+        target_actor_ids: Vec<String>,
+        payload: plexspaces::actor::types::Payload,
+        message_type: String,
+        idempotency_key: String,
+        conflict_resolution: String,
+    ) -> Result<String, plexspaces::actor::types::ActorError> {
+        let actor_id = self.actor_id.to_string();
+        crate::outbox_host::outbox_dispatch_impl(
+            self.host_functions.as_ref(),
+            &actor_id,
+            &target_actor_ids,
+            &payload,
+            &message_type,
+            &idempotency_key,
+            &conflict_resolution,
+        )
+        .await
+    }
+
+    async fn outbox_status(
+        &mut self,
+        _ctx: String,
+        dispatcher_id: String,
+    ) -> Result<String, plexspaces::actor::types::ActorError> {
+        Ok(crate::outbox_host::outbox_status_impl(&dispatcher_id))
     }
 }

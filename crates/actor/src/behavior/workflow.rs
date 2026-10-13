@@ -36,21 +36,37 @@ use crate::core::{ActorId, BehaviorError};
 use plexspaces_persistence::{
     Journal, JournalEntry, JournalError, PromiseMetadata, PromiseResult, SideEffect,
 };
-pub use plexspaces_proto::workflow::v1::RetryConfig;
+pub use plexspaces_proto::common::v1::RetryPolicy;
 
-/// Default retry config (single attempt). Aligns with [RetryConfig] proto defaults when unset.
-pub fn default_retry_config() -> RetryConfig {
-    RetryConfig {
+pub type RetryConfig = RetryPolicy;
+
+fn duration_to_ms(d: &Option<prost_types::Duration>) -> u64 {
+    d.as_ref()
+        .map(|d| (d.seconds as u64) * 1000 + (d.nanos as u64) / 1_000_000)
+        .unwrap_or(0)
+}
+
+fn ms_to_duration(ms: u64) -> Option<prost_types::Duration> {
+    Some(prost_types::Duration {
+        seconds: (ms / 1000) as i64,
+        nanos: ((ms % 1000) * 1_000_000) as i32,
+    })
+}
+
+/// Default retry policy (single attempt).
+pub fn default_retry_config() -> RetryPolicy {
+    RetryPolicy {
         max_attempts: 1,
-        initial_interval_ms: 100,
-        backoff_rate: 2.0,
-        max_interval_ms: 30_000,
+        backoff_multiplier: 2.0,
+        initial_delay: ms_to_duration(100),
+        max_delay: ms_to_duration(30_000),
+        jitter_ratio: 0.0,
         retryable_errors: vec![],
+        allow_non_idempotent: false,
     }
 }
 
-/// Effective max attempts: 0 (unset) means 1 (single run).
-fn effective_max_attempts(c: &RetryConfig) -> u32 {
+fn effective_max_attempts(c: &RetryPolicy) -> u32 {
     if c.max_attempts == 0 {
         1
     } else {
@@ -58,22 +74,19 @@ fn effective_max_attempts(c: &RetryConfig) -> u32 {
     }
 }
 
-/// Resolved backoff params from config (0/unset use proto defaults).
-fn backoff_params(c: &RetryConfig) -> (u64, f64, u64) {
-    let initial_ms = if c.initial_interval_ms == 0 {
-        100u64
-    } else {
-        c.initial_interval_ms as u64
+fn backoff_params(c: &RetryPolicy) -> (u64, f64, u64) {
+    let initial_ms = {
+        let ms = duration_to_ms(&c.initial_delay);
+        if ms == 0 { 100u64 } else { ms }
     };
-    let rate = if c.backoff_rate < 1.0 {
+    let rate = if c.backoff_multiplier < 1.0 {
         2.0
     } else {
-        c.backoff_rate
+        c.backoff_multiplier
     };
-    let max_ms = if c.max_interval_ms == 0 {
-        30_000u64
-    } else {
-        c.max_interval_ms as u64
+    let max_ms = {
+        let ms = duration_to_ms(&c.max_delay);
+        if ms == 0 { 30_000u64 } else { ms }
     };
     (initial_ms, rate, max_ms)
 }
@@ -464,10 +477,10 @@ mod tests {
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
         let mut call_count = 0;
-        let config = RetryConfig {
+        let config = RetryPolicy {
             max_attempts: 3,
-            initial_interval_ms: 1,
-            max_interval_ms: 2,
+            initial_delay: ms_to_duration(1),
+            max_delay: ms_to_duration(2),
             ..default_retry_config()
         };
         let result = ctx
@@ -489,10 +502,10 @@ mod tests {
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
         let mut call_count = 0;
-        let config = RetryConfig {
+        let config = RetryPolicy {
             max_attempts: 3,
-            initial_interval_ms: 1,
-            max_interval_ms: 2,
+            initial_delay: ms_to_duration(1),
+            max_delay: ms_to_duration(2),
             ..default_retry_config()
         };
         let result = ctx
@@ -518,10 +531,10 @@ mod tests {
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
         let mut call_count = 0;
-        let config = RetryConfig {
+        let config = RetryPolicy {
             max_attempts: 3,
-            initial_interval_ms: 1,
-            max_interval_ms: 2,
+            initial_delay: ms_to_duration(1),
+            max_delay: ms_to_duration(2),
             ..default_retry_config()
         };
         let err = ctx
@@ -544,10 +557,10 @@ mod tests {
 
         {
             let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
-            let config = RetryConfig {
+            let config = RetryPolicy {
                 max_attempts: 3,
-                initial_interval_ms: 1,
-                max_interval_ms: 2,
+                initial_delay: ms_to_duration(1),
+                max_delay: ms_to_duration(2),
                 ..default_retry_config()
             };
             let _ = ctx
@@ -559,10 +572,10 @@ mod tests {
         let mut ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
         ctx.enter_replay_mode(1).await.unwrap();
         let mut call_count = 0;
-        let config = RetryConfig {
+        let config = RetryPolicy {
             max_attempts: 3,
-            initial_interval_ms: 1,
-            max_interval_ms: 2,
+            initial_delay: ms_to_duration(1),
+            max_delay: ms_to_duration(2),
             ..default_retry_config()
         };
         let result = ctx

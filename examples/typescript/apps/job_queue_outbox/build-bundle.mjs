@@ -1,0 +1,23 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Bundle job_queue_outbox_actor.ts + @plexspaces/sdk into one ESM file for jco componentize.
+
+import * as esbuild from "esbuild";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const out = join(__dirname, "job_queue_outbox_actor_bundle.mjs");
+
+await esbuild.build({
+  entryPoints: [join(__dirname, "job_queue_outbox_actor.ts")],
+  bundle: true,
+  format: "esm",
+  outfile: out,
+  platform: "neutral",
+  target: "es2020",
+  packages: "bundle",
+  external: ["plexspaces:*"],
+});
+
+console.log("  ✓ job_queue_outbox_actor_bundle.mjs");

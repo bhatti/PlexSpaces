@@ -3,11 +3,12 @@
 //! Merge [`ClientTransportPolicy`](plexspaces_proto::node::v1::ClientTransportPolicy) from runtime defaults and templates.
 
 use plexspaces_proto::circuitbreaker::prv::{CircuitBreakerConfig, FailureStrategy};
-use plexspaces_proto::node::v1::{ClientTransportPolicy, HttpRetryPolicy, RuntimeConfig};
+use plexspaces_proto::common::v1::RetryPolicy;
+use plexspaces_proto::node::v1::{ClientTransportPolicy, RuntimeConfig};
 use prost_types::Duration as ProtoDuration;
 
 /// Effective max attempts (at least 1).
-pub fn effective_max_attempts(retry: Option<&HttpRetryPolicy>) -> u32 {
+pub fn effective_max_attempts(retry: Option<&RetryPolicy>) -> u32 {
     retry.map(|r| r.max_attempts.max(1)).unwrap_or(1)
 }
 

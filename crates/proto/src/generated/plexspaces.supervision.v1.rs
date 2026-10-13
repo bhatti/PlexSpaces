@@ -8,17 +8,6 @@ pub struct AdaptiveConfig {
     #[prost(double, tag="1")]
     pub learning_rate: f64,
 }
-/// Configuration for exponential backoff restart policy
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ExponentialBackoffConfig {
-    #[prost(uint64, tag="1")]
-    pub initial_delay_ms: u64,
-    #[prost(uint64, tag="2")]
-    pub max_delay_ms: u64,
-    #[prost(double, tag="3")]
-    pub factor: f64,
-}
 /// Child specification
 ///
 /// ## Erlang/OTP Equivalent
@@ -79,7 +68,14 @@ pub struct ChildSpec {
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Exponential backoff config (when restart = RESTART_POLICY_EXPONENTIAL_BACKOFF)
     #[prost(message, optional, tag="11")]
-    pub exponential_backoff: ::core::option::Option<ExponentialBackoffConfig>,
+    pub exponential_backoff: ::core::option::Option<super::super::common::v1::RetryPolicy>,
+    /// Per-actor mailbox configuration. When unset, inherits the node default (IN_MEMORY).
+    /// Set channel_provider = SQLITE or POSTGRES to use the shared node DB pool for
+    /// a durable, DB-backed mailbox (no per-actor pool; uses node-wide shared connection).
+    /// DB-backed mailboxes should NOT use the admission_control facet — the DB itself
+    /// acts as the buffer; throttling at the inbox level defeats the purpose.
+    #[prost(message, optional, tag="12")]
+    pub mailbox_config: ::core::option::Option<super::super::mailbox::v1::MailboxConfig>,
 }
 /// Supervisor specification (canonical definition)
 ///

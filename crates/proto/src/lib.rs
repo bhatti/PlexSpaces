@@ -133,6 +133,12 @@ pub mod channel {
     }
 }
 
+pub mod outbox {
+    pub mod v1 {
+        include!("generated/plexspaces.outbox.v1.rs");
+    }
+}
+
 pub mod dashboard {
     pub mod v1 {
         include!("generated/plexspaces.dashboard.v1.rs");

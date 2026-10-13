@@ -47,7 +47,7 @@ async fn create_child_spec(
         let child_name = id_for_factory.clone();
         Box::pin(async move {
             let actor_id = test_actor_id(&child_name);
-            let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+            let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
                 .await
                 .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
             let actor = ActorInstance::new(
@@ -58,7 +58,7 @@ async fn create_child_spec(
                 "test".to_string(),
                 None,
             );
-            let (ref_mailbox, _ref_receiver) = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+            let (ref_mailbox, _ref_receiver) = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
                 .await
                 .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
             let service_locator: Arc<dyn crate::core::ServiceLocator> =
@@ -104,11 +104,11 @@ fn create_child_spec_sync(id: String, restart: RestartPolicy) -> crate::ChildSpe
         let child_name = id_for_factory.clone();
         Box::pin(async move {
             let actor_id = test_actor_id(&child_name);
-            let actor_mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+            let actor_mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
                 .await
                 .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
             let (ref_mailbox_inner, _ref_receiver) =
-                Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+                Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
                     .await
                     .map_err(|e| crate::ActorError::InvalidState(e.to_string()))?;
             let ref_mailbox = Arc::new(ref_mailbox_inner);

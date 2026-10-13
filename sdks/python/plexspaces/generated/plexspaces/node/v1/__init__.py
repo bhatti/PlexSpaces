@@ -162,31 +162,6 @@ class MemberState(betterproto.Enum):
 
 
 @dataclass(eq=False, repr=False)
-class HttpRetryPolicy(betterproto.Message):
-    """
-    Retry policy for outbound HTTP calls (exponential backoff with optional full jitter).
-    """
-
-    max_attempts: int = betterproto.uint32_field(1)
-    """Maximum attempts including the first try (1 = no retry)."""
-
-    initial_backoff: timedelta = betterproto.message_field(2)
-    max_backoff: timedelta = betterproto.message_field(3)
-    backoff_multiplier: float = betterproto.double_field(4)
-    """Multiplier for exponential backoff (e.g. 2.0)."""
-
-    jitter_ratio: float = betterproto.double_field(5)
-    """
-    Jitter in [0,1] applied as full jitter on the backoff cap (AWS-style).
-    """
-
-    allow_non_idempotent_retry: bool = betterproto.bool_field(6)
-    """
-    When false, only GET/HEAD/OPTIONS/TRACE are retried. When true, non-idempotent methods may retry.
-    """
-
-
-@dataclass(eq=False, repr=False)
 class ClientTransportPolicy(betterproto.Message):
     """
     Timeouts, retry, and circuit breaker for outbound HTTP clients (connection vs request timeout).
@@ -194,7 +169,7 @@ class ClientTransportPolicy(betterproto.Message):
 
     connect_timeout: timedelta = betterproto.message_field(1)
     request_timeout: timedelta = betterproto.message_field(2)
-    retry: "HttpRetryPolicy" = betterproto.message_field(3)
+    retry: "__common_v1__.RetryPolicy" = betterproto.message_field(3)
     circuit_breaker: "__circuitbreaker_prv__.CircuitBreakerConfig" = (
         betterproto.message_field(4)
     )
@@ -450,7 +425,7 @@ class NodeRegistryConfig(betterproto.Message):
      Default: false
     """
 
-    db_backoff: "DbBackoffConfig" = betterproto.message_field(21)
+    db_backoff: "__common_v1__.RetryPolicy" = betterproto.message_field(21)
     """DB operation backoff configuration"""
 
     db_sync_interval_seconds: int = betterproto.uint32_field(22)
@@ -575,46 +550,6 @@ class SwimConfig(betterproto.Message):
      How often to perform full state sync with a random peer.
      Ensures consistency even if some updates are lost.
      Default: 30 seconds
-    """
-
-
-@dataclass(eq=False, repr=False)
-class DbBackoffConfig(betterproto.Message):
-    """
-    Database backoff configuration
-
-     ## Purpose
-     Configures exponential backoff with jitter for database operations.
-     Prevents thundering herd and reduces DB load during failures.
-
-     ## Algorithm
-     Uses decorrelated jitter: sleep = min(cap, random(base, sleep * 3))
-     Based on AWS Architecture Blog recommendations.
-    """
-
-    base_delay_ms: int = betterproto.uint32_field(1)
-    """
-    Base delay in milliseconds
-    
-     Initial backoff delay for the first retry.
-     Default: 100ms
-    """
-
-    max_delay_ms: int = betterproto.uint32_field(2)
-    """
-    Maximum delay cap in milliseconds
-    
-     Upper bound for backoff delay regardless of retry count.
-     Default: 30000ms (30 seconds)
-    """
-
-    max_attempts: int = betterproto.uint32_field(3)
-    """
-    Maximum retry attempts
-    
-     How many times to retry a failed DB operation before giving up.
-     Set to 0 for unlimited retries (not recommended).
-     Default: 10
     """
 
 

@@ -130,7 +130,7 @@ mod actor_integration_tests {
         };
 
         let behavior = Box::new(CounterActor::new());
-        let mailbox_pair = Mailbox::new(mailbox_config_default(), "counter-actor".to_string(), String::new(), String::new(), None)
+        let mailbox_pair = Mailbox::new(mailbox_config_default(), "counter-actor".to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
         let actor_id = test_actor_id("counter-actor", "default");
@@ -186,7 +186,7 @@ mod actor_integration_tests {
 
         // Restart actor (simulate crash recovery)
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox_pair2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        let mailbox_pair2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(
@@ -245,7 +245,7 @@ mod actor_integration_tests {
         };
 
         let behavior = Box::new(CounterActor::new());
-        let mailbox_pair = Mailbox::new(mailbox_config_default(), "counter-actor-2".to_string(), String::new(), String::new(), None)
+        let mailbox_pair = Mailbox::new(mailbox_config_default(), "counter-actor-2".to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
         let actor_id = test_actor_id("counter-actor-2", "default");
@@ -312,7 +312,7 @@ mod actor_integration_tests {
 
         // Restart actor
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox_pair2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        let mailbox_pair2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(
@@ -374,7 +374,7 @@ mod actor_integration_tests {
         let behavior = Box::new(CounterActorWrapper {
             counter: Arc::clone(&counter),
         });
-        let mailbox_pair = Mailbox::new(mailbox_config_default(), "counter-actor-3".to_string(), String::new(), String::new(), None)
+        let mailbox_pair = Mailbox::new(mailbox_config_default(), "counter-actor-3".to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
         let actor_id = test_actor_id("counter-actor-3", "default");
@@ -440,7 +440,7 @@ mod actor_integration_tests {
         let behavior2 = Box::new(CounterActorWrapper {
             counter: Arc::clone(&counter2),
         });
-        let mailbox_pair2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        let mailbox_pair2 = Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(

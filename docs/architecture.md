@@ -573,6 +573,9 @@ Composable capabilities that extend actor behavior at runtime:
 **Event Facets**:
 - **EventEmitterFacet**: Event-driven communication
 
+**Flow Control Facets**:
+- **AdmissionControlFacet**: Receiver-side concurrency limiter. Tracks in-flight messages via atomic counter; rejects with `RESOURCE_EXHAUSTED` and `retry_after_ms` hint when the actor is at capacity. Complements sender-side AIMD concurrency in the outbox relay.
+
 See [Detailed Design - Facets](detailed-design.md#facets) for comprehensive documentation.
 
 ### TupleSpace
@@ -622,6 +625,8 @@ Queue and topic patterns for message passing between actors and services:
 - In-progress messages complete before channel closes
 - Configurable timeout for shutdown completion
 - ACK/NACK still works for in-progress messages
+
+**Outbox Pattern**: DB-backed channels also serve as the storage layer for the outbox relay. The `OutboxRelay` drains messages from a channel at AIMD-controlled concurrency, ack/nacking based on delivery outcome. This reuses the existing channel infrastructure (ACK/NACK, DLQ, message recovery) without introducing a separate transport.
 
 See [Durability Documentation](durability.md) for comprehensive channel documentation.
 
@@ -706,6 +711,29 @@ sequenceDiagram
     TupleSpace-->>Consumer2: Tuple (destructive)
     Note over TupleSpace: Tuple Removed
 ```
+
+### Flow-Controlled Messaging (Outbox Pattern)
+
+For high-fan-out scenarios (notifications to millions of actors, bulk upgrades) where uncontrolled `tell()` would overwhelm receivers:
+
+```
+SenderActor
+  └─ outbox.dispatch() → OutboxRelay (AIMD concurrency, DB-backed channel)
+                           ├─ Channel (SQLite/Postgres, existing ChannelConfig)
+                           └─ drain loop → tell() → TargetActor
+                                                      └─ AdmissionControlFacet
+                                                           ├─ Under limit → process
+                                                           └─ Over limit → RESOURCE_EXHAUSTED + retry_after_ms
+                                                                └─ Relay nacks → channel retries with backoff
+```
+
+**Sender-side** — `OutboxRelay` stores messages in a DB-backed channel and drains at AIMD-controlled concurrency (additive increase on success, multiplicative decrease on rejection).
+
+**Receiver-side** — `AdmissionControlFacet` (priority 950) tracks in-flight messages via atomic counter. Rejects with `RESOURCE_EXHAUSTED` when at capacity, signaling the relay to back off.
+
+**Concurrency control** — `ConcurrencyLimiter` implements TCP-style AIMD: limit increases by 1 on success, halves on `RESOURCE_EXHAUSTED`. Bounded by configurable min/max. Also supports fixed-limit mode.
+
+**Shared retry** — All retry/backoff computation uses the canonical `RetryPolicy` (common.proto) and `compute_backoff()` (crates/common). Exponential backoff with configurable jitter ratio.
 
 ## WebSocket Transport
 
@@ -1551,6 +1579,59 @@ curl -X POST http://localhost:8080/api/v1/admin/tracing/disable \
 The same API is available over gRPC as `TracingControlService`. **Note**: the toggle applies to actors spawned after the call; restart running actors to change their dispatcher.
 
 See [Detailed Design](detailed-design.md#performance-internals) for implementation details.
+
+## Outbox & Flow Control
+
+PlexSpaces provides sender-side and receiver-side flow control for high-fan-out messaging via the `plexspaces-outbox` crate.
+
+### Components
+
+| Component | Role | Layer |
+|-----------|------|-------|
+| `ConcurrencyLimiter` | AIMD concurrency control (additive increase, multiplicative decrease) | Sender-side |
+| `OutboxRelay` | Async drain loop: dequeues from channel, delivers via permits | Sender-side |
+| `PartitionedOutboxRelay` | N independent partitions with hash routing for million-target scale | Sender-side |
+| `HashRouter` | FNV-1a hash routing: same target always maps to same partition | Sender-side |
+| `AdmissionControlFacet` | Receiver-side back-pressure facet; rejects with RESOURCE_EXHAUSTED | Receiver-side |
+| Dispatch helpers | `parse_dispatch_request`, `build_dispatch_response`, `validate_config` utilities | Shared |
+
+### Metrics
+
+All outbox components emit metrics via the `metrics` crate facade (same recorder as gRPC/actor metrics). Naming follows `plexspaces_outbox_*`:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `plexspaces_outbox_limiter_success_total` | counter | Permits completed successfully |
+| `plexspaces_outbox_limiter_rejection_total` | counter | RESOURCE_EXHAUSTED rejections (triggers multiplicative decrease) |
+| `plexspaces_outbox_limiter_acquire_rejected_total` | counter | Permit acquisition failures (at capacity) |
+| `plexspaces_outbox_limiter_current_limit` | gauge | Current AIMD concurrency limit |
+| `plexspaces_outbox_limiter_in_flight` | gauge | Permits currently held |
+| `plexspaces_outbox_relay_delivered_total` | counter | Messages successfully delivered |
+| `plexspaces_outbox_relay_errors_total` | counter | Non-backpressure delivery failures |
+| `plexspaces_outbox_relay_backpressure_total` | counter | RESOURCE_EXHAUSTED responses from targets |
+| `plexspaces_outbox_relay_retries_total` | counter | Messages requeued for retry |
+| `plexspaces_outbox_relay_dead_lettered_total` | counter | Messages moved to dead letter after exhausting retries |
+| `plexspaces_outbox_relay_delivery_seconds` | histogram | End-to-end delivery latency per message |
+| `plexspaces_outbox_relay_pending` | gauge | Batch size of last dequeue |
+| `plexspaces_outbox_admission_admitted_total` | counter | Messages admitted by the facet |
+| `plexspaces_outbox_admission_rejected_total` | counter | Messages rejected (actor at capacity) |
+| `plexspaces_outbox_admission_in_flight` | gauge | Current in-flight messages on the receiver |
+
+### Partitioned Dispatch
+
+When a single relay becomes a bottleneck (millions of target actors), `PartitionedOutboxRelay` distributes messages across N independent partitions. Each partition runs its own relay task with its own channel and AIMD limiter. `HashRouter` maps `target_actor_id → partition` using FNV-1a mod N, preserving per-recipient ordering.
+
+**State**: Partitions use in-memory channels (not durable). AIMD limits and counters are in-process atomics, lost on restart. For durable partitions, compose N `OutboxRelay` instances with DB-backed channels and a `HashRouter` directly.
+
+**Scaling partition count**: Create a new relay with desired N, drain old relay to zero, switch. No rebalancing — channels are transient queues, not persistent logs.
+
+**Monitoring**: All partition relays emit to shared `plexspaces_outbox_*` metric names (counters aggregate automatically). For per-partition drill-down, call `status()` which returns `PartitionedDispatcherStatus` with per-partition delivered/failed/pending/in_flight/AIMD limit.
+
+See [Detailed Design — PartitionedOutboxRelay](detailed-design.md) for configuration reference, state storage table, gotchas, and testing commands.
+
+### Retry Policy
+
+All retry/backoff configuration uses the canonical `RetryPolicy` from `common.proto` (consolidating 6 prior duplicate types). The Rust implementation in `plexspaces-common::retry` provides exponential backoff with configurable jitter ratio, max delay cap, and error-type filtering.
 
 ## See Also
 

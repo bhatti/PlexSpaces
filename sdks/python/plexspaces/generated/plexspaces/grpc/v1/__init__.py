@@ -15,6 +15,8 @@ from typing import (
 
 import betterproto
 
+from ...common import v1 as __common_v1__
+
 
 class MiddlewareType(betterproto.Enum):
     """Middleware types"""
@@ -167,7 +169,7 @@ class MiddlewareSpec(betterproto.Message):
     circuit_breaker: "CircuitBreakerMiddlewareConfig" = betterproto.message_field(
         16, group="config"
     )
-    retry: "RetryMiddlewareConfig" = betterproto.message_field(17, group="config")
+    retry: "__common_v1__.RetryPolicy" = betterproto.message_field(17, group="config")
     logging: "LoggingMiddlewareConfig" = betterproto.message_field(18, group="config")
 
 
@@ -475,35 +477,6 @@ class CircuitBreakerMiddlewareConfig(betterproto.Message):
 
     window: timedelta = betterproto.message_field(4)
     """Time window for counting failures"""
-
-
-@dataclass(eq=False, repr=False)
-class RetryMiddlewareConfig(betterproto.Message):
-    """
-    Retry middleware configuration
-
-     ## Purpose
-     Automatically retries failed requests with exponential backoff.
-
-     ## Design Notes
-     - Only retries idempotent methods by default
-     - Backoff prevents overwhelming downstream service
-    """
-
-    max_retries: int = betterproto.uint32_field(1)
-    """Maximum retry attempts"""
-
-    initial_delay: timedelta = betterproto.message_field(2)
-    """Initial retry delay"""
-
-    max_delay: timedelta = betterproto.message_field(3)
-    """Maximum retry delay"""
-
-    backoff_factor: float = betterproto.double_field(4)
-    """Backoff multiplier (2.0 = exponential)"""
-
-    retryable_status_codes: List[int] = betterproto.int32_field(5)
-    """Retryable gRPC status codes"""
 
 
 @dataclass(eq=False, repr=False)

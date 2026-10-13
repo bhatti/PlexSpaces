@@ -182,7 +182,7 @@ async fn wait_for_count(observed_count: &Arc<tokio::sync::RwLock<i32>>, expected
 async fn test_actor_lifecycle() {
     let id = runtime_actor_id("test-actor");
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -214,7 +214,7 @@ async fn test_actor_handle_stop_actor_runs_terminate() {
     let behavior = Box::new(TerminateTrackingBehavior {
         terminated: terminated.clone(),
     });
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -250,7 +250,7 @@ async fn test_non_virtual_durable_actor_restores_checkpoint_on_restart() {
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::GenServer,
     });
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -306,7 +306,7 @@ async fn test_non_virtual_durable_actor_restores_checkpoint_on_restart() {
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::GenServer,
     });
-    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut restarted_actor = actor_with_default_service_locator(
@@ -343,7 +343,7 @@ async fn test_non_virtual_non_durable_actor_restarts_from_fresh_state() {
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::GenServer,
     });
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -372,7 +372,7 @@ async fn test_non_virtual_non_durable_actor_restarts_from_fresh_state() {
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::GenServer,
     });
-    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut restarted_actor = actor_with_default_service_locator(
@@ -403,7 +403,7 @@ async fn test_non_virtual_durable_workflow_actor_restores_checkpoint_on_restart(
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::Workflow,
     });
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -444,7 +444,7 @@ async fn test_non_virtual_durable_workflow_actor_restores_checkpoint_on_restart(
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::Workflow,
     });
-    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut restarted_actor = actor_with_default_service_locator(
@@ -487,7 +487,7 @@ async fn test_non_virtual_durable_event_actor_restores_checkpoint_on_restart() {
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::GenEvent,
     });
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut actor = actor_with_default_service_locator(
@@ -528,7 +528,7 @@ async fn test_non_virtual_durable_event_actor_restores_checkpoint_on_restart() {
         observed_count: observed_count.clone(),
         behavior_type: crate::core::BehaviorType::GenEvent,
     });
-    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let mut restarted_actor = actor_with_default_service_locator(
@@ -568,7 +568,7 @@ async fn test_actor_id() {
 #[tokio::test]
 async fn test_static_lifecycle_on_activate_always_runs() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -593,7 +593,7 @@ async fn test_static_lifecycle_on_activate_always_runs() {
 #[tokio::test]
 async fn test_static_lifecycle_on_deactivate_always_runs() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -617,7 +617,7 @@ async fn test_static_lifecycle_on_deactivate_always_runs() {
 #[tokio::test]
 async fn test_static_lifecycle_state_transitions() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -649,7 +649,7 @@ async fn test_static_lifecycle_allows_behavior_extension() {
     // This test will pass once we implement the helper methods
     // for behaviors to extend lifecycle (like as_lifecycle_mut())
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -674,7 +674,7 @@ async fn test_static_lifecycle_allows_behavior_extension() {
 #[tokio::test]
 async fn test_with_resource_profile() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -700,7 +700,7 @@ async fn test_with_resource_profile() {
 #[tokio::test]
 async fn test_with_resource_contract() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -733,7 +733,7 @@ async fn test_with_resource_contract() {
 #[tokio::test]
 async fn test_resource_usage() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -759,7 +759,7 @@ async fn test_resource_usage() {
 #[tokio::test]
 async fn test_health_check() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -782,7 +782,7 @@ async fn test_health_check() {
 #[tokio::test]
 async fn test_validate_resources_without_contract() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -803,7 +803,7 @@ async fn test_validate_resources_without_contract() {
 #[tokio::test]
 async fn test_validate_resources_with_contract() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -837,7 +837,7 @@ async fn test_validate_resources_with_contract() {
 #[tokio::test]
 async fn test_start_already_active_error() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -863,7 +863,7 @@ async fn test_start_already_active_error() {
 #[tokio::test]
 async fn test_stop_already_stopped() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -891,7 +891,7 @@ async fn test_send_message() {
     use plexspaces_mailbox::mailbox_config_default;
 
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(mailbox_config_default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config_default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .expect("Failed to create mailbox");
 
@@ -916,7 +916,7 @@ async fn test_send_message() {
 #[tokio::test]
 async fn test_actor_id_getter() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor-123".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor-123".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -936,7 +936,7 @@ async fn test_actor_id_getter() {
 #[tokio::test]
 async fn test_mailbox_getter() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -962,7 +962,7 @@ async fn test_mailbox_getter() {
 #[tokio::test]
 async fn test_become_changes_behavior() {
     let behavior1 = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -984,7 +984,7 @@ async fn test_become_changes_behavior() {
 #[tokio::test]
 async fn test_unbecome_restores_previous_behavior() {
     let behavior1 = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1009,7 +1009,7 @@ async fn test_unbecome_restores_previous_behavior() {
 #[tokio::test]
 async fn test_unbecome_error_when_no_previous_behavior() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1091,7 +1091,7 @@ async fn test_attach_facet() {
     }
 
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1113,7 +1113,7 @@ async fn test_attach_facet() {
 #[tokio::test]
 async fn test_list_facets() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1134,7 +1134,7 @@ async fn test_list_facets() {
 #[tokio::test]
 async fn test_detach_facet() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1165,7 +1165,7 @@ async fn test_actor_processes_messages_in_loop() {
     use plexspaces_mailbox::mailbox_config_default;
 
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(mailbox_config_default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config_default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .expect("Failed to create mailbox");
 
@@ -1201,7 +1201,7 @@ async fn test_actor_processes_messages_in_loop() {
 #[tokio::test]
 async fn test_actor_graceful_shutdown() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1234,7 +1234,7 @@ async fn test_actor_graceful_shutdown() {
 #[tokio::test]
 async fn test_on_timer_hook() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1261,7 +1261,7 @@ async fn test_message_processing_with_sender() {
     use plexspaces_mailbox::mailbox_config_default;
 
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(mailbox_config_default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config_default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .expect("Failed to create mailbox");
 
@@ -1320,7 +1320,7 @@ async fn test_message_processing_error_handling() {
     }
 
     let behavior = Box::new(FailingBehavior);
-    let mailbox_pair = Mailbox::new(mailbox_config_default(), "failing-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config_default(), "failing-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1355,7 +1355,7 @@ async fn test_message_processing_error_handling() {
 #[tokio::test]
 async fn test_health_tracking_with_messages() {
     let behavior = Box::new(MockBehavior::new());
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 

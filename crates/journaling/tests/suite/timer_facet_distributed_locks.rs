@@ -135,6 +135,7 @@ mod distributed_lock_tests {
                 String::new(),
                 String::new(),
                 None,
+                None,
             )
             .await
             .expect("Failed to create mailbox");
@@ -158,6 +159,7 @@ mod distributed_lock_tests {
                 timer_test_actor_id("test-actor", "node-1"),
                 String::new(),
                 String::new(),
+                None,
                 None,
             )
             .await
@@ -196,6 +198,7 @@ mod distributed_lock_tests {
                 timer_test_actor_id("test-actor", "node-1"),
                 String::new(),
                 String::new(),
+                None,
                 None,
             )
             .await
@@ -242,6 +245,7 @@ mod distributed_lock_tests {
                 String::new(),
                 String::new(),
                 None,
+                None,
             )
             .await
             .expect("Failed to create mailbox");
@@ -261,6 +265,7 @@ mod distributed_lock_tests {
                 timer_test_actor_id("test-actor-1", "node-2"),
                 String::new(),
                 String::new(),
+                None,
                 None,
             )
             .await
@@ -310,6 +315,7 @@ mod distributed_lock_tests {
                 timer_test_actor_id("test-actor", "node-1"),
                 String::new(),
                 String::new(),
+                None,
                 None,
             )
             .await

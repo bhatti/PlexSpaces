@@ -1784,9 +1784,9 @@ async fn test_virtual_actor_implicit_activation() {
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
-        plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+        plexspaces_mailbox::BackpressureStrategy::BackpressureStrategyDropOldest as i32;
     let actor_id = runtime_actor_id("virtual-actor-implicit-1");
-    let mailbox_pair = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1845,9 +1845,9 @@ async fn test_virtual_actor_idle_deactivation() {
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
-        plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+        plexspaces_mailbox::BackpressureStrategy::BackpressureStrategyDropOldest as i32;
     let actor_id2 = runtime_actor_id("virtual-actor-idle-2");
-    let mailbox_pair = Mailbox::new(mailbox_config, actor_id2.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id2.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1909,9 +1909,9 @@ async fn test_virtual_actor_pending_messages() {
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
-        plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+        plexspaces_mailbox::BackpressureStrategy::BackpressureStrategyDropOldest as i32;
     let actor_id3 = runtime_actor_id("virtual-actor-pending-3");
-    let mailbox_pair = Mailbox::new(mailbox_config, actor_id3.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id3.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -1961,9 +1961,9 @@ async fn test_activate_actor_manual() {
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
-        plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+        plexspaces_mailbox::BackpressureStrategy::BackpressureStrategyDropOldest as i32;
     let actor_id4 = runtime_actor_id("virtual-actor-manual-4");
-    let mailbox_pair = Mailbox::new(mailbox_config, actor_id4.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id4.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -2006,9 +2006,9 @@ async fn test_deactivate_actor_manual() {
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
-        plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+        plexspaces_mailbox::BackpressureStrategy::BackpressureStrategyDropOldest as i32;
     let actor_id5 = runtime_actor_id("virtual-actor-deact-5");
-    let mailbox_pair = Mailbox::new(mailbox_config, actor_id5.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id5.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -2076,7 +2076,7 @@ async fn test_check_actor_exists() {
 
     let mailbox_config = MailboxConfig::default();
     let actor_id6 = runtime_actor_id("virtual-actor-check-6");
-    let mailbox_pair = Mailbox::new(mailbox_config, actor_id6.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id6.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 

@@ -2,11 +2,11 @@
 
 //! Pure retry backoff (full jitter) and idempotency helpers — unit-tested without timers.
 
-use plexspaces_proto::node::v1::HttpRetryPolicy;
+use plexspaces_proto::common::v1::RetryPolicy;
 use rand::Rng;
 use std::time::Duration;
 
-/// HTTP methods safe to retry by default without `allow_non_idempotent_retry`.
+/// HTTP methods safe to retry by default without `allow_non_idempotent`.
 pub fn is_idempotent_method(method: &str) -> bool {
     matches!(
         method.to_ascii_uppercase().as_str(),
@@ -15,11 +15,11 @@ pub fn is_idempotent_method(method: &str) -> bool {
 }
 
 /// Whether this attempt may be retried for the given method and policy.
-pub fn method_allows_retry(method: &str, policy: &HttpRetryPolicy) -> bool {
+pub fn method_allows_retry(method: &str, policy: &RetryPolicy) -> bool {
     if is_idempotent_method(method) {
         return true;
     }
-    policy.allow_non_idempotent_retry
+    policy.allow_non_idempotent
 }
 
 /// HTTP status codes that are reasonable to retry (server/transient).
@@ -29,17 +29,17 @@ pub fn status_is_retriable(status: u16) -> bool {
 
 /// Caps for exponential backoff: `min(cap, initial * mult^(attempt-1))` then full jitter in [0, cap].
 pub fn backoff_duration_for_attempt(
-    policy: &HttpRetryPolicy,
+    policy: &RetryPolicy,
     attempt_after_failure: u32,
     rng: &mut impl Rng,
 ) -> Duration {
     let initial_ms = policy
-        .initial_backoff
+        .initial_delay
         .as_ref()
         .map(|d| duration_proto_to_ms(d).max(1))
         .unwrap_or(100);
     let max_ms = policy
-        .max_backoff
+        .max_delay
         .as_ref()
         .map(|d| duration_proto_to_ms(d).max(initial_ms))
         .unwrap_or(30_000);
@@ -85,34 +85,30 @@ mod tests {
 
     #[test]
     fn method_allows_retry_respects_flag() {
-        let mut p = HttpRetryPolicy {
+        let mut p = RetryPolicy {
             max_attempts: 3,
-            initial_backoff: None,
-            max_backoff: None,
-            backoff_multiplier: 0.0,
-            jitter_ratio: 0.0,
-            allow_non_idempotent_retry: false,
+            ..Default::default()
         };
         assert!(!method_allows_retry("POST", &p));
-        p.allow_non_idempotent_retry = true;
+        p.allow_non_idempotent = true;
         assert!(method_allows_retry("POST", &p));
     }
 
     #[test]
     fn backoff_bounded_with_full_jitter() {
-        let policy = HttpRetryPolicy {
+        let policy = RetryPolicy {
             max_attempts: 5,
-            initial_backoff: Some(ProtoDuration {
+            initial_delay: Some(ProtoDuration {
                 seconds: 0,
                 nanos: 10_000_000,
             }),
-            max_backoff: Some(ProtoDuration {
+            max_delay: Some(ProtoDuration {
                 seconds: 1,
                 nanos: 0,
             }),
             backoff_multiplier: 2.0,
             jitter_ratio: 1.0,
-            allow_non_idempotent_retry: false,
+            ..Default::default()
         };
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..20 {

@@ -570,7 +570,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let (mailbox_counter_inner, mut mailbox_counter_receiver) =
-        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let mailbox_counter = Arc::new(mailbox_counter_inner);
@@ -720,7 +720,7 @@ async fn test_chained_asks_multi_node() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let (mailbox_counter_inner, mut mailbox_counter_receiver) =
-        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let mailbox_counter = Arc::new(mailbox_counter_inner);
@@ -868,7 +868,7 @@ async fn test_concurrent_asks_multi_node() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let (mailbox_counter_inner, mut mailbox_counter_receiver) =
-        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config, counter_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let mailbox_counter = Arc::new(mailbox_counter_inner);

@@ -40,9 +40,10 @@ use bytes::Bytes;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use dashmap::DashMap;
+use tokio::time::Instant;
 use plexspaces_service_traits::{IdempotencyError, IdempotencyOutcome, IdempotencyResult, IdempotencyStore};
 
 /// State of a single idempotency entry.

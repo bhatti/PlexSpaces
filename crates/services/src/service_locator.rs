@@ -385,6 +385,11 @@ pub struct ServiceLocatorImpl {
     /// Runtime tracing gate (set once after TracingControlService is created).
     tracing_gate:
         Arc<RwLock<Option<Arc<crate::tracing_control_service::TracingControlServiceImpl>>>>,
+
+    /// Tenant-isolated durable channel repository (optional; enables mailbox persistence
+    /// when `ActorConfig.enable_persistence = true`).
+    channel_repository:
+        Arc<RwLock<Option<Arc<dyn plexspaces_channel::ChannelRepository>>>>,
 }
 
 impl ServiceLocatorImpl {
@@ -479,6 +484,7 @@ impl ServiceLocatorImpl {
             outbound_http_client: Arc::new(RwLock::new(None)),
             shutdown_flag: Arc::new(RwLock::new(false)),
             tracing_gate: Arc::new(RwLock::new(None)),
+            channel_repository: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -619,6 +625,15 @@ impl ServiceLocatorImpl {
     ) {
         let mut g = self.tracing_gate.write().await;
         *g = Some(gate);
+    }
+
+    /// Register ChannelRepository for tenant-isolated durable mailbox channels.
+    pub async fn register_channel_repository(
+        &self,
+        repo: Arc<dyn plexspaces_channel::ChannelRepository>,
+    ) {
+        let mut g = self.channel_repository.write().await;
+        *g = Some(repo);
     }
 
     /// Register SecurityConfig
@@ -1195,7 +1210,7 @@ impl ServiceLocatorImpl {
         mailbox_config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
 
         // Create mailbox with the configured backend
-        Mailbox::new(mailbox_config, mailbox_id, String::new(), String::new(), None)
+        Mailbox::new(mailbox_config, mailbox_id, String::new(), String::new(), None, None)
             .await
             .map_err(|e| format!("Failed to create mailbox: {}", e).into())
     }
@@ -1677,6 +1692,13 @@ impl plexspaces_actor::ServiceLocator for ServiceLocatorImpl {
         g.as_ref()
             .map(|arc| arc.clone() as Arc<dyn plexspaces_actor::TracingGate>)
     }
+
+    async fn get_channel_repository(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_channel::ChannelRepository>> {
+        let g = self.channel_repository.read().await;
+        g.clone()
+    }
 }
 
 #[async_trait::async_trait]
@@ -1907,6 +1929,13 @@ impl plexspaces_actor::InitializableServiceLocator for ServiceLocatorImpl {
         let mut g = self.ws_registry.write().await;
         *g = Some(registry);
     }
+
+    async fn register_channel_repository(
+        &self,
+        repo: std::sync::Arc<dyn plexspaces_channel::ChannelRepository>,
+    ) {
+        ServiceLocatorImpl::register_channel_repository(self, repo).await;
+    }
 }
 
 impl ServiceLocatorImpl {
@@ -2117,6 +2146,23 @@ async fn initialize_services_impl(
         .await;
     if tracing::enabled!(tracing::Level::TRACE) {
         tracing::trace!("✅ JournalStorage registered for durability facets");
+    }
+
+    // Create and register ChannelRepository for tenant-isolated durable mailbox channels.
+    // Actors with `ActorConfig.enable_persistence = true` use this to persist their mailbox.
+    match plexspaces_channel::create_channel_repository_from_shared_db(shared_db).await {
+        Ok(repo) => {
+            service_locator.register_channel_repository(repo).await;
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!("✅ ChannelRepository registered for durable mailboxes");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "ChannelRepository unavailable (mailbox persistence disabled): {}",
+                e
+            );
+        }
     }
 
     let object_registry_trait: Arc<dyn plexspaces_actor::ObjectRegistry> = object_registry.clone();

@@ -159,7 +159,7 @@ message WorkflowDefinition {
   google.protobuf.Duration default_timeout = 5 [(buf.validate.field).duration.lte.seconds = 86400]; // Max 24 hours
 
   // Default retry policy for steps
-  RetryConfig default_retry = 6;
+  plexspaces.common.v1.RetryPolicy default_retry = 6;
 
   // User-defined labels
   map<string, string> labels = 7;
@@ -215,7 +215,7 @@ message Step {
   google.protobuf.Duration timeout = 5 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 
   // Retry configuration
-  RetryConfig retry = 6;
+  plexspaces.common.v1.RetryPolicy retry = 6;
 
   // Step ID to run on error (compensation/saga)
   string on_error = 7 [(buf.validate.field).string.max_len = 255];
@@ -237,45 +237,6 @@ enum StepType {
 
 // Retry configuration
 //
-// Exponential backoff retry policy with error type matching.
-// When fields are unset (proto3 default: 0 for numbers, empty for repeated), runtime defaults apply:
-// - max_attempts: 1 (single attempt, no retries)
-// - initial_interval_ms: 100
-// - backoff_rate: 2.0 (exponential: delay = initial * rate^(attempt-1) capped at max_interval_ms)
-// - max_interval_ms: 30000
-// Runtime applies full jitter to delay (multiply by random in (0, 1]) before sleeping between retries.
-message RetryConfig {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Retry Configuration"
-      description: "Exponential backoff retry policy. Unset max_attempts means 1 (no retries)."
-    }
-  };
-
-  // Maximum retry attempts (1 = single attempt, no retries; unset/0 treated as 1 at runtime)
-  uint32 max_attempts = 1 [(buf.validate.field).uint32 = {lte: 1000}]; // 0 or 1–1000
-
-  // Initial retry interval (milliseconds). Default 100 when unset.
-  uint32 initial_interval_ms = 2 [(buf.validate.field).uint32 = {lte: 300000}]; // 0 or 1–300000
-
-  // Exponential backoff rate (e.g., 2.0 for doubling). Default 2.0 when unset.
-  double backoff_rate = 3 [(buf.validate.field).double = {
-    gte: 1.0
-    lte: 10.0
-  }];
-
-  // Maximum retry interval (milliseconds). Default 30000 when unset.
-  uint32 max_interval_ms = 4 [(buf.validate.field).uint32 = {lte: 3600000}]; // 0 or 1–3600000
-
-  // Error types to retry (empty = retry all)
-  repeated string retryable_errors = 5 [(buf.validate.field).repeated = {
-    max_items: 100
-    items: {
-      string: {max_len: 256}
-    }
-  }];
-}
-
 // ==================== Workflow Execution ====================
 
 // Workflow execution (metadata)

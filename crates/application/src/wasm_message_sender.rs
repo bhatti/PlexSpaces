@@ -282,6 +282,44 @@ impl MessageSender for ActorServiceMessageSender {
             .map_err(|e| e.to_string())
     }
 
+    async fn send_message_ex(
+        &self,
+        from: &str,
+        to: &str,
+        message_type: &str,
+        message: &[u8],
+        idempotency_key: &str,
+        conflict_resolution: i32,
+    ) -> Result<(), String> {
+        use plexspaces_actor::ActorRegistry;
+
+        trace!(from = %from, to = %to, message_type = %message_type, idempotency_key = %idempotency_key, "WASM send_message_ex (tell with meta)");
+
+        let registry: Arc<ActorRegistry> = self
+            .service_locator
+            .actor_registry()
+            .await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
+        let to_id = registry.resolve_actor_id(&ctx, to).await?;
+        let msg = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: message.to_vec(),
+            sender_id: from.to_string(),
+            receiver_id: to_id.to_string(),
+            message_type: message_type.to_string(),
+            idempotency_key: idempotency_key.to_string(),
+            conflict_resolution,
+            ..Default::default()
+        };
+        registry
+            .tell(&ctx, &to_id, msg)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     #[instrument(skip(self, payload), fields(from = %from, to = %to, msg_type = %message_type))]
     async fn ask(
         &self,

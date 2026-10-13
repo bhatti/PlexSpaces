@@ -1206,7 +1206,7 @@ mod tests {
     pub(crate) async fn create_test_mailbox() -> (Arc<Mailbox>, MailboxReceiver) {
         use plexspaces_mailbox::mailbox_config_default;
         let (mailbox, receiver) =
-            Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
+            Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string(), String::new(), String::new(), None, None)
                 .await
                 .expect("Failed to create mailbox");
         (Arc::new(mailbox), receiver)
@@ -1322,7 +1322,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_actor_ref_exposes_scope_and_local_state_handle_via_message_sender() {
-        let (mailbox_inner, _receiver) = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None)
+        let (mailbox_inner, _receiver) = Mailbox::new(MailboxConfig::default(), "test-actor".to_string(), String::new(), String::new(), None, None)
                 .await
                 .unwrap();
         let mailbox = Arc::new(mailbox_inner);
@@ -1756,7 +1756,7 @@ mod tests {
         let correlation_id = "test-corr-123".to_string();
         let reply_mailbox_id = format!("reply-mailbox-{}", Ulid::new());
         let (_reply_mailbox, _reply_receiver) =
-            Mailbox::new(MailboxConfig::default(), reply_mailbox_id, String::new(), String::new(), None)
+            Mailbox::new(MailboxConfig::default(), reply_mailbox_id, String::new(), String::new(), None, None)
                 .await
                 .expect("Failed to create reply mailbox");
         let _reply_mailbox = Arc::new(_reply_mailbox);

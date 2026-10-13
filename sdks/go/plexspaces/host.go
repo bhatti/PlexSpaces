@@ -73,6 +73,7 @@ func (r *ActorRef) Ask(msgType string, payload []byte, timeoutMs uint64) ([]byte
 type Host struct {
 	ts  *TupleSpace
 	ch  *Channel
+	ob  *Outbox
 	reg *Registry
 }
 
@@ -81,6 +82,7 @@ func NewHost() *Host {
 	h := &Host{}
 	h.ts = &TupleSpace{host: h}
 	h.ch = &Channel{host: h}
+	h.ob = &Outbox{host: h}
 	h.reg = &Registry{}
 	return h
 }
@@ -951,6 +953,79 @@ func (ch *Channel) Depth(ctx, channelName string) (uint64, error) {
 		return 0, fmt.Errorf("channel depth: malformed response %q: %w", result, err)
 	}
 	return depth, nil
+}
+
+// ========================================================================
+// Outbox (flow-controlled messaging)
+// ========================================================================
+
+// Outbox provides access to flow-controlled messaging via the outbox relay.
+// Messages are enqueued in a DB-backed channel and delivered asynchronously
+// at AIMD-controlled concurrency, protecting both sender and receiver from overload.
+type Outbox struct {
+	host *Host
+}
+
+// Outbox returns the Outbox sub-API.
+func (h *Host) Outbox() *Outbox { return h.ob }
+
+// DispatchResult holds the result of an outbox dispatch operation.
+type DispatchResult struct {
+	Accepted uint32 `json:"accepted"`
+	Rejected uint32 `json:"rejected"`
+}
+
+// Dispatch enqueues messages to one or more target actors via the outbox relay.
+// dispatcherID: ID of the dispatcher actor managing the outbox.
+// targetActorIDs: list of target actor IDs to deliver to.
+// payload: message payload (JSON-serializable).
+// messageType: "call" or "cast" (default "cast").
+// idempotencyKey: optional dedup key (empty = no dedup).
+// conflictResolution: "" or "keep_original" (drop duplicate) or "overwrite" (LWW replace).
+// Returns (accepted, rejected) counts.
+func (ob *Outbox) Dispatch(ctx, dispatcherID string, targetActorIDs []string, payload any, messageType, idempotencyKey, conflictResolution string) (*DispatchResult, error) {
+	payloadJSON := marshalPayload(payload)
+	ctxJSON := marshalPayload(ctx)
+	result := hostOutboxDispatch(ctxJSON, dispatcherID, targetActorIDs, payloadJSON, messageType, idempotencyKey, conflictResolution)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var dr DispatchResult
+	if err := json.Unmarshal([]byte(result), &dr); err != nil {
+		return nil, fmt.Errorf("outbox dispatch: parse response: %w", err)
+	}
+	return &dr, nil
+}
+
+// DispatchWithTargets is the pre-encoded payload variant of Dispatch.
+// payloadJSON must already be a valid JSON string.
+// In WASM builds use this instead of Dispatch to avoid marshalPayload/fmt.Sprintf function-table corruption.
+func (ob *Outbox) DispatchWithTargets(ctx, dispatcherID string, targets []string, payloadJSON, messageType, idempotencyKey, conflictResolution string) (*DispatchResult, error) {
+	ctxJSON := marshalPayload(ctx)
+	result := hostOutboxDispatch(ctxJSON, dispatcherID, targets, payloadJSON, messageType, idempotencyKey, conflictResolution)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var dr DispatchResult
+	if err := json.Unmarshal([]byte(result), &dr); err != nil {
+		return nil, fmt.Errorf("outbox dispatch: parse response: %w", err)
+	}
+	return &dr, nil
+}
+
+// Status returns the current status of a dispatcher (pending, in-flight, delivered, etc).
+// Returns JSON-decoded status map.
+func (ob *Outbox) Status(ctx, dispatcherID string) (map[string]any, error) {
+	ctxJSON := marshalPayload(ctx)
+	result := hostOutboxStatus(ctxJSON, dispatcherID)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var status map[string]any
+	if err := json.Unmarshal([]byte(result), &status); err != nil {
+		return nil, fmt.Errorf("outbox status: parse response: %w", err)
+	}
+	return status, nil
 }
 
 // ========================================================================

@@ -624,67 +624,6 @@ func (x *AdaptiveConfig) GetLearningRate() float64 {
 	return 0
 }
 
-// Configuration for exponential backoff restart policy
-type ExponentialBackoffConfig struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	InitialDelayMs uint64                 `protobuf:"varint,1,opt,name=initial_delay_ms,json=initialDelayMs,proto3" json:"initial_delay_ms,omitempty"`
-	MaxDelayMs     uint64                 `protobuf:"varint,2,opt,name=max_delay_ms,json=maxDelayMs,proto3" json:"max_delay_ms,omitempty"`
-	Factor         float64                `protobuf:"fixed64,3,opt,name=factor,proto3" json:"factor,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *ExponentialBackoffConfig) Reset() {
-	*x = ExponentialBackoffConfig{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ExponentialBackoffConfig) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ExponentialBackoffConfig) ProtoMessage() {}
-
-func (x *ExponentialBackoffConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ExponentialBackoffConfig.ProtoReflect.Descriptor instead.
-func (*ExponentialBackoffConfig) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *ExponentialBackoffConfig) GetInitialDelayMs() uint64 {
-	if x != nil {
-		return x.InitialDelayMs
-	}
-	return 0
-}
-
-func (x *ExponentialBackoffConfig) GetMaxDelayMs() uint64 {
-	if x != nil {
-		return x.MaxDelayMs
-	}
-	return 0
-}
-
-func (x *ExponentialBackoffConfig) GetFactor() float64 {
-	if x != nil {
-		return x.Factor
-	}
-	return 0
-}
-
 // Child specification
 //
 // ## Erlang/OTP Equivalent
@@ -734,14 +673,14 @@ type ChildSpec struct {
 	// Can include: "start_module", "start_function", "supervisor_strategy"
 	Metadata map[string]string `protobuf:"bytes,10,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Exponential backoff config (when restart = RESTART_POLICY_EXPONENTIAL_BACKOFF)
-	ExponentialBackoff *ExponentialBackoffConfig `protobuf:"bytes,11,opt,name=exponential_backoff,json=exponentialBackoff,proto3,oneof" json:"exponential_backoff,omitempty"`
+	ExponentialBackoff *v1.RetryPolicy `protobuf:"bytes,11,opt,name=exponential_backoff,json=exponentialBackoff,proto3,oneof" json:"exponential_backoff,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ChildSpec) Reset() {
 	*x = ChildSpec{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[2]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -753,7 +692,7 @@ func (x *ChildSpec) String() string {
 func (*ChildSpec) ProtoMessage() {}
 
 func (x *ChildSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[2]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -766,7 +705,7 @@ func (x *ChildSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChildSpec.ProtoReflect.Descriptor instead.
 func (*ChildSpec) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{2}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ChildSpec) GetActorIdentity() *v1.ActorIdentity {
@@ -832,7 +771,7 @@ func (x *ChildSpec) GetMetadata() map[string]string {
 	return nil
 }
 
-func (x *ChildSpec) GetExponentialBackoff() *ExponentialBackoffConfig {
+func (x *ChildSpec) GetExponentialBackoff() *v1.RetryPolicy {
 	if x != nil {
 		return x.ExponentialBackoff
 	}
@@ -863,7 +802,7 @@ type SupervisorSpec struct {
 
 func (x *SupervisorSpec) Reset() {
 	*x = SupervisorSpec{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[3]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -875,7 +814,7 @@ func (x *SupervisorSpec) String() string {
 func (*SupervisorSpec) ProtoMessage() {}
 
 func (x *SupervisorSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[3]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -888,7 +827,7 @@ func (x *SupervisorSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupervisorSpec.ProtoReflect.Descriptor instead.
 func (*SupervisorSpec) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{3}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SupervisorSpec) GetStrategy() SupervisionStrategy {
@@ -952,7 +891,7 @@ type SupervisorState struct {
 
 func (x *SupervisorState) Reset() {
 	*x = SupervisorState{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -964,7 +903,7 @@ func (x *SupervisorState) String() string {
 func (*SupervisorState) ProtoMessage() {}
 
 func (x *SupervisorState) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -977,7 +916,7 @@ func (x *SupervisorState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupervisorState.ProtoReflect.Descriptor instead.
 func (*SupervisorState) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{4}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SupervisorState) GetSupervisorId() string {
@@ -1034,7 +973,7 @@ type ChildState struct {
 
 func (x *ChildState) Reset() {
 	*x = ChildState{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1046,7 +985,7 @@ func (x *ChildState) String() string {
 func (*ChildState) ProtoMessage() {}
 
 func (x *ChildState) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1059,7 +998,7 @@ func (x *ChildState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChildState.ProtoReflect.Descriptor instead.
 func (*ChildState) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{5}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ChildState) GetSpec() *ChildSpec {
@@ -1114,7 +1053,7 @@ type RestartEvent struct {
 
 func (x *RestartEvent) Reset() {
 	*x = RestartEvent{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1126,7 +1065,7 @@ func (x *RestartEvent) String() string {
 func (*RestartEvent) ProtoMessage() {}
 
 func (x *RestartEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1139,7 +1078,7 @@ func (x *RestartEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartEvent.ProtoReflect.Descriptor instead.
 func (*RestartEvent) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{6}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RestartEvent) GetChildId() string {
@@ -1292,7 +1231,7 @@ type SupervisorStats struct {
 
 func (x *SupervisorStats) Reset() {
 	*x = SupervisorStats{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1304,7 +1243,7 @@ func (x *SupervisorStats) String() string {
 func (*SupervisorStats) ProtoMessage() {}
 
 func (x *SupervisorStats) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1317,7 +1256,7 @@ func (x *SupervisorStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupervisorStats.ProtoReflect.Descriptor instead.
 func (*SupervisorStats) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{7}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SupervisorStats) GetTotalRestarts() uint64 {
@@ -1369,7 +1308,7 @@ type SupervisorEvent struct {
 
 func (x *SupervisorEvent) Reset() {
 	*x = SupervisorEvent{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1320,7 @@ func (x *SupervisorEvent) String() string {
 func (*SupervisorEvent) ProtoMessage() {}
 
 func (x *SupervisorEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1333,7 @@ func (x *SupervisorEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupervisorEvent.ProtoReflect.Descriptor instead.
 func (*SupervisorEvent) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{8}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SupervisorEvent) GetEventType() SupervisorEventType {
@@ -1445,7 +1384,7 @@ type ChildInfo struct {
 
 func (x *ChildInfo) Reset() {
 	*x = ChildInfo{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1457,7 +1396,7 @@ func (x *ChildInfo) String() string {
 func (*ChildInfo) ProtoMessage() {}
 
 func (x *ChildInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1470,7 +1409,7 @@ func (x *ChildInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChildInfo.ProtoReflect.Descriptor instead.
 func (*ChildInfo) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{9}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ChildInfo) GetChildId() string {
@@ -1513,7 +1452,7 @@ type ChildCount struct {
 
 func (x *ChildCount) Reset() {
 	*x = ChildCount{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1525,7 +1464,7 @@ func (x *ChildCount) String() string {
 func (*ChildCount) ProtoMessage() {}
 
 func (x *ChildCount) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1538,7 +1477,7 @@ func (x *ChildCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChildCount.ProtoReflect.Descriptor instead.
 func (*ChildCount) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{10}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ChildCount) GetActors() uint32 {
@@ -1579,7 +1518,7 @@ type SupervisionError struct {
 
 func (x *SupervisionError) Reset() {
 	*x = SupervisionError{}
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1591,7 +1530,7 @@ func (x *SupervisionError) String() string {
 func (*SupervisionError) ProtoMessage() {}
 
 func (x *SupervisionError) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_supervision_supervision_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1604,7 +1543,7 @@ func (x *SupervisionError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupervisionError.ProtoReflect.Descriptor instead.
 func (*SupervisionError) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{11}
+	return file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SupervisionError) GetCode() SupervisionErrorCode {
@@ -1641,12 +1580,7 @@ const file_plexspaces_v1_supervision_supervision_proto_rawDesc = "" +
 	"\n" +
 	"+plexspaces/v1/supervision/supervision.proto\x12\x19plexspaces.supervision.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"5\n" +
 	"\x0eAdaptiveConfig\x12#\n" +
-	"\rlearning_rate\x18\x01 \x01(\x01R\flearningRate\"~\n" +
-	"\x18ExponentialBackoffConfig\x12(\n" +
-	"\x10initial_delay_ms\x18\x01 \x01(\x04R\x0einitialDelayMs\x12 \n" +
-	"\fmax_delay_ms\x18\x02 \x01(\x04R\n" +
-	"maxDelayMs\x12\x16\n" +
-	"\x06factor\x18\x03 \x01(\x01R\x06factor\"\xe9\x06\n" +
+	"\rlearning_rate\x18\x01 \x01(\x01R\flearningRate\"\xd7\x06\n" +
 	"\tChildSpec\x12J\n" +
 	"\x0eactor_identity\x18\x01 \x01(\v2#.plexspaces.common.v1.ActorIdentityR\ractorIdentity\x12\x1c\n" +
 	"\x04role\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x04role\x12B\n" +
@@ -1659,8 +1593,8 @@ const file_plexspaces_v1_supervision_supervision_proto_rawDesc = "" +
 	"\x06facets\x18\a \x03(\v2\x1b.plexspaces.common.v1.FacetR\x06facets\x12(\n" +
 	"\rbehavior_kind\x18\b \x01(\tH\x01R\fbehaviorKind\x88\x01\x01\x12N\n" +
 	"\bmetadata\x18\n" +
-	" \x03(\v22.plexspaces.supervision.v1.ChildSpec.MetadataEntryR\bmetadata\x12i\n" +
-	"\x13exponential_backoff\x18\v \x01(\v23.plexspaces.supervision.v1.ExponentialBackoffConfigH\x02R\x12exponentialBackoff\x88\x01\x01\x1a7\n" +
+	" \x03(\v22.plexspaces.supervision.v1.ChildSpec.MetadataEntryR\bmetadata\x12W\n" +
+	"\x13exponential_backoff\x18\v \x01(\v2!.plexspaces.common.v1.RetryPolicyH\x02R\x12exponentialBackoff\x88\x01\x01\x1a7\n" +
 	"\tArgsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a;\n" +
@@ -1809,65 +1743,65 @@ func file_plexspaces_v1_supervision_supervision_proto_rawDescGZIP() []byte {
 }
 
 var file_plexspaces_v1_supervision_supervision_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_plexspaces_v1_supervision_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_plexspaces_v1_supervision_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_plexspaces_v1_supervision_supervision_proto_goTypes = []any{
-	(SupervisionStrategy)(0),         // 0: plexspaces.supervision.v1.SupervisionStrategy
-	(RestartPolicy)(0),               // 1: plexspaces.supervision.v1.RestartPolicy
-	(ChildStatus)(0),                 // 2: plexspaces.supervision.v1.ChildStatus
-	(EventPropagation)(0),            // 3: plexspaces.supervision.v1.EventPropagation
-	(SupervisorEventType)(0),         // 4: plexspaces.supervision.v1.SupervisorEventType
-	(SupervisionErrorCode)(0),        // 5: plexspaces.supervision.v1.SupervisionErrorCode
-	(*AdaptiveConfig)(nil),           // 6: plexspaces.supervision.v1.AdaptiveConfig
-	(*ExponentialBackoffConfig)(nil), // 7: plexspaces.supervision.v1.ExponentialBackoffConfig
-	(*ChildSpec)(nil),                // 8: plexspaces.supervision.v1.ChildSpec
-	(*SupervisorSpec)(nil),           // 9: plexspaces.supervision.v1.SupervisorSpec
-	(*SupervisorState)(nil),          // 10: plexspaces.supervision.v1.SupervisorState
-	(*ChildState)(nil),               // 11: plexspaces.supervision.v1.ChildState
-	(*RestartEvent)(nil),             // 12: plexspaces.supervision.v1.RestartEvent
-	(*SupervisorStats)(nil),          // 13: plexspaces.supervision.v1.SupervisorStats
-	(*SupervisorEvent)(nil),          // 14: plexspaces.supervision.v1.SupervisorEvent
-	(*ChildInfo)(nil),                // 15: plexspaces.supervision.v1.ChildInfo
-	(*ChildCount)(nil),               // 16: plexspaces.supervision.v1.ChildCount
-	(*SupervisionError)(nil),         // 17: plexspaces.supervision.v1.SupervisionError
-	nil,                              // 18: plexspaces.supervision.v1.ChildSpec.ArgsEntry
-	nil,                              // 19: plexspaces.supervision.v1.ChildSpec.MetadataEntry
-	nil,                              // 20: plexspaces.supervision.v1.SupervisorSpec.MetadataEntry
-	nil,                              // 21: plexspaces.supervision.v1.SupervisorStats.FailurePatternsEntry
-	nil,                              // 22: plexspaces.supervision.v1.SupervisionError.ContextEntry
-	(*v1.ActorIdentity)(nil),         // 23: plexspaces.common.v1.ActorIdentity
-	(*durationpb.Duration)(nil),      // 24: google.protobuf.Duration
-	(*v1.Facet)(nil),                 // 25: plexspaces.common.v1.Facet
-	(*timestamppb.Timestamp)(nil),    // 26: google.protobuf.Timestamp
+	(SupervisionStrategy)(0),      // 0: plexspaces.supervision.v1.SupervisionStrategy
+	(RestartPolicy)(0),            // 1: plexspaces.supervision.v1.RestartPolicy
+	(ChildStatus)(0),              // 2: plexspaces.supervision.v1.ChildStatus
+	(EventPropagation)(0),         // 3: plexspaces.supervision.v1.EventPropagation
+	(SupervisorEventType)(0),      // 4: plexspaces.supervision.v1.SupervisorEventType
+	(SupervisionErrorCode)(0),     // 5: plexspaces.supervision.v1.SupervisionErrorCode
+	(*AdaptiveConfig)(nil),        // 6: plexspaces.supervision.v1.AdaptiveConfig
+	(*ChildSpec)(nil),             // 7: plexspaces.supervision.v1.ChildSpec
+	(*SupervisorSpec)(nil),        // 8: plexspaces.supervision.v1.SupervisorSpec
+	(*SupervisorState)(nil),       // 9: plexspaces.supervision.v1.SupervisorState
+	(*ChildState)(nil),            // 10: plexspaces.supervision.v1.ChildState
+	(*RestartEvent)(nil),          // 11: plexspaces.supervision.v1.RestartEvent
+	(*SupervisorStats)(nil),       // 12: plexspaces.supervision.v1.SupervisorStats
+	(*SupervisorEvent)(nil),       // 13: plexspaces.supervision.v1.SupervisorEvent
+	(*ChildInfo)(nil),             // 14: plexspaces.supervision.v1.ChildInfo
+	(*ChildCount)(nil),            // 15: plexspaces.supervision.v1.ChildCount
+	(*SupervisionError)(nil),      // 16: plexspaces.supervision.v1.SupervisionError
+	nil,                           // 17: plexspaces.supervision.v1.ChildSpec.ArgsEntry
+	nil,                           // 18: plexspaces.supervision.v1.ChildSpec.MetadataEntry
+	nil,                           // 19: plexspaces.supervision.v1.SupervisorSpec.MetadataEntry
+	nil,                           // 20: plexspaces.supervision.v1.SupervisorStats.FailurePatternsEntry
+	nil,                           // 21: plexspaces.supervision.v1.SupervisionError.ContextEntry
+	(*v1.ActorIdentity)(nil),      // 22: plexspaces.common.v1.ActorIdentity
+	(*durationpb.Duration)(nil),   // 23: google.protobuf.Duration
+	(*v1.Facet)(nil),              // 24: plexspaces.common.v1.Facet
+	(*v1.RetryPolicy)(nil),        // 25: plexspaces.common.v1.RetryPolicy
+	(*timestamppb.Timestamp)(nil), // 26: google.protobuf.Timestamp
 }
 var file_plexspaces_v1_supervision_supervision_proto_depIdxs = []int32{
-	23, // 0: plexspaces.supervision.v1.ChildSpec.actor_identity:type_name -> plexspaces.common.v1.ActorIdentity
-	18, // 1: plexspaces.supervision.v1.ChildSpec.args:type_name -> plexspaces.supervision.v1.ChildSpec.ArgsEntry
+	22, // 0: plexspaces.supervision.v1.ChildSpec.actor_identity:type_name -> plexspaces.common.v1.ActorIdentity
+	17, // 1: plexspaces.supervision.v1.ChildSpec.args:type_name -> plexspaces.supervision.v1.ChildSpec.ArgsEntry
 	1,  // 2: plexspaces.supervision.v1.ChildSpec.restart:type_name -> plexspaces.supervision.v1.RestartPolicy
-	24, // 3: plexspaces.supervision.v1.ChildSpec.shutdown_timeout:type_name -> google.protobuf.Duration
-	9,  // 4: plexspaces.supervision.v1.ChildSpec.supervisor:type_name -> plexspaces.supervision.v1.SupervisorSpec
-	25, // 5: plexspaces.supervision.v1.ChildSpec.facets:type_name -> plexspaces.common.v1.Facet
-	19, // 6: plexspaces.supervision.v1.ChildSpec.metadata:type_name -> plexspaces.supervision.v1.ChildSpec.MetadataEntry
-	7,  // 7: plexspaces.supervision.v1.ChildSpec.exponential_backoff:type_name -> plexspaces.supervision.v1.ExponentialBackoffConfig
+	23, // 3: plexspaces.supervision.v1.ChildSpec.shutdown_timeout:type_name -> google.protobuf.Duration
+	8,  // 4: plexspaces.supervision.v1.ChildSpec.supervisor:type_name -> plexspaces.supervision.v1.SupervisorSpec
+	24, // 5: plexspaces.supervision.v1.ChildSpec.facets:type_name -> plexspaces.common.v1.Facet
+	18, // 6: plexspaces.supervision.v1.ChildSpec.metadata:type_name -> plexspaces.supervision.v1.ChildSpec.MetadataEntry
+	25, // 7: plexspaces.supervision.v1.ChildSpec.exponential_backoff:type_name -> plexspaces.common.v1.RetryPolicy
 	0,  // 8: plexspaces.supervision.v1.SupervisorSpec.strategy:type_name -> plexspaces.supervision.v1.SupervisionStrategy
-	24, // 9: plexspaces.supervision.v1.SupervisorSpec.max_restart_window:type_name -> google.protobuf.Duration
-	8,  // 10: plexspaces.supervision.v1.SupervisorSpec.children:type_name -> plexspaces.supervision.v1.ChildSpec
-	20, // 11: plexspaces.supervision.v1.SupervisorSpec.metadata:type_name -> plexspaces.supervision.v1.SupervisorSpec.MetadataEntry
+	23, // 9: plexspaces.supervision.v1.SupervisorSpec.max_restart_window:type_name -> google.protobuf.Duration
+	7,  // 10: plexspaces.supervision.v1.SupervisorSpec.children:type_name -> plexspaces.supervision.v1.ChildSpec
+	19, // 11: plexspaces.supervision.v1.SupervisorSpec.metadata:type_name -> plexspaces.supervision.v1.SupervisorSpec.MetadataEntry
 	6,  // 12: plexspaces.supervision.v1.SupervisorSpec.adaptive:type_name -> plexspaces.supervision.v1.AdaptiveConfig
-	9,  // 13: plexspaces.supervision.v1.SupervisorState.spec:type_name -> plexspaces.supervision.v1.SupervisorSpec
-	11, // 14: plexspaces.supervision.v1.SupervisorState.children:type_name -> plexspaces.supervision.v1.ChildState
-	12, // 15: plexspaces.supervision.v1.SupervisorState.restart_history:type_name -> plexspaces.supervision.v1.RestartEvent
-	8,  // 16: plexspaces.supervision.v1.ChildState.spec:type_name -> plexspaces.supervision.v1.ChildSpec
+	8,  // 13: plexspaces.supervision.v1.SupervisorState.spec:type_name -> plexspaces.supervision.v1.SupervisorSpec
+	10, // 14: plexspaces.supervision.v1.SupervisorState.children:type_name -> plexspaces.supervision.v1.ChildState
+	11, // 15: plexspaces.supervision.v1.SupervisorState.restart_history:type_name -> plexspaces.supervision.v1.RestartEvent
+	7,  // 16: plexspaces.supervision.v1.ChildState.spec:type_name -> plexspaces.supervision.v1.ChildSpec
 	2,  // 17: plexspaces.supervision.v1.ChildState.status:type_name -> plexspaces.supervision.v1.ChildStatus
 	26, // 18: plexspaces.supervision.v1.ChildState.started_at:type_name -> google.protobuf.Timestamp
 	26, // 19: plexspaces.supervision.v1.ChildState.last_restart:type_name -> google.protobuf.Timestamp
 	26, // 20: plexspaces.supervision.v1.RestartEvent.timestamp:type_name -> google.protobuf.Timestamp
 	0,  // 21: plexspaces.supervision.v1.RestartEvent.strategy:type_name -> plexspaces.supervision.v1.SupervisionStrategy
-	21, // 22: plexspaces.supervision.v1.SupervisorStats.failure_patterns:type_name -> plexspaces.supervision.v1.SupervisorStats.FailurePatternsEntry
+	20, // 22: plexspaces.supervision.v1.SupervisorStats.failure_patterns:type_name -> plexspaces.supervision.v1.SupervisorStats.FailurePatternsEntry
 	4,  // 23: plexspaces.supervision.v1.SupervisorEvent.event_type:type_name -> plexspaces.supervision.v1.SupervisorEventType
 	0,  // 24: plexspaces.supervision.v1.SupervisorEvent.new_strategy:type_name -> plexspaces.supervision.v1.SupervisionStrategy
 	2,  // 25: plexspaces.supervision.v1.ChildInfo.status:type_name -> plexspaces.supervision.v1.ChildStatus
 	5,  // 26: plexspaces.supervision.v1.SupervisionError.code:type_name -> plexspaces.supervision.v1.SupervisionErrorCode
-	22, // 27: plexspaces.supervision.v1.SupervisionError.context:type_name -> plexspaces.supervision.v1.SupervisionError.ContextEntry
+	21, // 27: plexspaces.supervision.v1.SupervisionError.context:type_name -> plexspaces.supervision.v1.SupervisionError.ContextEntry
 	26, // 28: plexspaces.supervision.v1.SupervisionError.timestamp:type_name -> google.protobuf.Timestamp
 	29, // [29:29] is the sub-list for method output_type
 	29, // [29:29] is the sub-list for method input_type
@@ -1881,15 +1815,15 @@ func file_plexspaces_v1_supervision_supervision_proto_init() {
 	if File_plexspaces_v1_supervision_supervision_proto != nil {
 		return
 	}
+	file_plexspaces_v1_supervision_supervision_proto_msgTypes[1].OneofWrappers = []any{}
 	file_plexspaces_v1_supervision_supervision_proto_msgTypes[2].OneofWrappers = []any{}
-	file_plexspaces_v1_supervision_supervision_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plexspaces_v1_supervision_supervision_proto_rawDesc), len(file_plexspaces_v1_supervision_supervision_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   17,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

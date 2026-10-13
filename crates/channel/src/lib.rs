@@ -221,6 +221,35 @@ pub mod channel_service;
 #[cfg(any(feature = "channel-service", feature = "process-group-backend"))]
 pub use channel_service::ChannelServiceImpl;
 
+// ChannelRepository — tenant-isolated channel cache backed by shared DB pool.
+// Trait lives in repository.rs; both SQLite and Postgres implementations live in sql.rs,
+// following the convention in plexspaces-keyvalue (sql.rs) and
+// plexspaces-object-registry (repository/sql.rs).
+#[cfg(feature = "repository")]
+pub mod repository;
+
+#[cfg(feature = "repository")]
+pub use repository::ChannelRepository;
+
+// sql.rs: SqliteChannelRepository + PostgresChannelRepository in one file
+#[cfg(any(
+    all(feature = "sqlite-backend", feature = "repository"),
+    all(feature = "postgres-backend", feature = "repository")
+))]
+pub mod sql;
+
+#[cfg(all(feature = "sqlite-backend", feature = "repository"))]
+pub use sql::SqliteChannelRepository;
+
+#[cfg(all(feature = "postgres-backend", feature = "repository"))]
+pub use sql::PostgresChannelRepository;
+
+#[cfg(feature = "repository")]
+pub mod repo_config;
+
+#[cfg(feature = "repository")]
+pub use repo_config::create_channel_repository_from_shared_db;
+
 // Mock backend for testing
 // Available when test-utils feature is enabled (required for integration tests)
 #[cfg(feature = "test-utils")]

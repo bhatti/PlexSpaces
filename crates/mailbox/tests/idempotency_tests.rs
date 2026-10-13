@@ -33,7 +33,7 @@ fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: Strin
 async fn test_idempotency_key_deduplication() {
     // Test: Messages with same idempotency key are deduplicated
     let store = Arc::new(InMemoryIdempotencyStore::new(1000, Duration::from_secs(60)));
-    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox".to_string(), "tenant".to_string(), "ns".to_string(), Some(store))
+    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox".to_string(), "tenant".to_string(), "ns".to_string(), Some(store), None)
         .await
         .unwrap();
 
@@ -60,7 +60,7 @@ async fn test_idempotency_key_deduplication() {
 #[tokio::test]
 async fn test_idempotency_key_different_keys() {
     // Test: Messages with different idempotency keys are not deduplicated
-    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox-2".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox-2".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -82,7 +82,7 @@ async fn test_idempotency_key_different_keys() {
 #[tokio::test]
 async fn test_idempotency_key_without_key() {
     // Test: Messages without idempotency key are not deduplicated
-    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox-3".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(mailbox_config_default(), "test-mailbox-3".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -108,7 +108,7 @@ async fn test_idempotency_key_lru_eviction() {
     // Note: capacity_per_bucket is now controlled via IdempotencyConfig on the store,
     // not on MailboxConfig. This test verifies basic deduplication behavior.
 
-    let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox-4".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox-4".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -136,28 +136,29 @@ async fn test_idempotency_key_lru_eviction() {
     assert_eq!(msg.payload, b"first-again");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_idempotency_key_expiration() {
-    // Test: Idempotency keys expire after deduplication window
+    // Test: Idempotency keys expire after deduplication window.
+    // Uses tokio time control (start_paused + advance) — no real-time sleep.
     let mut config = mailbox_config_default();
     config.deduplication_window = Some(ProtoDuration {
         seconds: 0,
         nanos: 100_000_000, // 100ms
     });
 
-    let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox-5".to_string(), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, "test-mailbox-5".to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
     let idempotency_key = "expiring-key".to_string();
 
-    // Send first message
+    // Send first message and process it
     let msg1 = create_test_message_with_idempotency(b"first".to_vec(), idempotency_key.clone());
     mailbox.enqueue(msg1).await.unwrap();
-    let _ = receiver.dequeue().await; // Process
+    let _ = receiver.dequeue().await;
 
-    // Wait for expiration
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    // Advance mock time past the 100ms TTL — no real sleep
+    tokio::time::advance(Duration::from_millis(200)).await;
 
     // Send second message with same key (should NOT be deduplicated after expiration)
     let msg2 = create_test_message_with_idempotency(b"second".to_vec(), idempotency_key.clone());

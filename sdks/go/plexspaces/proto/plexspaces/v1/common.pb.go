@@ -214,6 +214,63 @@ func (ActivationStrategy) EnumDescriptor() ([]byte, []int) {
 	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{0}
 }
 
+// Backpressure strategy when a bounded buffer (mailbox, channel) is full.
+// Canonical definition — used by both mailbox and channel configurations.
+type BackpressureStrategy int32
+
+const (
+	BackpressureStrategy_BACKPRESSURE_STRATEGY_UNSPECIFIED BackpressureStrategy = 0
+	// Return error immediately to the sender
+	BackpressureStrategy_BACKPRESSURE_STRATEGY_ERROR BackpressureStrategy = 1
+	// Drop the oldest message in the buffer to make room
+	BackpressureStrategy_BACKPRESSURE_STRATEGY_DROP_OLDEST BackpressureStrategy = 2
+	// Drop the incoming message (silently accept but discard)
+	BackpressureStrategy_BACKPRESSURE_STRATEGY_DROP_NEWEST BackpressureStrategy = 3
+)
+
+// Enum value maps for BackpressureStrategy.
+var (
+	BackpressureStrategy_name = map[int32]string{
+		0: "BACKPRESSURE_STRATEGY_UNSPECIFIED",
+		1: "BACKPRESSURE_STRATEGY_ERROR",
+		2: "BACKPRESSURE_STRATEGY_DROP_OLDEST",
+		3: "BACKPRESSURE_STRATEGY_DROP_NEWEST",
+	}
+	BackpressureStrategy_value = map[string]int32{
+		"BACKPRESSURE_STRATEGY_UNSPECIFIED": 0,
+		"BACKPRESSURE_STRATEGY_ERROR":       1,
+		"BACKPRESSURE_STRATEGY_DROP_OLDEST": 2,
+		"BACKPRESSURE_STRATEGY_DROP_NEWEST": 3,
+	}
+)
+
+func (x BackpressureStrategy) Enum() *BackpressureStrategy {
+	p := new(BackpressureStrategy)
+	*p = x
+	return p
+}
+
+func (x BackpressureStrategy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (BackpressureStrategy) Descriptor() protoreflect.EnumDescriptor {
+	return file_plexspaces_v1_common_proto_enumTypes[1].Descriptor()
+}
+
+func (BackpressureStrategy) Type() protoreflect.EnumType {
+	return &file_plexspaces_v1_common_proto_enumTypes[1]
+}
+
+func (x BackpressureStrategy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use BackpressureStrategy.Descriptor instead.
+func (BackpressureStrategy) EnumDescriptor() ([]byte, []int) {
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{1}
+}
+
 // Quality of Service levels
 type QoSLevel int32
 
@@ -251,11 +308,11 @@ func (x QoSLevel) String() string {
 }
 
 func (QoSLevel) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_common_proto_enumTypes[1].Descriptor()
+	return file_plexspaces_v1_common_proto_enumTypes[2].Descriptor()
 }
 
 func (QoSLevel) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_common_proto_enumTypes[1]
+	return &file_plexspaces_v1_common_proto_enumTypes[2]
 }
 
 func (x QoSLevel) Number() protoreflect.EnumNumber {
@@ -264,7 +321,7 @@ func (x QoSLevel) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use QoSLevel.Descriptor instead.
 func (QoSLevel) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{1}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{2}
 }
 
 // Resource states
@@ -316,11 +373,11 @@ func (x ResourceState) String() string {
 }
 
 func (ResourceState) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_common_proto_enumTypes[2].Descriptor()
+	return file_plexspaces_v1_common_proto_enumTypes[3].Descriptor()
 }
 
 func (ResourceState) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_common_proto_enumTypes[2]
+	return &file_plexspaces_v1_common_proto_enumTypes[3]
 }
 
 func (x ResourceState) Number() protoreflect.EnumNumber {
@@ -329,7 +386,7 @@ func (x ResourceState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ResourceState.Descriptor instead.
 func (ResourceState) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{2}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{3}
 }
 
 // RequestContext error codes
@@ -372,11 +429,11 @@ func (x RequestContextErrorCode) String() string {
 }
 
 func (RequestContextErrorCode) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_common_proto_enumTypes[3].Descriptor()
+	return file_plexspaces_v1_common_proto_enumTypes[4].Descriptor()
 }
 
 func (RequestContextErrorCode) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_common_proto_enumTypes[3]
+	return &file_plexspaces_v1_common_proto_enumTypes[4]
 }
 
 func (x RequestContextErrorCode) Number() protoreflect.EnumNumber {
@@ -385,7 +442,7 @@ func (x RequestContextErrorCode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use RequestContextErrorCode.Descriptor instead.
 func (RequestContextErrorCode) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{4}
 }
 
 // Error codes for outbound HTTP client operations.
@@ -431,11 +488,11 @@ func (x OutboundHttpClientErrorCode) String() string {
 }
 
 func (OutboundHttpClientErrorCode) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_common_proto_enumTypes[4].Descriptor()
+	return file_plexspaces_v1_common_proto_enumTypes[5].Descriptor()
 }
 
 func (OutboundHttpClientErrorCode) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_common_proto_enumTypes[4]
+	return &file_plexspaces_v1_common_proto_enumTypes[5]
 }
 
 func (x OutboundHttpClientErrorCode) Number() protoreflect.EnumNumber {
@@ -444,7 +501,7 @@ func (x OutboundHttpClientErrorCode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OutboundHttpClientErrorCode.Descriptor instead.
 func (OutboundHttpClientErrorCode) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{4}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{5}
 }
 
 // Empty message (replacement for plexspaces.common.v1.Empty)
@@ -771,15 +828,30 @@ func (x *ErrorDetail) GetDetails() map[string]*anypb.Any {
 	return nil
 }
 
-// Retry policy configuration
+// Canonical retry policy used across PlexSpaces for all retry/backoff configuration.
 type RetryPolicy struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	MaxAttempts       uint32                 `protobuf:"varint,1,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
-	BackoffMultiplier float64                `protobuf:"fixed64,2,opt,name=backoff_multiplier,json=backoffMultiplier,proto3" json:"backoff_multiplier,omitempty"`
-	InitialDelay      *durationpb.Duration   `protobuf:"bytes,3,opt,name=initial_delay,json=initialDelay,proto3" json:"initial_delay,omitempty"` // >= 1ms
-	MaxDelay          *durationpb.Duration   `protobuf:"bytes,4,opt,name=max_delay,json=maxDelay,proto3" json:"max_delay,omitempty"`             // <= 1 hour
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Max attempts including the first try (1 = no retry, 0/unset = treated as 1 at runtime).
+	MaxAttempts uint32 `protobuf:"varint,1,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
+	// Exponential backoff multiplier (e.g., 2.0 for doubling). Default 2.0 when unset.
+	BackoffMultiplier float64 `protobuf:"fixed64,2,opt,name=backoff_multiplier,json=backoffMultiplier,proto3" json:"backoff_multiplier,omitempty"`
+	// Initial delay before first retry (e.g. 100ms). Default 100ms when unset.
+	InitialDelay *durationpb.Duration `protobuf:"bytes,3,opt,name=initial_delay,json=initialDelay,proto3" json:"initial_delay,omitempty"`
+	// Maximum delay cap (e.g. 30s). Default 30s when unset.
+	MaxDelay *durationpb.Duration `protobuf:"bytes,4,opt,name=max_delay,json=maxDelay,proto3" json:"max_delay,omitempty"`
+	// Jitter ratio [0.0, 1.0] — full jitter on the backoff cap (AWS-style).
+	// 0 = no jitter, 1 = full jitter. Default 0.0 when unset.
+	JitterRatio float64 `protobuf:"fixed64,5,opt,name=jitter_ratio,json=jitterRatio,proto3" json:"jitter_ratio,omitempty"`
+	// Error types/codes to retry (empty = retry all retriable errors).
+	// For gRPC: status code names (e.g. "UNAVAILABLE", "RESOURCE_EXHAUSTED").
+	// For HTTP: status codes as strings (e.g. "429", "503").
+	// For actor: error type names.
+	RetryableErrors []string `protobuf:"bytes,6,rep,name=retryable_errors,json=retryableErrors,proto3" json:"retryable_errors,omitempty"`
+	// Allow retry of non-idempotent operations (default false).
+	// When false, only idempotent operations are retried.
+	AllowNonIdempotent bool `protobuf:"varint,7,opt,name=allow_non_idempotent,json=allowNonIdempotent,proto3" json:"allow_non_idempotent,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RetryPolicy) Reset() {
@@ -838,6 +910,27 @@ func (x *RetryPolicy) GetMaxDelay() *durationpb.Duration {
 		return x.MaxDelay
 	}
 	return nil
+}
+
+func (x *RetryPolicy) GetJitterRatio() float64 {
+	if x != nil {
+		return x.JitterRatio
+	}
+	return 0
+}
+
+func (x *RetryPolicy) GetRetryableErrors() []string {
+	if x != nil {
+		return x.RetryableErrors
+	}
+	return nil
+}
+
+func (x *RetryPolicy) GetAllowNonIdempotent() bool {
+	if x != nil {
+		return x.AllowNonIdempotent
+	}
+	return false
 }
 
 // Standard pagination request
@@ -2212,13 +2305,16 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\adetails\x18\x03 \x03(\v2..plexspaces.common.v1.ErrorDetail.DetailsEntryR\adetails\x1aP\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12*\n" +
-	"\x05value\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x05value:\x028\x01\"\xd0\x02\n" +
-	"\vRetryPolicy\x12/\n" +
-	"\fmax_attempts\x18\x01 \x01(\rB\f\xe0A\x02\xbaH\x06*\x04\x18d(\x01R\vmaxAttempts\x12F\n" +
-	"\x12backoff_multiplier\x18\x02 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00$@)\x00\x00\x00\x00\x00\x00\xf0?R\x11backoffMultiplier\x12L\n" +
-	"\rinitial_delay\x18\x03 \x01(\v2\x19.google.protobuf.DurationB\f\xbaH\t\xaa\x01\x062\x04\x10\xc0\x84=R\finitialDelay\x12C\n" +
-	"\tmax_delay\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\bmaxDelay:5\x92A2\n" +
-	"0*\fRetry Policy2 Configuration for retry behavior\"\x8a\x02\n" +
+	"\x05value\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x05value:\x028\x01\"\x85\x04\n" +
+	"\vRetryPolicy\x12+\n" +
+	"\fmax_attempts\x18\x01 \x01(\rB\b\xbaH\x05*\x03\x18\xe8\aR\vmaxAttempts\x12F\n" +
+	"\x12backoff_multiplier\x18\x02 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00P@)\x00\x00\x00\x00\x00\x00\xf0?R\x11backoffMultiplier\x12>\n" +
+	"\rinitial_delay\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\finitialDelay\x126\n" +
+	"\tmax_delay\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\bmaxDelay\x12:\n" +
+	"\fjitter_ratio\x18\x05 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\vjitterRatio\x12:\n" +
+	"\x10retryable_errors\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fretryableErrors\x120\n" +
+	"\x14allow_non_idempotent\x18\a \x01(\bR\x12allowNonIdempotent:_\x92A\\\n" +
+	"Z*\fRetry Policy2JExponential backoff retry policy with optional jitter and error filtering.\"\x8a\x02\n" +
 	"\vPageRequest\x12&\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18(R\trequestId\x12\x1f\n" +
@@ -2368,7 +2464,12 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\x1fACTIVATION_STRATEGY_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18ACTIVATION_STRATEGY_LAZY\x10\x01\x12\x1d\n" +
 	"\x19ACTIVATION_STRATEGY_EAGER\x10\x02\x12\x1f\n" +
-	"\x1bACTIVATION_STRATEGY_PREWARM\x10\x03*n\n" +
+	"\x1bACTIVATION_STRATEGY_PREWARM\x10\x03*\xac\x01\n" +
+	"\x14BackpressureStrategy\x12%\n" +
+	"!BACKPRESSURE_STRATEGY_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bBACKPRESSURE_STRATEGY_ERROR\x10\x01\x12%\n" +
+	"!BACKPRESSURE_STRATEGY_DROP_OLDEST\x10\x02\x12%\n" +
+	"!BACKPRESSURE_STRATEGY_DROP_NEWEST\x10\x03*n\n" +
 	"\bQoSLevel\x12\x19\n" +
 	"\x15QOS_LEVEL_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eQOS_LEVEL_NONE\x10\x01\x12\x19\n" +
@@ -2420,72 +2521,73 @@ func file_plexspaces_v1_common_proto_rawDescGZIP() []byte {
 	return file_plexspaces_v1_common_proto_rawDescData
 }
 
-var file_plexspaces_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_plexspaces_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_plexspaces_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_plexspaces_v1_common_proto_goTypes = []any{
 	(ActivationStrategy)(0),          // 0: plexspaces.common.v1.ActivationStrategy
-	(QoSLevel)(0),                    // 1: plexspaces.common.v1.QoSLevel
-	(ResourceState)(0),               // 2: plexspaces.common.v1.ResourceState
-	(RequestContextErrorCode)(0),     // 3: plexspaces.common.v1.RequestContextErrorCode
-	(OutboundHttpClientErrorCode)(0), // 4: plexspaces.common.v1.OutboundHttpClientErrorCode
-	(*Empty)(nil),                    // 5: plexspaces.common.v1.Empty
-	(*Metadata)(nil),                 // 6: plexspaces.common.v1.Metadata
-	(*ActorId)(nil),                  // 7: plexspaces.common.v1.ActorId
-	(*ActorIdentity)(nil),            // 8: plexspaces.common.v1.ActorIdentity
-	(*ErrorDetail)(nil),              // 9: plexspaces.common.v1.ErrorDetail
-	(*RetryPolicy)(nil),              // 10: plexspaces.common.v1.RetryPolicy
-	(*PageRequest)(nil),              // 11: plexspaces.common.v1.PageRequest
-	(*PageResponse)(nil),             // 12: plexspaces.common.v1.PageResponse
-	(*Facet)(nil),                    // 13: plexspaces.common.v1.Facet
-	(*FacetDescriptor)(nil),          // 14: plexspaces.common.v1.FacetDescriptor
-	(*ConfigOption)(nil),             // 15: plexspaces.common.v1.ConfigOption
-	(*SecurityPolicy)(nil),           // 16: plexspaces.common.v1.SecurityPolicy
-	(*ResourceQuota)(nil),            // 17: plexspaces.common.v1.ResourceQuota
-	(*ResourceSpec)(nil),             // 18: plexspaces.common.v1.ResourceSpec
-	(*RequestContext)(nil),           // 19: plexspaces.common.v1.RequestContext
-	(*Message)(nil),                  // 20: plexspaces.common.v1.Message
-	(*HttpHeader)(nil),               // 21: plexspaces.common.v1.HttpHeader
-	(*OutboundHttpRequest)(nil),      // 22: plexspaces.common.v1.OutboundHttpRequest
-	(*OutboundHttpResponse)(nil),     // 23: plexspaces.common.v1.OutboundHttpResponse
-	nil,                              // 24: plexspaces.common.v1.Metadata.LabelsEntry
-	nil,                              // 25: plexspaces.common.v1.Metadata.AnnotationsEntry
-	nil,                              // 26: plexspaces.common.v1.ErrorDetail.DetailsEntry
-	nil,                              // 27: plexspaces.common.v1.Facet.ConfigEntry
-	nil,                              // 28: plexspaces.common.v1.Facet.StateEntry
-	nil,                              // 29: plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
-	nil,                              // 30: plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
-	nil,                              // 31: plexspaces.common.v1.RequestContext.MetadataEntry
-	nil,                              // 32: plexspaces.common.v1.RequestContext.HeadersEntry
-	nil,                              // 33: plexspaces.common.v1.Message.HeadersEntry
-	(*timestamppb.Timestamp)(nil),    // 34: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),      // 35: google.protobuf.Duration
-	(*anypb.Any)(nil),                // 36: google.protobuf.Any
+	(BackpressureStrategy)(0),        // 1: plexspaces.common.v1.BackpressureStrategy
+	(QoSLevel)(0),                    // 2: plexspaces.common.v1.QoSLevel
+	(ResourceState)(0),               // 3: plexspaces.common.v1.ResourceState
+	(RequestContextErrorCode)(0),     // 4: plexspaces.common.v1.RequestContextErrorCode
+	(OutboundHttpClientErrorCode)(0), // 5: plexspaces.common.v1.OutboundHttpClientErrorCode
+	(*Empty)(nil),                    // 6: plexspaces.common.v1.Empty
+	(*Metadata)(nil),                 // 7: plexspaces.common.v1.Metadata
+	(*ActorId)(nil),                  // 8: plexspaces.common.v1.ActorId
+	(*ActorIdentity)(nil),            // 9: plexspaces.common.v1.ActorIdentity
+	(*ErrorDetail)(nil),              // 10: plexspaces.common.v1.ErrorDetail
+	(*RetryPolicy)(nil),              // 11: plexspaces.common.v1.RetryPolicy
+	(*PageRequest)(nil),              // 12: plexspaces.common.v1.PageRequest
+	(*PageResponse)(nil),             // 13: plexspaces.common.v1.PageResponse
+	(*Facet)(nil),                    // 14: plexspaces.common.v1.Facet
+	(*FacetDescriptor)(nil),          // 15: plexspaces.common.v1.FacetDescriptor
+	(*ConfigOption)(nil),             // 16: plexspaces.common.v1.ConfigOption
+	(*SecurityPolicy)(nil),           // 17: plexspaces.common.v1.SecurityPolicy
+	(*ResourceQuota)(nil),            // 18: plexspaces.common.v1.ResourceQuota
+	(*ResourceSpec)(nil),             // 19: plexspaces.common.v1.ResourceSpec
+	(*RequestContext)(nil),           // 20: plexspaces.common.v1.RequestContext
+	(*Message)(nil),                  // 21: plexspaces.common.v1.Message
+	(*HttpHeader)(nil),               // 22: plexspaces.common.v1.HttpHeader
+	(*OutboundHttpRequest)(nil),      // 23: plexspaces.common.v1.OutboundHttpRequest
+	(*OutboundHttpResponse)(nil),     // 24: plexspaces.common.v1.OutboundHttpResponse
+	nil,                              // 25: plexspaces.common.v1.Metadata.LabelsEntry
+	nil,                              // 26: plexspaces.common.v1.Metadata.AnnotationsEntry
+	nil,                              // 27: plexspaces.common.v1.ErrorDetail.DetailsEntry
+	nil,                              // 28: plexspaces.common.v1.Facet.ConfigEntry
+	nil,                              // 29: plexspaces.common.v1.Facet.StateEntry
+	nil,                              // 30: plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
+	nil,                              // 31: plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
+	nil,                              // 32: plexspaces.common.v1.RequestContext.MetadataEntry
+	nil,                              // 33: plexspaces.common.v1.RequestContext.HeadersEntry
+	nil,                              // 34: plexspaces.common.v1.Message.HeadersEntry
+	(*timestamppb.Timestamp)(nil),    // 35: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),      // 36: google.protobuf.Duration
+	(*anypb.Any)(nil),                // 37: google.protobuf.Any
 }
 var file_plexspaces_v1_common_proto_depIdxs = []int32{
-	34, // 0: plexspaces.common.v1.Metadata.create_time:type_name -> google.protobuf.Timestamp
-	34, // 1: plexspaces.common.v1.Metadata.update_time:type_name -> google.protobuf.Timestamp
-	24, // 2: plexspaces.common.v1.Metadata.labels:type_name -> plexspaces.common.v1.Metadata.LabelsEntry
-	25, // 3: plexspaces.common.v1.Metadata.annotations:type_name -> plexspaces.common.v1.Metadata.AnnotationsEntry
-	26, // 4: plexspaces.common.v1.ErrorDetail.details:type_name -> plexspaces.common.v1.ErrorDetail.DetailsEntry
-	35, // 5: plexspaces.common.v1.RetryPolicy.initial_delay:type_name -> google.protobuf.Duration
-	35, // 6: plexspaces.common.v1.RetryPolicy.max_delay:type_name -> google.protobuf.Duration
-	27, // 7: plexspaces.common.v1.Facet.config:type_name -> plexspaces.common.v1.Facet.ConfigEntry
-	28, // 8: plexspaces.common.v1.Facet.state:type_name -> plexspaces.common.v1.Facet.StateEntry
-	6,  // 9: plexspaces.common.v1.Facet.metadata:type_name -> plexspaces.common.v1.Metadata
-	15, // 10: plexspaces.common.v1.FacetDescriptor.config_options:type_name -> plexspaces.common.v1.ConfigOption
-	29, // 11: plexspaces.common.v1.SecurityPolicy.custom_rules:type_name -> plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
-	30, // 12: plexspaces.common.v1.ResourceQuota.custom_quotas:type_name -> plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
-	34, // 13: plexspaces.common.v1.RequestContext.timestamp:type_name -> google.protobuf.Timestamp
-	31, // 14: plexspaces.common.v1.RequestContext.metadata:type_name -> plexspaces.common.v1.RequestContext.MetadataEntry
-	32, // 15: plexspaces.common.v1.RequestContext.headers:type_name -> plexspaces.common.v1.RequestContext.HeadersEntry
-	34, // 16: plexspaces.common.v1.Message.timestamp:type_name -> google.protobuf.Timestamp
-	33, // 17: plexspaces.common.v1.Message.headers:type_name -> plexspaces.common.v1.Message.HeadersEntry
-	35, // 18: plexspaces.common.v1.Message.ttl:type_name -> google.protobuf.Duration
-	21, // 19: plexspaces.common.v1.OutboundHttpRequest.headers:type_name -> plexspaces.common.v1.HttpHeader
-	21, // 20: plexspaces.common.v1.OutboundHttpResponse.headers:type_name -> plexspaces.common.v1.HttpHeader
-	36, // 21: plexspaces.common.v1.Metadata.AnnotationsEntry.value:type_name -> google.protobuf.Any
-	36, // 22: plexspaces.common.v1.ErrorDetail.DetailsEntry.value:type_name -> google.protobuf.Any
-	36, // 23: plexspaces.common.v1.Facet.StateEntry.value:type_name -> google.protobuf.Any
+	35, // 0: plexspaces.common.v1.Metadata.create_time:type_name -> google.protobuf.Timestamp
+	35, // 1: plexspaces.common.v1.Metadata.update_time:type_name -> google.protobuf.Timestamp
+	25, // 2: plexspaces.common.v1.Metadata.labels:type_name -> plexspaces.common.v1.Metadata.LabelsEntry
+	26, // 3: plexspaces.common.v1.Metadata.annotations:type_name -> plexspaces.common.v1.Metadata.AnnotationsEntry
+	27, // 4: plexspaces.common.v1.ErrorDetail.details:type_name -> plexspaces.common.v1.ErrorDetail.DetailsEntry
+	36, // 5: plexspaces.common.v1.RetryPolicy.initial_delay:type_name -> google.protobuf.Duration
+	36, // 6: plexspaces.common.v1.RetryPolicy.max_delay:type_name -> google.protobuf.Duration
+	28, // 7: plexspaces.common.v1.Facet.config:type_name -> plexspaces.common.v1.Facet.ConfigEntry
+	29, // 8: plexspaces.common.v1.Facet.state:type_name -> plexspaces.common.v1.Facet.StateEntry
+	7,  // 9: plexspaces.common.v1.Facet.metadata:type_name -> plexspaces.common.v1.Metadata
+	16, // 10: plexspaces.common.v1.FacetDescriptor.config_options:type_name -> plexspaces.common.v1.ConfigOption
+	30, // 11: plexspaces.common.v1.SecurityPolicy.custom_rules:type_name -> plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
+	31, // 12: plexspaces.common.v1.ResourceQuota.custom_quotas:type_name -> plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
+	35, // 13: plexspaces.common.v1.RequestContext.timestamp:type_name -> google.protobuf.Timestamp
+	32, // 14: plexspaces.common.v1.RequestContext.metadata:type_name -> plexspaces.common.v1.RequestContext.MetadataEntry
+	33, // 15: plexspaces.common.v1.RequestContext.headers:type_name -> plexspaces.common.v1.RequestContext.HeadersEntry
+	35, // 16: plexspaces.common.v1.Message.timestamp:type_name -> google.protobuf.Timestamp
+	34, // 17: plexspaces.common.v1.Message.headers:type_name -> plexspaces.common.v1.Message.HeadersEntry
+	36, // 18: plexspaces.common.v1.Message.ttl:type_name -> google.protobuf.Duration
+	22, // 19: plexspaces.common.v1.OutboundHttpRequest.headers:type_name -> plexspaces.common.v1.HttpHeader
+	22, // 20: plexspaces.common.v1.OutboundHttpResponse.headers:type_name -> plexspaces.common.v1.HttpHeader
+	37, // 21: plexspaces.common.v1.Metadata.AnnotationsEntry.value:type_name -> google.protobuf.Any
+	37, // 22: plexspaces.common.v1.ErrorDetail.DetailsEntry.value:type_name -> google.protobuf.Any
+	37, // 23: plexspaces.common.v1.Facet.StateEntry.value:type_name -> google.protobuf.Any
 	24, // [24:24] is the sub-list for method output_type
 	24, // [24:24] is the sub-list for method input_type
 	24, // [24:24] is the sub-list for extension type_name
@@ -2503,7 +2605,7 @@ func file_plexspaces_v1_common_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plexspaces_v1_common_proto_rawDesc), len(file_plexspaces_v1_common_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   0,

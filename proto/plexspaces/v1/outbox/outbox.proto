@@ -1,0 +1,263 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Outbox / Flow-Controlled Messaging API
+//
+// ## Purpose
+// Provides flow-controlled, durable message dispatch for high-fan-out scenarios.
+// Protects both senders (bounded memory via DB-backed outbox) and receivers
+// (admission control facet) when sending messages to millions of actors.
+//
+// ## Architecture Context
+// The outbox pattern uses existing PlexSpaces primitives:
+// - DB-backed channels (SQLite/Postgres) for durable message storage
+// - AIMD concurrency control for adaptive throughput
+// - IdempotencyStore for exactly-once delivery
+// - Facets for receiver-side admission control
+//
+// ## Use Cases
+// - Bulk upgrade: send upgrade command to millions of nodes at controlled rate
+// - Job queue: dispatch work with priority, retry, and dead-letter handling
+// - Thundering herd prevention: receivers reject excess, dispatcher backs off
+
+syntax = "proto3";
+
+package plexspaces.outbox.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/channel/channel.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/outbox;plexspaces_outbox_v1";
+
+// Concurrency limiting strategy for the outbox relay.
+enum ConcurrencyStrategy {
+  // Additive Increase Multiplicative Decrease (TCP-style).
+  // On success: limit += 1. On rejection: limit /= 2.
+  CONCURRENCY_STRATEGY_AIMD = 0;
+
+  // Static fixed limit, no adaptation.
+  CONCURRENCY_STRATEGY_FIXED = 1;
+}
+
+// Configuration for the outbox relay's concurrency limiter.
+message ConcurrencyConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Concurrency Config"
+      description: "Controls how many messages the relay sends concurrently."
+    }
+  };
+
+  // Initial concurrency limit (default 100).
+  uint32 initial_limit = 1 [(buf.validate.field).uint32 = {lte: 100000}];
+
+  // Minimum concurrency limit — AIMD will not go below this (default 1).
+  uint32 min_limit = 2 [(buf.validate.field).uint32 = {lte: 100000}];
+
+  // Maximum concurrency limit — AIMD will not exceed this (default 10000).
+  uint32 max_limit = 3 [(buf.validate.field).uint32 = {lte: 100000}];
+
+  // Strategy for adjusting the limit.
+  ConcurrencyStrategy strategy = 4;
+}
+
+// Admission control strategy for receiver-side flow control.
+enum AdmissionStrategy {
+  // Static max_concurrent limit.
+  ADMISSION_STRATEGY_FIXED_LIMIT = 0;
+
+  // Dynamically adjusts limit based on processing latency (EWMA).
+  ADMISSION_STRATEGY_LATENCY_ADAPTIVE = 1;
+}
+
+// Configuration for the AdmissionControlFacet (receiver-side protection).
+message AdmissionControlConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Admission Control Config"
+      description: "Receiver-side flow control — limits concurrent message processing."
+    }
+  };
+
+  // Maximum concurrent messages being processed (default 100).
+  uint32 max_concurrent = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 100000
+  }];
+
+  // Strategy for admission decisions.
+  AdmissionStrategy strategy = 2;
+
+  // Hint returned to rejected senders (default 100ms).
+  uint64 default_retry_after_ms = 3 [(buf.validate.field).uint64 = {lte: 60000}];
+}
+
+// Status of an outbox entry in the dispatch pipeline.
+enum OutboxEntryStatus {
+  OUTBOX_ENTRY_STATUS_PENDING = 0;
+  OUTBOX_ENTRY_STATUS_IN_FLIGHT = 1;
+  OUTBOX_ENTRY_STATUS_DELIVERED = 2;
+  OUTBOX_ENTRY_STATUS_FAILED = 3;
+  OUTBOX_ENTRY_STATUS_DEAD_LETTER = 4;
+}
+
+// Request to dispatch messages to one or more target actors.
+message DispatchRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Dispatch Request"
+      description: "Enqueue messages for flow-controlled delivery to target actors."
+    }
+  };
+
+  // Target actor IDs to send the message to.
+  repeated string target_actor_ids = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 1000000
+    items: {
+      string: {min_len: 1, max_len: 255}
+    }
+  }];
+
+  // Message payload (protobuf-encoded or JSON bytes).
+  bytes payload = 2 [(buf.validate.field).bytes = {max_len: 10485760}]; // 10MB
+
+  // Idempotency key for exactly-once delivery (ULID recommended).
+  string idempotency_key = 3 [(buf.validate.field).string = {max_len: 255}];
+
+  // Priority (0 = normal, higher = dispatched sooner).
+  int32 priority = 4;
+
+  // Headers passed through to the target message.
+  map<string, string> headers = 5;
+
+  // Message type: "call" (request-reply) or "cast" (fire-and-forget). Default "cast".
+  string message_type = 6 [(buf.validate.field).string = {max_len: 10}];
+}
+
+// Response after enqueuing messages in the outbox.
+message DispatchResponse {
+  // Number of messages accepted into the outbox.
+  uint32 accepted = 1;
+
+  // Number of messages rejected (e.g., outbox at capacity).
+  uint32 rejected = 2;
+
+  // ID of the dispatcher actor that accepted the messages.
+  string dispatcher_id = 3;
+}
+
+// Full configuration for an outbox relay.
+message OutboxConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Outbox Config"
+      description: "Configuration for an outbox relay: concurrency, retry, and storage."
+    }
+  };
+
+  // Concurrency limiter configuration.
+  ConcurrencyConfig concurrency = 1;
+
+  // Retry policy for failed deliveries (reuses canonical RetryPolicy).
+  plexspaces.common.v1.RetryPolicy retry_policy = 2;
+
+  // Underlying channel configuration for durable message storage.
+  plexspaces.channel.v1.ChannelConfig storage_channel = 3;
+
+  // How often the relay polls for pending messages (milliseconds, default 50).
+  uint64 relay_interval_ms = 4 [(buf.validate.field).uint64 = {lte: 60000}];
+
+  // Maximum messages dequeued per relay cycle (default 100).
+  uint64 relay_batch_size = 5 [(buf.validate.field).uint64 = {
+    gte: 1
+    lte: 10000
+  }];
+}
+
+// How messages are routed to partitions in a partitioned relay.
+enum HashStrategy {
+  // Simple modulo: hash(target_actor_id) % num_partitions.
+  // Deterministic, zero overhead, preserves per-recipient ordering.
+  HASH_STRATEGY_MODULO = 0;
+
+  // Consistent hashing (reserved for future dynamic partition resize).
+  HASH_STRATEGY_CONSISTENT = 1;
+}
+
+// Configuration for a partitioned outbox relay.
+// Scales dispatch by sharding messages across N independent partitions,
+// each with its own channel, relay, and AIMD concurrency limiter.
+// Same target_actor_id always routes to the same partition (ordering preserved).
+message PartitionedOutboxConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Partitioned Outbox Config"
+      description: "Configuration for a partitioned outbox relay with N independent partitions."
+    }
+  };
+
+  // Number of partitions (default 8). Each partition runs an independent relay.
+  uint32 num_partitions = 1 [(buf.validate.field).uint32 = {gte: 1, lte: 1024}];
+
+  // Configuration applied to each partition's relay.
+  OutboxConfig per_partition = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Strategy for mapping target_actor_id to partition.
+  HashStrategy hash_strategy = 3;
+}
+
+// Aggregated status across all partitions of a partitioned relay.
+message PartitionedDispatcherStatus {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Partitioned Dispatcher Status"
+      description: "Aggregated runtime metrics across all partitions."
+    }
+  };
+
+  string dispatcher_id = 1;
+  uint32 num_partitions = 2;
+  repeated DispatcherStatus partition_statuses = 3;
+  uint64 total_delivered = 4;
+  uint64 total_failed = 5;
+  uint64 total_pending = 6;
+  double aggregate_success_rate = 7;
+}
+
+// Runtime status of an outbox dispatcher (for monitoring).
+message DispatcherStatus {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Dispatcher Status"
+      description: "Runtime metrics for an active outbox dispatcher."
+    }
+  };
+
+  string dispatcher_id = 1;
+  uint64 pending_count = 2;
+  uint64 in_flight_count = 3;
+  uint64 delivered_count = 4;
+  uint64 failed_count = 5;
+  uint64 dead_letter_count = 6;
+  uint32 current_concurrency_limit = 7;
+  double success_rate = 8;
+}

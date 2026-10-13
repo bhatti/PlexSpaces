@@ -912,12 +912,48 @@ impl ActorFactory for ActorFactoryImpl {
                 cfg
             })
             .unwrap_or_else(mailbox_config_default);
+
+        // When enable_persistence = true, obtain a durable channel from ChannelRepository
+        // so the mailbox survives process restarts.
+        let enable_persistence = spawn_spec
+            .config
+            .as_ref()
+            .map(|c| c.enable_persistence)
+            .unwrap_or(false);
+        let injected_channel: Option<Arc<dyn plexspaces_channel::Channel>> =
+            if enable_persistence {
+                if let Some(repo) = self.service_locator.get_channel_repository().await {
+                    let actor_id_str = actor_id.to_string();
+                    match repo.get_or_create(ctx, &actor_id_str).await {
+                        Ok(ch) => Some(ch),
+                        Err(e) => {
+                            tracing::warn!(
+                                actor_id = %actor_id,
+                                error = %e,
+                                "ChannelRepository unavailable; falling back to in-memory mailbox"
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    tracing::debug!(
+                        actor_id = %actor_id,
+                        "enable_persistence=true but no ChannelRepository registered; \
+                         using in-memory mailbox"
+                    );
+                    None
+                }
+            } else {
+                None
+            };
+
         let mailbox_pair = Mailbox::new(
             mailbox_config,
             format!("mailbox_{}", actor_id),
             tenant_id.clone(),
             namespace.clone(),
             None, // TODO: wire node-wide IdempotencyStore from ServiceLocator
+            injected_channel,
         )
         .await
         .map_err(|e| format!("Failed to create mailbox: {}", e))?;

@@ -164,22 +164,6 @@ class ChannelErrorCode(betterproto.Enum):
     """Channel with this name already exists"""
 
 
-class InMemoryConfigBackpressureStrategy(betterproto.Enum):
-    """Backpressure strategy when channel is full"""
-
-    BACKPRESSURE_STRATEGY_BLOCK = 0
-    """Block sender until space available"""
-
-    BACKPRESSURE_STRATEGY_DROP_OLDEST = 1
-    """Drop oldest message"""
-
-    BACKPRESSURE_STRATEGY_DROP_NEWEST = 2
-    """Drop newest message (reject send)"""
-
-    BACKPRESSURE_STRATEGY_ERROR = 3
-    """Return error to sender"""
-
-
 class KafkaConfigCompressionType(betterproto.Enum):
     """Compression type"""
 
@@ -242,13 +226,11 @@ class ChannelConfig(betterproto.Message):
     dead_letter_queue: str = betterproto.string_field(21)
     """Optional: Dead-letter queue for failed messages"""
 
-    max_retries: int = betterproto.uint32_field(22)
+    retry_policy: "__common_v1__.RetryPolicy" = betterproto.message_field(22)
     """
-    Maximum number of retries before sending to DLQ (default: 3)
-     After N failures, message is sent to Dead Letter Queue instead of requeuing
-     Set to 0 to disable retries (immediate DLQ on first failure)
-     Only applies to channels that support ack/nack/dlq (Redis, Kafka, etc.)
-     InMemory channels ignore this (no retry/DLQ support)
+    Retry policy for failed messages (backoff, max attempts, jitter).
+     When set, messages that fail are retried per this policy before going to DLQ.
+     Only applies to channels that support ack/nack/dlq (Redis, Kafka, SQLite, etc.)
     """
 
     dlq_enabled: bool = betterproto.bool_field(23)
@@ -265,7 +247,7 @@ class ChannelConfig(betterproto.Message):
 class InMemoryConfig(betterproto.Message):
     """In-memory channel configuration"""
 
-    backpressure: "InMemoryConfigBackpressureStrategy" = betterproto.enum_field(1)
+    backpressure: "__common_v1__.BackpressureStrategy" = betterproto.enum_field(1)
     send_timeout: timedelta = betterproto.message_field(2)
     """Timeout for blocking sends"""
 

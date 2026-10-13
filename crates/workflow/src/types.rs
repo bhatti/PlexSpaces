@@ -29,9 +29,10 @@
 
 // Re-export proto-generated types as the canonical types
 pub use plexspaces_proto::workflow::v1::{
-    ExecutionStatus, RetryConfig, Step, StepExecution, StepStatus, StepType, WorkflowDefinition,
+    ExecutionStatus, Step, StepExecution, StepStatus, StepType, WorkflowDefinition,
     WorkflowExecution,
 };
+pub use plexspaces_proto::common::v1::RetryPolicy;
 
 // Re-export proto-generated error enum
 pub use plexspaces_proto::workflow::v1::WorkflowError as WorkflowErrorProto;

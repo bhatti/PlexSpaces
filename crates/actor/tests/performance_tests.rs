@@ -194,10 +194,10 @@ async fn perf_tell_throughput_10k() {
 }
 
 // ---------------------------------------------------------------------------
-// Perf test: ask() latency (p50 < 10 ms)
+// Perf test: ask() latency (p95 < 10 ms)
 // ---------------------------------------------------------------------------
 
-/// 1,000 sequential ask/reply round-trips; assert p50 latency < 10 ms.
+/// 1,000 sequential ask/reply round-trips; assert p95 latency < 10 ms.
 #[tokio::test]
 #[ignore]
 async fn perf_ask_latency_1k_sequential() {
@@ -240,21 +240,20 @@ async fn perf_ask_latency_1k_sequential() {
     }
 
     latencies_us.sort_unstable();
-    let p50 = latencies_us[n / 2];
     let p95 = latencies_us[n * 95 / 100];
     let p99 = latencies_us[n * 99 / 100];
     let mean_us = latencies_us.iter().sum::<u128>() / n as u128;
 
     println!(
-        "[perf_ask_latency_1k_sequential] n={} mean={:.1}µs p50={}µs p95={}µs p99={}µs",
-        n, mean_us as f64, p50, p95, p99
+        "[perf_ask_latency_1k_sequential] n={} mean={:.1}µs p95={}µs p99={}µs",
+        n, mean_us as f64, p95, p99
     );
 
-    let p50_ms = p50 as f64 / 1_000.0;
+    let p95_ms = p95 as f64 / 1_000.0;
     assert!(
-        p50_ms < 10.0,
-        "p50 ask latency was {:.3}ms, expected < 10ms",
-        p50_ms
+        p95_ms < 10.0,
+        "p95 ask latency was {:.3}ms, expected < 10ms",
+        p95_ms
     );
 }
 

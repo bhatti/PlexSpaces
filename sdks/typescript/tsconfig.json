@@ -21,7 +21,8 @@
       "plexspaces:actor/host-shard@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-shard.d.ts"],
       "plexspaces:actor/host-http@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-http.d.ts"],
       "plexspaces:actor/registry@0.1.0": ["./src/generated/interfaces/plexspaces-actor-registry.d.ts"],
-      "plexspaces:actor/channels@0.1.0": ["./src/generated/interfaces/plexspaces-actor-channels.d.ts"]
+      "plexspaces:actor/channels@0.1.0": ["./src/generated/interfaces/plexspaces-actor-channels.d.ts"],
+      "plexspaces:actor/outbox@0.1.0": ["./src/generated/interfaces/plexspaces-actor-outbox.d.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/generated/**/*.d.ts"],

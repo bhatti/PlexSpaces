@@ -15,7 +15,8 @@ package plexspaces
 
 import (
 	"encoding/base64"
-	"fmt"
+	"errors"
+	"strconv"
 	"strings"
 )
 
@@ -57,6 +58,7 @@ func (r *ActorRef) Ask(msgType string, payload []byte, timeoutMs uint64) ([]byte
 type Host struct {
 	ts  *TupleSpace
 	ch  *Channel
+	ob  *Outbox
 	reg *Registry
 }
 
@@ -65,6 +67,7 @@ func NewHost() *Host {
 	h := &Host{}
 	h.ts = &TupleSpace{host: h}
 	h.ch = &Channel{host: h}
+	h.ob = &Outbox{host: h}
 	h.reg = &Registry{}
 	return h
 }
@@ -164,11 +167,11 @@ func (kv *KeyValueStore) MultiGet(keys []string) ([]string, error) {
 	keysJSON := wasmEncodeStringSliceJSON(keys)
 	raw := hostKVMultiGet(keysJSON)
 	if isHostError(raw) {
-		return nil, fmt.Errorf("%s", raw[len(errorPrefix):])
+		return nil, errors.New(raw[len(errorPrefix):])
 	}
 	items, err := wasmDecodeStringArrayJSON(raw)
 	if err != nil {
-		return nil, fmt.Errorf("kv_multi_get: parse response: %w", err)
+		return nil, errors.New("kv_multi_get: parse response: " + err.Error())
 	}
 	results := make([]string, len(items))
 	for i, s := range items {
@@ -177,7 +180,7 @@ func (kv *KeyValueStore) MultiGet(keys []string) ([]string, error) {
 		}
 		decoded, err := base64.StdEncoding.DecodeString(s)
 		if err != nil {
-			return nil, fmt.Errorf("kv_multi_get: decode key %d: %w", i, err)
+			return nil, errors.New("kv_multi_get: decode key " + strconv.Itoa(i) + ": " + err.Error())
 		}
 		results[i] = string(decoded)
 	}
@@ -192,7 +195,7 @@ func (kv *KeyValueStore) MultiPut(entries map[string]string) error {
 }
 func (kv *KeyValueStore) GetJSON(key string, dest interface{}) (bool, error) {
 	// In WASM builds encoding/json is forbidden. Use kv.Get() and WasmJSON* helpers manually.
-	return false, fmt.Errorf("KVGetJSON: not supported in WASM; use Get() + WasmJSON helpers")
+	return false, errors.New("KVGetJSON: not supported in WASM; use Get() + WasmJSON helpers")
 }
 func (kv *KeyValueStore) PutJSON(key string, src interface{}) error {
 	return kv.Put(key, marshalPayload(src))
@@ -433,11 +436,11 @@ type EventLog struct {
 
 func (el *EventLog) Append(h *Host, prefix string, entry any) (int64, error) {
 	el.Watermark++
-	key := fmt.Sprintf("%sseq:%d", prefix, el.Watermark)
+	key := prefix + "seq:" + strconv.FormatInt(el.Watermark, 10)
 	data := marshalPayload(entry)
 	if result := hostKVPut(key, data); isHostError(result) {
 		el.Watermark--
-		return 0, fmt.Errorf("KVPutJSON(%q): %s", key, result)
+		return 0, errors.New("KVPutJSON(" + key + "): " + result)
 	}
 	return el.Watermark, nil
 }
@@ -446,13 +449,13 @@ func (el *EventLog) Poll(h *Host, prefix, consumerID string, limit int) ([]any, 
 	cursorKey := prefix + "cursor:" + consumerID
 	var cursor int64
 	if raw := hostKVGet(cursorKey); raw != "" {
-		fmt.Sscanf(raw, "%d", &cursor)
+		cursor, _ = strconv.ParseInt(raw, 10, 64)
 	}
 
 	var events []any
 	newCursor := cursor
 	for seq := cursor + 1; seq <= el.Watermark && len(events) < limit; seq++ {
-		key := fmt.Sprintf("%sseq:%d", prefix, seq)
+		key := prefix + "seq:" + strconv.FormatInt(seq, 10)
 		raw := hostKVGet(key)
 		if raw == "" {
 			continue
@@ -462,7 +465,7 @@ func (el *EventLog) Poll(h *Host, prefix, consumerID string, limit int) ([]any, 
 	}
 
 	if newCursor != cursor {
-		hostKVPut(cursorKey, fmt.Sprintf("%d", newCursor))
+		hostKVPut(cursorKey, strconv.FormatInt(newCursor, 10))
 	}
 	return events, newCursor, nil
 }
@@ -496,10 +499,10 @@ func (pg *ProcessGroups) Broadcast(group, msgType string, payload any) error {
 func (pg *ProcessGroups) First(group string) (string, error) {
 	members, err := pg.Members(group)
 	if err != nil {
-		return "", fmt.Errorf("pg.Members(%q): %w", group, err)
+		return "", errors.New("pg.Members(" + group + "): " + err.Error())
 	}
 	if len(members) == 0 {
-		return "", fmt.Errorf("no members in process group %q", group)
+		return "", errors.New("no members in process group " + group)
 	}
 	return members[0], nil
 }
@@ -680,11 +683,66 @@ func (ch *Channel) Depth(ctx, channelName string) (uint64, error) {
 	if isHostError(result) {
 		return 0, &HostError{result}
 	}
-	var depth uint64
-	if _, err := fmt.Sscanf(result, "%d", &depth); err != nil {
-		return 0, fmt.Errorf("channel depth: malformed response %q: %w", result, err)
+	depth, err2 := strconv.ParseUint(result, 10, 64)
+	if err2 != nil {
+		return 0, errors.New("channel depth: malformed response " + result + ": " + err2.Error())
 	}
 	return depth, nil
+}
+
+// Outbox (flow-controlled messaging)
+
+type Outbox struct {
+	host *Host
+}
+
+func (h *Host) Outbox() *Outbox { return h.ob }
+
+type DispatchResult struct {
+	Accepted uint32 `json:"accepted"`
+	Rejected uint32 `json:"rejected"`
+}
+
+func (ob *Outbox) Dispatch(ctx, dispatcherID string, targetActorIDs []string, payload any, messageType, idempotencyKey, conflictResolution string) (*DispatchResult, error) {
+	payloadJSON := marshalPayload(payload)
+	ctxJSON := marshalPayload(ctx)
+	result := hostOutboxDispatch(ctxJSON, dispatcherID, targetActorIDs, payloadJSON, messageType, idempotencyKey, conflictResolution)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	accepted := uint32(WasmJSONExtractInt(result, "accepted"))
+	rejected := uint32(WasmJSONExtractInt(result, "rejected"))
+	return &DispatchResult{Accepted: accepted, Rejected: rejected}, nil
+}
+
+// DispatchWithTargets is the WASM-safe variant of Dispatch.
+// Encodes targets directly via wasmEncodeStringSliceJSON, bypassing marshalPayload
+// and fmt.Sprintf which corrupt the TinyGo WASM function table.
+// payloadJSON must already be a valid JSON string.
+func (ob *Outbox) DispatchWithTargets(ctx, dispatcherID string, targets []string, payloadJSON, messageType, idempotencyKey, conflictResolution string) (*DispatchResult, error) {
+	ctxJSON := marshalPayload(ctx)
+	result := hostOutboxDispatch(ctxJSON, dispatcherID, targets, payloadJSON, messageType, idempotencyKey, conflictResolution)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	accepted := uint32(WasmJSONExtractInt(result, "accepted"))
+	rejected := uint32(WasmJSONExtractInt(result, "rejected"))
+	return &DispatchResult{Accepted: accepted, Rejected: rejected}, nil
+}
+
+func (ob *Outbox) Status(ctx, dispatcherID string) (map[string]any, error) {
+	ctxJSON := marshalPayload(ctx)
+	result := hostOutboxStatus(ctxJSON, dispatcherID)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	return map[string]any{
+		"dispatcher_id": WasmJSONExtractStr(result, "dispatcher_id"),
+		"pending":       WasmJSONExtractInt(result, "pending"),
+		"in_flight":     WasmJSONExtractInt(result, "in_flight"),
+		"delivered":     WasmJSONExtractInt(result, "delivered"),
+		"failed":        WasmJSONExtractInt(result, "failed"),
+	}, nil
 }
 
 // Elastic pool
@@ -1052,7 +1110,7 @@ func marshalPayload(payload any) string {
 	if b, ok := payload.([]byte); ok {
 		return string(b)
 	}
-	return fmt.Sprintf("%v", payload)
+	return SafeMarshal(payload)
 }
 
 // wasmEncodeStringStringMapJSON encodes map[string]string as a JSON object

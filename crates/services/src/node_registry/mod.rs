@@ -279,13 +279,17 @@ impl NodeRegistry {
 
             // DB backoff configuration
             if let Some(backoff_proto) = &proto.db_backoff {
-                if backoff_proto.base_delay_ms > 0 {
-                    config.db_backoff_base =
-                        Duration::from_millis(backoff_proto.base_delay_ms as u64);
+                if let Some(d) = &backoff_proto.initial_delay {
+                    let ms = (d.seconds as u64 * 1000) + (d.nanos as u64 / 1_000_000);
+                    if ms > 0 {
+                        config.db_backoff_base = Duration::from_millis(ms);
+                    }
                 }
-                if backoff_proto.max_delay_ms > 0 {
-                    config.db_backoff_cap =
-                        Duration::from_millis(backoff_proto.max_delay_ms as u64);
+                if let Some(d) = &backoff_proto.max_delay {
+                    let ms = (d.seconds as u64 * 1000) + (d.nanos as u64 / 1_000_000);
+                    if ms > 0 {
+                        config.db_backoff_cap = Duration::from_millis(ms);
+                    }
                 }
                 if backoff_proto.max_attempts > 0 {
                     config.db_max_attempts = backoff_proto.max_attempts;
@@ -3014,9 +3018,9 @@ mod tests {
 
     #[test]
     fn test_config_from_proto_with_values() {
+        use plexspaces_proto::common::v1::RetryPolicy;
         use plexspaces_proto::node::v1::{
-            DbBackoffConfig as ProtoDbBackoffConfig, NodeRegistryConfig as ProtoNodeRegistryConfig,
-            SwimConfig as ProtoSwimConfig,
+            NodeRegistryConfig as ProtoNodeRegistryConfig, SwimConfig as ProtoSwimConfig,
         };
 
         let proto_config = ProtoNodeRegistryConfig {
@@ -3037,10 +3041,17 @@ mod tests {
             use_shared_db: true,
             db_sync_interval_seconds: 60,
             active_node_window_seconds: 7200,
-            db_backoff: Some(ProtoDbBackoffConfig {
-                base_delay_ms: 200,
-                max_delay_ms: 60000,
+            db_backoff: Some(RetryPolicy {
                 max_attempts: 5,
+                initial_delay: Some(plexspaces_proto::prost_types::Duration {
+                    seconds: 0,
+                    nanos: 200_000_000, // 200ms
+                }),
+                max_delay: Some(plexspaces_proto::prost_types::Duration {
+                    seconds: 60,
+                    nanos: 0, // 60s
+                }),
+                ..Default::default()
             }),
         };
 

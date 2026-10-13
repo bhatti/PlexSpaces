@@ -1,13 +1,33 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- Unified migration: Channel messages (PostgreSQL)
+-- Tenant isolation: (tenant_id, namespace, channel_name) mirrors kv_store schema.
 
 CREATE TABLE IF NOT EXISTS channel_messages (
-    id TEXT PRIMARY KEY,
-    channel_name TEXT NOT NULL,
-    payload BYTEA NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL,
-    acked BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL
+    id                  TEXT        PRIMARY KEY,
+    tenant_id           TEXT        NOT NULL DEFAULT '',
+    namespace           TEXT        NOT NULL DEFAULT '',
+    channel_name        TEXT        NOT NULL,
+    payload             BYTEA       NOT NULL,
+    headers_json        JSONB       NOT NULL DEFAULT '{}',
+    idempotency_key     TEXT        NOT NULL DEFAULT '',
+    conflict_resolution SMALLINT    NOT NULL DEFAULT 0,
+    timestamp           TIMESTAMPTZ NOT NULL,
+    acked               BOOLEAN     NOT NULL DEFAULT FALSE,
+    dead_lettered       BOOLEAN     NOT NULL DEFAULT FALSE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_channel_unacked ON channel_messages(channel_name, acked) WHERE acked = FALSE;
-CREATE INDEX IF NOT EXISTS idx_channel_name ON channel_messages(channel_name);
+
+-- Hot path: tenant+namespace-scoped poll of pending unacked messages, ordered by arrival
+CREATE INDEX IF NOT EXISTS idx_channel_unacked
+    ON channel_messages(tenant_id, namespace, channel_name, created_at)
+    WHERE acked = FALSE AND dead_lettered = FALSE;
+
+-- Idempotency OVERWRITE: find+delete existing queued key in O(log n), tenant-scoped
+CREATE INDEX IF NOT EXISTS idx_channel_idempotency
+    ON channel_messages(tenant_id, namespace, channel_name, idempotency_key)
+    WHERE idempotency_key != '' AND acked = FALSE;
+
+-- DLQ monitoring queries, tenant-scoped
+CREATE INDEX IF NOT EXISTS idx_channel_dlq
+    ON channel_messages(tenant_id, namespace, channel_name, dead_lettered)
+    WHERE dead_lettered = TRUE;

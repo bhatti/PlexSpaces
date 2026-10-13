@@ -49,7 +49,9 @@ use plexspaces_sdk::{
     json, Value, GenServerRef,
 };
 use plexspaces_actor::supervisor::{Supervisor, SupervisorEvent, SupervisionStrategy};
-use plexspaces_actor::child_spec::{ChildSpec, RestartStrategy, StartFn, StartedChild};
+use plexspaces_actor::child_spec::{ChildSpec, StartFn, StartedChild};
+use plexspaces_actor::child_spec::ProtoRestartPolicy;
+use plexspaces_proto::supervision::v1::SupervisorEventType;
 use plexspaces_actor::ActorBuilder;
 use plexspaces_actor::{ActorError, ActorId, ActorRef, RequestContextExt};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
@@ -429,7 +431,7 @@ fn generate_events(num_events: usize) -> Vec<ClickstreamEvent> {
 fn create_processor_spec(
     child_actor_id: ActorId,
     event_type: EventType,
-    restart: RestartStrategy,
+    restart: ProtoRestartPolicy,
     ctx: RequestContext,
     service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 ) -> ChildSpec {
@@ -464,7 +466,7 @@ fn create_processor_spec(
             // ActorBuilder handles mailbox creation, context setup, and structured ID construction.
             let actor_instance = StreamProcessor::new(&actor_name, event_type);
             let mut actor = ActorBuilder::new(Box::new(actor_instance))
-                .with_id(child_actor_id.clone())
+                .with_name(child_actor_id.name())
                 .with_namespace(ctx.namespace().to_string())
                 .with_tenant_id(ctx.tenant_id().to_string())
                 .build()
@@ -634,7 +636,7 @@ async fn main() -> Result<()> {
     let spec = create_processor_spec(
         supervised_actor_id.clone(),
         supervised_event_type,
-        RestartStrategy::Permanent,
+        ProtoRestartPolicy::RestartPolicyPermanent,
         ctx.clone(),
         service_locator.clone(),
     );
@@ -642,8 +644,10 @@ async fn main() -> Result<()> {
     supervisor.add_child(spec).await?;
     
     // Wait for child to start
-    if let Some(SupervisorEvent::ChildStarted(id)) = event_rx.recv().await {
-        println!("  ✓ Supervisor registered: {}", id);
+    if let Some(event) = event_rx.recv().await {
+        if event.event_type == SupervisorEventType::SupervisorEventChildStarted as i32 {
+            println!("  ✓ Supervisor registered: {}", event.actor_id);
+        }
     }
     
     // Process events
@@ -730,17 +734,13 @@ async fn main() -> Result<()> {
         tokio::select! {
             event = event_rx.recv() => {
                 if let Some(event) = event {
-                    match event {
-                        SupervisorEvent::ChildFailed(id, reason) => {
-                            println!("    ✗ Processor failed: {} (reason: {})", id, reason);
-                            metrics_tracker.increment_message();
-                        }
-                        SupervisorEvent::ChildRestarted(id, count) => {
-                            println!("    ✓ Processor restarted: {} (restart #{})", id, count);
-                            restart_count = count;
-                            metrics_tracker.increment_message();
-                        }
-                        _ => {}
+                    if event.event_type == SupervisorEventType::SupervisorEventChildFailed as i32 {
+                        println!("    ✗ Processor failed: {} (reason: {})", event.actor_id, event.reason);
+                        metrics_tracker.increment_message();
+                    } else if event.event_type == SupervisorEventType::SupervisorEventChildRestarted as i32 {
+                        println!("    ✓ Processor restarted: {} (restart #{})", event.actor_id, event.restart_count);
+                        restart_count = event.restart_count;
+                        metrics_tracker.increment_message();
                     }
                 }
             }

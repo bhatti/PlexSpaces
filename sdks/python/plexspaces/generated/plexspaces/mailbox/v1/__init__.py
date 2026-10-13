@@ -48,23 +48,6 @@ class MessagePriority(betterproto.Enum):
     SYSTEM = 10
 
 
-class BackpressureStrategy(betterproto.Enum):
-    """Backpressure strategy when mailbox is full"""
-
-    UNSPECIFIED = 0
-    BLOCK = 1
-    """Block sender until space is available"""
-
-    DROP_OLDEST = 2
-    """Drop oldest message in queue"""
-
-    DROP_NEWEST = 3
-    """Drop newest message (reject)"""
-
-    ERROR = 4
-    """Return error to sender"""
-
-
 class OrderingStrategy(betterproto.Enum):
     """
     Ordering strategy for mailbox messages
@@ -169,10 +152,12 @@ class MailboxConfig(betterproto.Message):
      Override via env: PLEXSPACES_MAILBOX_MAX_CAPACITY
     """
 
-    backpressure_strategy: "BackpressureStrategy" = betterproto.enum_field(4)
+    backpressure_strategy: "__common_v1__.BackpressureStrategy" = (
+        betterproto.enum_field(4)
+    )
     """Backpressure strategy when queue is full"""
 
-    retry_after_ms: int = betterproto.uint32_field(5)
+    retry_after_ms: int = betterproto.uint64_field(5)
     """
     How long (ms) to suggest callers wait before retrying after RESOURCE_EXHAUSTED.
      Sent in the `retry-after-ms` gRPC trailing metadata field.
@@ -223,7 +208,7 @@ class MailboxFullDetail(betterproto.Message):
      Clients should wait at least `retry_after_ms` milliseconds before retrying.
     """
 
-    retry_after_ms: int = betterproto.uint32_field(1)
+    retry_after_ms: int = betterproto.uint64_field(1)
     """
     Suggested back-off before retrying, in milliseconds.
      0 means use a sensible default (e.g. 100 ms with jitter).

@@ -17,6 +17,7 @@ from typing import (
 import betterproto
 
 from ...common import v1 as __common_v1__
+from ...mailbox import v1 as __mailbox_v1__
 
 
 class SupervisionStrategy(betterproto.Enum):
@@ -179,15 +180,6 @@ class AdaptiveConfig(betterproto.Message):
 
 
 @dataclass(eq=False, repr=False)
-class ExponentialBackoffConfig(betterproto.Message):
-    """Configuration for exponential backoff restart policy"""
-
-    initial_delay_ms: int = betterproto.uint64_field(1)
-    max_delay_ms: int = betterproto.uint64_field(2)
-    factor: float = betterproto.double_field(3)
-
-
-@dataclass(eq=False, repr=False)
 class ChildSpec(betterproto.Message):
     """
     Child specification
@@ -259,11 +251,22 @@ class ChildSpec(betterproto.Message):
      Can include: "start_module", "start_function", "supervisor_strategy"
     """
 
-    exponential_backoff: Optional["ExponentialBackoffConfig"] = (
+    exponential_backoff: Optional["__common_v1__.RetryPolicy"] = (
         betterproto.message_field(11, optional=True)
     )
     """
     Exponential backoff config (when restart = RESTART_POLICY_EXPONENTIAL_BACKOFF)
+    """
+
+    mailbox_config: Optional["__mailbox_v1__.MailboxConfig"] = (
+        betterproto.message_field(12, optional=True)
+    )
+    """
+    Per-actor mailbox configuration. When unset, inherits the node default (IN_MEMORY).
+     Set channel_provider = SQLITE or POSTGRES to use the shared node DB pool for
+     a durable, DB-backed mailbox (no per-actor pool; uses node-wide shared connection).
+     DB-backed mailboxes should NOT use the admission_control facet — the DB itself
+     acts as the buffer; throttling at the inbox level defeats the purpose.
     """
 
 

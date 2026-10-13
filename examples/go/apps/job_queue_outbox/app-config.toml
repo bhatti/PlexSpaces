@@ -1,0 +1,42 @@
+# Job Queue Outbox Application Configuration (Go WASM)
+#
+# Deploys a leader actor that creates virtual workers via CreateShardGroup
+# and dispatches jobs via the outbox relay with AIMD flow control.
+#
+# Workers are NOT statically configured here — they are created at runtime
+# by the leader via host.CreateShardGroup(). The framework places them
+# across all available nodes automatically.
+
+name = "go-job-queue-outbox"
+version = "1.0.0"
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Leader: creates workers via CreateShardGroup, dispatches via outbox
+[[supervisor.children]]
+name = "leader"
+actor_type = "JobQueueLeader"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "admission_control", priority = 80, config = { max_concurrent = 100 } }
+]
+
+# Worker prototype — registers JobQueueWorker with the BehaviorRegistry so that
+# CreateShardGroup can spawn worker instances. No static worker is started here
+# (virtual_actor + lazy activation means it only activates on first message).
+[[supervisor.children]]
+name = "worker-proto"
+actor_type = "JobQueueWorker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]

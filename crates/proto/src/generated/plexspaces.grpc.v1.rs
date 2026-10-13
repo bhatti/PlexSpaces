@@ -67,7 +67,7 @@ pub mod middleware_spec {
         #[prost(message, tag="16")]
         CircuitBreaker(super::CircuitBreakerMiddlewareConfig),
         #[prost(message, tag="17")]
-        Retry(super::RetryMiddlewareConfig),
+        Retry(super::super::super::common::v1::RetryPolicy),
         #[prost(message, tag="18")]
         Logging(super::LoggingMiddlewareConfig),
     }
@@ -351,33 +351,6 @@ pub struct CircuitBreakerMiddlewareConfig {
     /// Time window for counting failures
     #[prost(message, optional, tag="4")]
     pub window: ::core::option::Option<::prost_types::Duration>,
-}
-/// Retry middleware configuration
-///
-/// ## Purpose
-/// Automatically retries failed requests with exponential backoff.
-///
-/// ## Design Notes
-/// - Only retries idempotent methods by default
-/// - Backoff prevents overwhelming downstream service
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RetryMiddlewareConfig {
-    /// Maximum retry attempts
-    #[prost(uint32, tag="1")]
-    pub max_retries: u32,
-    /// Initial retry delay
-    #[prost(message, optional, tag="2")]
-    pub initial_delay: ::core::option::Option<::prost_types::Duration>,
-    /// Maximum retry delay
-    #[prost(message, optional, tag="3")]
-    pub max_delay: ::core::option::Option<::prost_types::Duration>,
-    /// Backoff multiplier (2.0 = exponential)
-    #[prost(double, tag="4")]
-    pub backoff_factor: f64,
-    /// Retryable gRPC status codes
-    #[prost(int32, repeated, tag="5")]
-    pub retryable_status_codes: ::prost::alloc::vec::Vec<i32>,
 }
 /// Logging middleware configuration
 ///

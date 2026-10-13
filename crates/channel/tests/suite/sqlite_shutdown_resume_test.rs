@@ -28,7 +28,7 @@
 mod tests {
     use plexspaces_channel::create_channel;
     use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, SqliteConfig};
-    use plexspaces_proto::common::v1::Message;
+    use plexspaces_proto::common::v1::{Message, RetryPolicy};
     use std::time::Duration;
     use tempfile::TempDir;
     use tokio::time::timeout;
@@ -53,7 +53,10 @@ mod tests {
             backend_config: Some(
                 plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config),
             ),
-            max_retries: 3,
+            retry_policy: Some(RetryPolicy {
+                max_attempts: 3,
+                ..Default::default()
+            }),
             dlq_enabled: true,
             ..Default::default()
         }

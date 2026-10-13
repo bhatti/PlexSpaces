@@ -540,6 +540,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let initial_deposit = 10_000.0;
     let deposit_result: Value = account
         .call(
+            &ctx,
             "deposit",
             &json!({
                 "amount": initial_deposit,
@@ -570,6 +571,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if is_deposit {
             let _: Value = account
                 .call(
+                    &ctx,
                     "deposit",
                     &json!({
                         "amount": amount,
@@ -581,12 +583,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             metrics_tracker.increment_message();
         } else {
             // Check balance before withdrawing
-            let balance_result: Value = account.call("get_balance", &json!({})).await?;
+            let balance_result: Value = account.call(&ctx, "get_balance", &json!({})).await?;
             let balance = balance_result["balance"].as_f64().unwrap();
 
             if balance >= amount {
                 let _: Value = account
                     .call(
+                        &ctx,
                         "withdraw",
                         &json!({
                             "amount": amount,
@@ -601,7 +604,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Show progress
         if i < 5 || i >= num_transactions - 5 {
-            let balance_result: Value = account.call("get_balance", &json!({})).await?;
+            let balance_result: Value = account.call(&ctx, "get_balance", &json!({})).await?;
             println!(
                 "  Transaction {}: {} ${:.2} → Balance: ${:.2}",
                 i + 1,
@@ -613,7 +616,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Get final balance
-    let final_balance_result: Value = account.call("get_balance", &json!({})).await?;
+    let final_balance_result: Value = account.call(&ctx, "get_balance", &json!({})).await?;
     let final_balance = final_balance_result["balance"].as_f64().unwrap();
 
     let process_time = process_start.elapsed();
@@ -653,6 +656,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get transaction history to verify journaling
     let history_result: Value = account
         .call(
+            &ctx,
             "get_transactions",
             &json!({
                 "limit": 10

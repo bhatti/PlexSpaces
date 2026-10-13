@@ -166,6 +166,13 @@ try:
 except ImportError:
     pass
 
+_outbox_impl = None
+try:
+    from wit_world.imports import outbox as _wit_outbox_eager
+    _outbox_impl = _wit_outbox_eager
+except ImportError:
+    pass
+
 
 def _to_payload_bytes(data: str) -> bytes:
     """Encode a JSON/string payload to bytes for WIT payload (list<u8>) parameters.
@@ -287,6 +294,14 @@ def _get_registry():
     global _registry_impl
     if _registry_impl is not None:
         return _registry_impl
+    return _get_host_actor()
+
+
+def _get_outbox():
+    """Get the outbox WIT import (real or mock fallback to _get_host_actor())."""
+    global _outbox_impl
+    if _outbox_impl is not None:
+        return _outbox_impl
     return _get_host_actor()
 
 
@@ -789,6 +804,16 @@ class _MockHost:
         return str(len(self._channel_queues.get(channel_name, [])))
 
     # ========================================================================
+    # Outbox mock
+    # ========================================================================
+
+    def outbox_dispatch(self, ctx: str, dispatcher_id: str, target_actor_ids, payload, message_type: str, idempotency_key: str, conflict_resolution: str = ""):
+        return (len(target_actor_ids), 0)
+
+    def outbox_status(self, ctx: str, dispatcher_id: str) -> str:
+        return json.dumps({"dispatcher_id": dispatcher_id, "pending_count": 0, "in_flight_count": 0, "delivered_count": 0, "failed_count": 0})
+
+    # ========================================================================
     # Object Registry mock
     # ========================================================================
 
@@ -1243,6 +1268,69 @@ class Channel:
             return 0
 
 
+class Outbox:
+    """
+    Outbox host functions for flow-controlled messaging.
+
+    Dispatches messages via an OutboxRelay that uses AIMD-controlled
+    concurrency and DB-backed channels for reliable delivery.
+
+    Example::
+
+        from plexspaces import host
+
+        accepted, rejected = host.outbox.dispatch(
+            ctx, "dispatcher-1", ["actor-a", "actor-b"],
+            {"task": "process"}, "cast", ""
+        )
+        status = host.outbox.status(ctx, "dispatcher-1")
+    """
+
+    def dispatch(
+        self,
+        ctx: Any,
+        dispatcher_id: str,
+        target_actor_ids: List[str],
+        payload: Any = None,
+        message_type: str = "cast",
+        idempotency_key: str = "",
+        conflict_resolution: str = "",
+    ) -> tuple:
+        """Dispatch messages to target actors via the outbox relay.
+
+        Returns:
+            (accepted_count, rejected_count) tuple.
+        """
+        h = _get_outbox()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        payload_bytes = _to_payload_bytes(json.dumps(payload) if payload is not None else "{}")
+        result = h.outbox_dispatch(ctx_json, dispatcher_id, target_actor_ids, payload_bytes, message_type, idempotency_key, conflict_resolution)
+        if isinstance(result, tuple):
+            return result
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if isinstance(result, str):
+            try:
+                parsed = json.loads(result)
+                return (int(parsed.get("accepted", 0)), int(parsed.get("rejected", 0)))
+            except Exception:
+                pass
+        return (0, 0)
+
+    def status(self, ctx: Any, dispatcher_id: str) -> Dict[str, Any]:
+        """Get dispatcher status (pending, in-flight, delivered, failed counts).
+
+        Returns:
+            Dict with dispatcher status fields.
+        """
+        h = _get_outbox()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        raw = h.outbox_status(ctx_json, dispatcher_id)
+        if isinstance(raw, (bytes, bytearray)):
+            raw = _from_payload_bytes(raw)
+        return json.loads(raw) if raw else {}
+
+
 class Registry:
     """
     Object Registry host functions for registration and discovery.
@@ -1679,6 +1767,7 @@ class Host:
         self.process_groups = ProcessGroups()
         self.ts = _TupleSpaceHelper(self)
         self.channel = Channel()
+        self.outbox = Outbox()
         self.registry = Registry()
         self.kv = KVStore()
         self.alarm = AlarmClient()

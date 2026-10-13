@@ -39,7 +39,7 @@ async fn register_supervisor(
     supervisor_id: &plexspaces_actor::ActorId,
 ) -> (Arc<Mailbox>, plexspaces_mailbox::MailboxReceiver) {
     let (mailbox_inner, rx) =
-        Mailbox::new(MailboxConfig::default(), supervisor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), supervisor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let mailbox = Arc::new(mailbox_inner);
@@ -84,7 +84,7 @@ async fn test_monitor_local_actor() {
 
     // Register worker so monitoring can proceed.
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -126,7 +126,7 @@ async fn test_local_actor_termination_down_message() {
 
     // Register both actors.
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -172,7 +172,7 @@ async fn test_multiple_monitors_same_actor() {
     let sup2_id = test_runtime_actor_id("supervisor2", "node1");
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -223,7 +223,7 @@ async fn test_monitor_ref_uniqueness() {
     let sup2_id = test_runtime_actor_id("supervisor2", "node1");
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -247,7 +247,7 @@ async fn test_actor_crash_reason_propagation() {
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -289,7 +289,7 @@ async fn test_demonitor_cancels_down_notification() {
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -330,7 +330,7 @@ async fn test_monitor_down_on_shutdown() {
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);
@@ -368,7 +368,7 @@ async fn test_demonitor_idempotent() {
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
 
     let (worker_mailbox_inner, _rx) =
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let worker_mailbox = Arc::new(worker_mailbox_inner);

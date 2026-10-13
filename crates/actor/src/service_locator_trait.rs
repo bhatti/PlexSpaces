@@ -193,6 +193,16 @@ pub trait ServiceLocator: plexspaces_service_traits::ServiceLocatorBase {
     ) -> Option<std::sync::Arc<dyn crate::TracingGate>> {
         None
     }
+
+    /// Get ChannelRepository for tenant-isolated durable mailbox channels.
+    ///
+    /// Returns `None` by default; only `ServiceLocatorImpl` overrides this once the
+    /// `enable_persistence` flag is set on an actor's `ActorConfig`.
+    async fn get_channel_repository(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_channel::ChannelRepository>> {
+        None
+    }
 }
 
 /// Write-side of ServiceLocator — used exclusively during node startup / test setup.
@@ -321,6 +331,12 @@ pub trait InitializableServiceLocator: ServiceLocator {
 
     /// Register WebSocket session registry at node startup.
     async fn register_ws_registry(&self, registry: std::sync::Arc<dyn WsRegistryTrait>);
+
+    /// Register ChannelRepository for durable actor mailboxes at node startup.
+    async fn register_channel_repository(
+        &self,
+        repo: std::sync::Arc<dyn plexspaces_channel::ChannelRepository>,
+    );
 }
 
 /// Trait for WASM Runtime (defined in wasm-runtime crate)

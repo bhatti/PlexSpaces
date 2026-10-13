@@ -354,7 +354,7 @@ See [Examples](examples/README.md) for the complete list.
 
 In-depth articles about PlexSpaces design, patterns, and real-world use cases:
 
-- [What Happens After the PR Merges: Building the Learning Loop Software Factories Are Missing](https://shahbhat.medium.com/what-happens-after-the-pr-merges-building-the-learning-loop-software-factories-are-missing-bd867da38b8b)
+- [Building Production Data Pipelines with SEDA and Actors Model](https://shahbhat.medium.com/building-production-data-pipelines-with-seda-and-actors-model-e2aace62a6a4)
 - [When Hundreds of AI Agents Self-Organized: Coordination Patterns for Multi-Agent Systems](https://shahbhat.medium.com/when-hundreds-of-ai-agents-self-organized-coordination-patterns-for-multi-agent-systems-e1288679b0e7)
 - [Building a Durable Actor Framework for Polyglot Serverless Apps](https://shahbhat.medium.com/building-plexspaces-decades-of-distributed-systems-distilled-into-one-framework-a63132040dd8) — The origin story: how decades of distributed systems research shaped PlexSpaces
 - [20+ Production Patterns for Distributed AI Agents Using Actors and TupleSpaces](https://shahbhat.medium.com/20-production-patterns-for-distributed-ai-agents-using-actors-and-tuplespaces-2fceb8a6a0b1) — Practical patterns for building production-grade distributed AI agent systems

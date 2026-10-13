@@ -71,6 +71,7 @@ async fn ten_thousand_mailboxes_stack_under_10mb() {
             String::new(),
             String::new(),
             None,
+            None,
         )
         .await
         .expect("mailbox creation must not fail");

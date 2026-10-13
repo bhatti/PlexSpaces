@@ -4,15 +4,15 @@
 // Integration tests for retry interceptor with exponential backoff
 
 use plexspaces_grpc_middleware::chain::InterceptorChain;
+use plexspaces_proto::common::v1::RetryPolicy;
 use plexspaces_proto::grpc::v1::{
     InterceptorRequest, InterceptorResponse, MiddlewareConfig, MiddlewareSpec, MiddlewareType,
-    RetryMiddlewareConfig,
 };
 
 #[tokio::test]
 async fn test_retry_interceptor_configured() {
-    let config = RetryMiddlewareConfig {
-        max_retries: 3,
+    let config = RetryPolicy {
+        max_attempts: 3,
         initial_delay: Some(plexspaces_proto::prost_types::Duration {
             seconds: 0,
             nanos: 100_000_000, // 100ms
@@ -21,8 +21,9 @@ async fn test_retry_interceptor_configured() {
             seconds: 1,
             nanos: 0, // 1 second
         }),
-        backoff_factor: 2.0,
-        retryable_status_codes: vec![14, 8], // UNAVAILABLE, RESOURCE_EXHAUSTED
+        backoff_multiplier: 2.0,
+        retryable_errors: vec!["14".to_string(), "8".to_string()],
+        ..Default::default()
     };
 
     let middleware_config = MiddlewareConfig {
@@ -48,7 +49,6 @@ async fn test_retry_interceptor_configured() {
         peer_service_id: String::new(),
     };
 
-    // Retry interceptor should allow initial request
     let result = chain.before_request(&context).await;
     assert!(
         result.is_ok(),
@@ -58,18 +58,19 @@ async fn test_retry_interceptor_configured() {
 
 #[tokio::test]
 async fn test_retry_interceptor_identifies_retryable_errors() {
-    let config = RetryMiddlewareConfig {
-        max_retries: 3,
+    let config = RetryPolicy {
+        max_attempts: 3,
         initial_delay: Some(plexspaces_proto::prost_types::Duration {
             seconds: 0,
-            nanos: 100_000_000, // 100ms
+            nanos: 100_000_000,
         }),
         max_delay: Some(plexspaces_proto::prost_types::Duration {
             seconds: 1,
             nanos: 0,
         }),
-        backoff_factor: 2.0,
-        retryable_status_codes: vec![14], // UNAVAILABLE
+        backoff_multiplier: 2.0,
+        retryable_errors: vec!["14".to_string()],
+        ..Default::default()
     };
 
     let middleware_config = MiddlewareConfig {
@@ -85,7 +86,6 @@ async fn test_retry_interceptor_identifies_retryable_errors() {
 
     let chain = InterceptorChain::from_config(&middleware_config).unwrap();
 
-    // Response with retryable error (UNAVAILABLE = 14)
     let response_context = InterceptorResponse {
         status_code: 14, // UNAVAILABLE
         headers: std::collections::HashMap::new(),
@@ -95,25 +95,25 @@ async fn test_retry_interceptor_identifies_retryable_errors() {
         method: "/test.Service/RetryableMethod".to_string(),
     };
 
-    // Retry interceptor should identify this as retryable
     let result = chain.after_response(&response_context).await;
     assert!(result.is_ok(), "Should handle retryable error");
 }
 
 #[tokio::test]
 async fn test_retry_interceptor_does_not_retry_non_retryable_errors() {
-    let config = RetryMiddlewareConfig {
-        max_retries: 3,
+    let config = RetryPolicy {
+        max_attempts: 3,
         initial_delay: Some(plexspaces_proto::prost_types::Duration {
             seconds: 0,
-            nanos: 100_000_000, // 100ms
+            nanos: 100_000_000,
         }),
         max_delay: Some(plexspaces_proto::prost_types::Duration {
             seconds: 1,
             nanos: 0,
         }),
-        backoff_factor: 2.0,
-        retryable_status_codes: vec![14, 8], // Only UNAVAILABLE and RESOURCE_EXHAUSTED
+        backoff_multiplier: 2.0,
+        retryable_errors: vec!["14".to_string(), "8".to_string()],
+        ..Default::default()
     };
 
     let middleware_config = MiddlewareConfig {
@@ -129,7 +129,6 @@ async fn test_retry_interceptor_does_not_retry_non_retryable_errors() {
 
     let chain = InterceptorChain::from_config(&middleware_config).unwrap();
 
-    // Response with non-retryable error (INVALID_ARGUMENT = 3)
     let response_context = InterceptorResponse {
         status_code: 3, // INVALID_ARGUMENT (not in retryable list)
         headers: std::collections::HashMap::new(),
@@ -139,25 +138,25 @@ async fn test_retry_interceptor_does_not_retry_non_retryable_errors() {
         method: "/test.Service/NonRetryableMethod".to_string(),
     };
 
-    // Should not retry
     let result = chain.after_response(&response_context).await;
     assert!(result.is_ok(), "Should not retry non-retryable errors");
 }
 
 #[tokio::test]
 async fn test_retry_interceptor_respects_max_retries() {
-    let config = RetryMiddlewareConfig {
-        max_retries: 2, // Max 2 retries
+    let config = RetryPolicy {
+        max_attempts: 2,
         initial_delay: Some(plexspaces_proto::prost_types::Duration {
             seconds: 0,
-            nanos: 10_000_000, // 10ms (fast for testing)
+            nanos: 10_000_000, // 10ms
         }),
         max_delay: Some(plexspaces_proto::prost_types::Duration {
             seconds: 0,
             nanos: 100_000_000, // 100ms
         }),
-        backoff_factor: 2.0,
-        retryable_status_codes: vec![14], // UNAVAILABLE
+        backoff_multiplier: 2.0,
+        retryable_errors: vec!["14".to_string()],
+        ..Default::default()
     };
 
     let middleware_config = MiddlewareConfig {
@@ -173,9 +172,6 @@ async fn test_retry_interceptor_respects_max_retries() {
 
     let chain = InterceptorChain::from_config(&middleware_config).unwrap();
 
-    // Simulate multiple retryable failures
-    // Note: Actual retry logic would be in the client, not interceptor
-    // This test just verifies configuration is respected
     let response_context = InterceptorResponse {
         status_code: 14, // UNAVAILABLE
         headers: std::collections::HashMap::new(),

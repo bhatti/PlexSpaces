@@ -83,7 +83,7 @@ async fn test_node_spawns_actor_with_full_context() {
     mailbox_config.capacity = 1000;
     let actor_name = "test-actor";
     let actor_id = ActorId::new(actor_name, "gen_server", "default", node.id().as_str()).unwrap();
-    let mailbox_pair = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let actor = ActorInstance::new(
@@ -170,7 +170,7 @@ async fn test_actor_context_has_node_id() {
 
     let behavior = Box::new(ContextAwareBehavior::new());
     let actor_id = ActorId::new("test-actor-2", "gen_server", "default", "test-node-2").unwrap();
-    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None)
+    let mailbox_pair = Mailbox::new(MailboxConfig::default(), actor_id.to_string(), String::new(), String::new(), None, None)
         .await
         .unwrap();
     let actor = ActorInstance::new(

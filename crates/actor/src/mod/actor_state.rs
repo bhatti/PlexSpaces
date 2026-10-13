@@ -56,10 +56,6 @@ pub enum ActorState {
     Terminated,
 }
 
-// NOTE: ActorLifecycle trait REMOVED - lifecycle is now STATIC (always present)
-// This was a design flaw: lifecycle hooks are CORE to every actor, not optional.
-// The new design has lifecycle methods directly on Actor (see impl Actor below)
-
 impl ActorState {
     /// Convert to proto ActorState enum
     pub fn to_proto(&self) -> plexspaces_proto::v1::actor::ActorState {

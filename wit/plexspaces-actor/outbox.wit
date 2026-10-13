@@ -1,0 +1,52 @@
+// PlexSpaces Actor Interface - Outbox (Flow-Controlled Messaging)
+//
+// Provides sender-side flow-controlled dispatch via the outbox pattern.
+// Messages are written to a DB-backed channel and delivered at AIMD-controlled
+// concurrency, protecting both sender and receiver from overload.
+//
+// ## Context parameter
+// `ctx` is a JSON-encoded string carrying optional tenant/namespace override.
+// An empty string is valid — the host infers context from the calling actor.
+
+interface outbox {
+    use types.{payload, actor-error, duration-ms};
+
+    /// Dispatch messages to one or more target actors via the outbox relay.
+    ///
+    /// Messages are enqueued in a DB-backed channel and delivered asynchronously
+    /// at AIMD-controlled concurrency. Returns accepted/rejected counts.
+    ///
+    /// # Arguments
+    /// - `ctx`:              JSON context string (tenant / namespace override)
+    /// - `dispatcher-id`:    ID of the dispatcher actor managing the outbox
+    /// - `target-actor-ids`: List of target actor IDs to deliver to
+    /// - `payload`:          Message payload
+    /// - `message-type`:     "call" or "cast" (default "cast")
+    /// - `idempotency-key`:      Optional dedup key (empty = no dedup)
+    /// - `conflict-resolution`:  "" | "keep_original" | "overwrite"
+    ///                           When idempotency-key is non-empty and a queued message
+    ///                           with the same key exists: "keep_original" (default) drops
+    ///                           the incoming duplicate; "overwrite" replaces the queued
+    ///                           message with the incoming one (Last-Write-Wins).
+    ///
+    /// # Returns
+    /// JSON string with accepted/rejected counts
+    outbox-dispatch: func(
+        ctx: string,
+        dispatcher-id: string,
+        target-actor-ids: list<string>,
+        payload: payload,
+        message-type: string,
+        idempotency-key: string,
+        conflict-resolution: string
+    ) -> result<string, actor-error>;
+
+    /// Get the current status of a dispatcher (pending, in-flight, delivered, etc).
+    ///
+    /// # Returns
+    /// JSON-encoded DispatcherStatus
+    outbox-status: func(
+        ctx: string,
+        dispatcher-id: string
+    ) -> result<string, actor-error>;
+}

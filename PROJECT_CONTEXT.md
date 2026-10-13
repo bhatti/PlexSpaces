@@ -168,6 +168,9 @@ Layer 6 — Execution engines:
   wasm-runtime  — wasmtime Component Model execution engine
   workflow      — Durable workflow orchestration (built on actor + persistence + facet)
   elastic-pool  — Auto-scaling elastic worker pool
+  outbox        — Flow-controlled messaging: ConcurrencyLimiter (AIMD), OutboxRelay,
+                  PartitionedOutboxRelay (N-partition hash-routed scale-out),
+                  AdmissionControlFacet (receiver-side), dispatch helpers
 
 Layer 7 — Application lifecycle:
   application   — Deploy/start/stop multi-actor applications; WASM component loading;
@@ -529,7 +532,31 @@ hostWireScatterGatherRequest(req)   // ScatterGatherRequest → proto bytes dire
 
 **Why**: Eliminates a class of TinyGo WASM crashes. The intermediary map creation forced `map[string]any` values (like `req.Query`) to be stored as `any` in another `map[string]any` — which corrupts a function-table entry in TinyGo's hashmap runtime when `encoding/json` is linked in.
 
-**TinyGo WASM `map[string]any` rules** (DO NOT VIOLATE):
+**TinyGo WASM function-table corruption — root cause** (DO NOT VIOLATE):
+
+TinyGo compiles Go to WASM using LLVM. Certain stdlib imports inject entries into the WASM
+function table at link time. When `encoding/json` or `fmt` are linked, their init functions
+add `fmtsort`'s comparison function at a table slot that collides with an actor interface
+method dispatch (`Handle$invoke`). The result: at runtime, `call_indirect` calls the wrong
+function and traps.
+
+**FORBIDDEN anywhere in a TinyGo WASM actor or its linked SDK:**
+- `encoding/json.Marshal(...)` — links `fmtsort` (the sort used for map key ordering in JSON)
+- `fmt.Sprintf(...)`, `fmt.Errorf(...)`, `fmt.Sscanf(...)` — interface dispatch via `%v`/`%d`/`%w` verbs
+
+**SAFE alternatives:**
+- `json.Unmarshal(...)` — decoding only, does not link fmtsort
+- `plexspaces.SafeMarshal(map[string]any{...})` — type-switch encoder, no fmtsort
+- Raw string building: `` `{"k":` + strconv.Itoa(n) + `}` ``
+- `strconv.Itoa`, `strconv.FormatInt` instead of `fmt.Sprintf("%d", n)`
+- `errors.New("msg " + s)` instead of `fmt.Errorf("msg %s", s)`
+
+**SDK fix applied (2026-10-12)**: `sdks/go/plexspaces/host_wasm.go` — removed all `fmt.*`
+calls: replaced `fmt.Sprintf` with string concat + `strconv`, `fmt.Errorf` with `errors.New`,
+`fmt.Sscanf` with `strconv.Parse*`. The last remaining fallback `fmt.Sprintf("%v", payload)`
+in `marshalPayload` was replaced with `SafeMarshal(payload)`.
+
+**TinyGo WASM `map[string]any` write rules** (still applicable):
 1. Writing `m[key] = value` is safe ONLY when `m` was declared as a local variable in the **same function scope** (map literal or `make(map[string]any)`)
 2. Writing to a `map[string]any` passed as a function **parameter** — CRASHES (corrupted `call_indirect`)
 3. Storing a `map[string]any` returned from a function as an `any` **value** in another map — CRASHES
@@ -731,3 +758,151 @@ Before considering any work done:
 - [ ] No backward-compat, legacy, or dead code introduced; any found in the change set is removed
 - [ ] SDK/docs use node-based spawn, annotation-based actors, and canonical message constructors; deprecated patterns (`ActorTrait`, `actor-factory`, `Message::new`) replaced where applicable
 - [ ] `PROJECT_TRACKER.md` updated for meaningful feature/bug work
+
+---
+
+## 20. Embedded Rust Example Reference
+
+Embedded examples are self-contained single-binary applications under `examples/rust/embedded/`. They start a node, spawn actors, run logic, print results, assert correctness, and shut down — all in `main()`. No external server needed.
+
+### Canonical File Layout
+
+```
+examples/rust/embedded/<name>/
+├── .cargo/config.toml        # MANDATORY: shared target dir
+├── Cargo.toml                # standalone [workspace], deps reference ../../../../crates/*
+├── Cargo.lock                # pinned deps (copy from a working example if AWS deps fail)
+├── src/main.rs               # single-file binary
+├── test.sh                   # build + run + assert output strings
+└── README.md                 # what it demonstrates, how to run, references to main docs
+```
+
+### `.cargo/config.toml` (every example must have this)
+
+```toml
+[build]
+target-dir = "../../../../target"
+```
+
+### Node Startup (Correct API)
+
+```rust
+use plexspaces_node::NodeBuilder;
+
+// NodeBuilder::new() takes exactly ONE argument: the node ID string.
+// There is NO .with_node_id() method.
+let node = NodeBuilder::new("my-example-node")
+    .with_clustering_enabled(false)    // embedded = no clustering
+    .build_started()                   // returns Arc<Node>, no Result (no ?)
+    .await;
+
+let service_locator = node.service_locator();   // Arc<ServiceLocatorImpl>
+
+// Shutdown at the end:
+node.shutdown(Duration::from_secs(5)).await?;
+```
+
+**Common mistakes**:
+- `NodeBuilder::new()` with 0 args — compile error (takes 1 string arg)
+- `.with_node_id("...")` — does not exist; node ID goes in `new()`
+- `.build().await?` — `build()` returns `Node` (not `Arc<Node>`); prefer `build_started()`
+- `.build_started().await?` — `build_started()` returns `Arc<Node>`, not `Result`; no `?`
+
+### Actor Spawn (SDK helpers)
+
+```rust
+use plexspaces_sdk::{spawn, spawn_with_facets, RequestContext};
+
+let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
+
+// spawn returns Result<ActorRef, Box<dyn Error + Send + Sync>>
+// For anyhow examples, convert with .map_err():
+let actor_ref = spawn(&ctx, service_locator.clone(), "actor-name", "namespace", actor)
+    .await
+    .map_err(|e| anyhow::anyhow!("spawn: {}", e))?;
+
+// With facets:
+let actor_ref = spawn_with_facets(
+    &ctx, service_locator.clone(), "actor-name", "namespace", actor,
+    vec![Box::new(some_facet)],
+).await.map_err(|e| anyhow::anyhow!("spawn: {}", e))?;
+```
+
+### Channel Usage (import the trait)
+
+```rust
+// The Channel trait MUST be imported for .send()/.receive() to work on
+// Arc<InMemoryChannel> or any other Channel implementor:
+use plexspaces_channel::{Channel, InMemoryChannel};
+
+// InMemoryChannel::new() returns ChannelResult<Self> — convert for anyhow:
+let channel = Arc::new(
+    InMemoryChannel::new(channel_config)
+        .await
+        .map_err(|e| anyhow::anyhow!("channel: {}", e))?,
+);
+
+// channel.send() also returns ChannelResult<String>:
+channel.send(msg).await.map_err(|e| anyhow::anyhow!("send: {}", e))?;
+```
+
+### Message Construction and Ask/Tell
+
+```rust
+use plexspaces_sdk::{call_message, cast_message, json};
+
+// Fire-and-forget:
+let msg = cast_message(json!({ "action": "process" }));
+actor_ref.tell(msg).await?;
+
+// Request-reply (ask helper pattern from web_crawl example):
+async fn ask(actor_ref: &ActorRef, ctx: &RequestContext, op: &str, payload: Value) -> Result<Value> {
+    let mut msg = call_message(payload);
+    msg.message_type = op.to_string();
+    let reply = actor_ref.ask(ctx, msg, Duration::from_secs(30)).await
+        .map_err(|e| anyhow::anyhow!("ask {op}: {e}"))?;
+    let v: Value = serde_json::from_slice(&reply.payload)
+        .map_err(|e| anyhow::anyhow!("parse reply from {op}: {e}"))?;
+    Ok(v)
+}
+```
+
+### Benchmark Table Pattern
+
+Every embedded example should include a scaling benchmark with assertions. See `web_crawl` and `job_queue` for the canonical pattern:
+
+1. **Per-phase timing** — measure spawn, enqueue, relay, etc. separately
+2. **Scaling sweep** — run with 1/N/2N/4N workers, compute jobs/sec, speedup, efficiency%
+3. **ASCII table** — `┌─────┐` box-drawing for results
+4. **Assertions** — `assert_eq!` on delivered counts, `assert!` on throughput > 0
+5. **Patterns footer** — list key PlexSpaces patterns demonstrated
+
+### test.sh Pattern
+
+```bash
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+# Step 1: Build
+cd "$SCRIPT_DIR"
+CARGO_TARGET_DIR="${REPO_ROOT}/target" cargo build 2>&1 | tail -3
+
+# Step 2: Run and capture output
+OUTPUT=$(CARGO_TARGET_DIR="${REPO_ROOT}/target" cargo run 2>&1)
+echo "$OUTPUT"
+
+# Step 3: Assert on output strings (at least 2-3 checks)
+PASS=0
+echo "$OUTPUT" | grep -q "assertion string 1" && PASS=$((PASS + 1))
+echo "$OUTPUT" | grep -q "assertion string 2" && PASS=$((PASS + 1))
+echo "$OUTPUT" | grep -q "assertion string 3" && PASS=$((PASS + 1))
+
+[ "$PASS" -ge 3 ] && echo "All tests passed" || { echo "FAIL"; exit 1; }
+```
+
+### Adding a New Example to CI
+
+After creating the example, add its path to the `EXAMPLES` list in the `test-examples` Makefile target so it is built during CI.

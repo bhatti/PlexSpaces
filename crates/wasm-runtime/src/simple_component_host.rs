@@ -1846,6 +1846,40 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
     }
 }
 
+#[async_trait::async_trait]
+impl plexspaces::actor::outbox::Host for SimpleHostImpl {
+    async fn outbox_dispatch(
+        &mut self,
+        _ctx: String,
+        _dispatcher_id: String,
+        target_actor_ids: Vec<String>,
+        payload: plexspaces::actor::types::Payload,
+        message_type: String,
+        idempotency_key: String,
+        conflict_resolution: String,
+    ) -> Result<String, plexspaces::actor::types::ActorError> {
+        let actor_id = self.actor_id.to_string();
+        crate::outbox_host::outbox_dispatch_impl(
+            self.host_functions.as_ref(),
+            &actor_id,
+            &target_actor_ids,
+            &payload,
+            &message_type,
+            &idempotency_key,
+            &conflict_resolution,
+        )
+        .await
+    }
+
+    async fn outbox_status(
+        &mut self,
+        _ctx: String,
+        dispatcher_id: String,
+    ) -> Result<String, plexspaces::actor::types::ActorError> {
+        Ok(crate::outbox_host::outbox_status_impl(&dispatcher_id))
+    }
+}
+
 /// Check if a WASM component uses the actor-world interface by examining its imports.
 #[cfg(feature = "component-model")]
 pub fn is_simple_actor_component(component: &wasmtime::component::Component) -> bool {
@@ -1863,6 +1897,7 @@ pub fn is_simple_actor_component(component: &wasmtime::component::Component) -> 
             || n.starts_with("plexspaces:actor/host-pool@")
             || n.starts_with("plexspaces:actor/host-shard@")
             || n.starts_with("plexspaces:actor/host-http@")
+            || n.starts_with("plexspaces:actor/outbox@")
         {
             return true;
         }

@@ -224,7 +224,7 @@ message NodeRegistryConfig {
   }];
 
   // DB operation backoff configuration
-  DbBackoffConfig db_backoff = 21;
+  plexspaces.common.v1.RetryPolicy db_backoff = 21;
 
   // Anti-entropy sync interval in seconds
   //
@@ -387,58 +387,6 @@ message SwimConfig {
     minimum: 10
     maximum: 600
     default: "30"
-  }];
-}
-
-// Database backoff configuration
-//
-// ## Purpose
-// Configures exponential backoff with jitter for database operations.
-// Prevents thundering herd and reduces DB load during failures.
-//
-// ## Algorithm
-// Uses decorrelated jitter: sleep = min(cap, random(base, sleep * 3))
-// Based on AWS Architecture Blog recommendations.
-message DbBackoffConfig {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Database Backoff Configuration"
-      description: "Exponential backoff configuration for DB operations"
-    }
-  };
-
-  // Base delay in milliseconds
-  //
-  // Initial backoff delay for the first retry.
-  // Default: 100ms
-  uint32 base_delay_ms = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-    description: "Base delay in milliseconds"
-    minimum: 10
-    maximum: 10000
-    default: "100"
-  }];
-
-  // Maximum delay cap in milliseconds
-  //
-  // Upper bound for backoff delay regardless of retry count.
-  // Default: 30000ms (30 seconds)
-  uint32 max_delay_ms = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-    description: "Maximum delay cap in milliseconds"
-    minimum: 100
-    maximum: 300000
-    default: "30000"
-  }];
-
-  // Maximum retry attempts
-  //
-  // How many times to retry a failed DB operation before giving up.
-  // Set to 0 for unlimited retries (not recommended).
-  // Default: 10
-  uint32 max_attempts = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-    description: "Maximum retry attempts"
-    minimum: 0
-    maximum: 100
-    default: "10"
   }];
 }
 

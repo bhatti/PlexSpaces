@@ -126,6 +126,11 @@ import {
 import type { ChannelMessage as WitChannelMessage } from 'plexspaces:actor/channels@0.1.0';
 
 import {
+  outboxDispatch as hostOutboxDispatch,
+  outboxStatus as hostOutboxStatus,
+} from 'plexspaces:actor/outbox@0.1.0';
+
+import {
   register as hostRegistryRegister,
   unregister as hostRegistryUnregister,
   lookup as hostRegistryLookup,
@@ -792,6 +797,48 @@ export class Channel {
   }
 }
 
+/**
+ * Outbox host functions for flow-controlled message dispatch.
+ *
+ * Messages are enqueued in a DB-backed channel and delivered asynchronously
+ * at AIMD-controlled concurrency. Parity with Python `host.outbox` and Go `host.Outbox()`.
+ */
+export class Outbox {
+  /** Dispatch messages to target actors via the outbox relay. Returns [accepted, rejected]. */
+  dispatch(
+    ctx: string,
+    dispatcherID: string,
+    targetActorIDs: string[],
+    payload: Uint8Array,
+    messageType: string = 'cast',
+    idempotencyKey: string = '',
+    conflictResolution: string = '',
+  ): [number, number] {
+    const result = safeCall(hostOutboxDispatch, ctx, dispatcherID, targetActorIDs, payload, messageType, idempotencyKey, conflictResolution) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    if (typeof result === 'string' && result.length > 0) {
+      try {
+        const parsed = JSON.parse(result) as { accepted?: number; rejected?: number };
+        return [parsed.accepted ?? 0, parsed.rejected ?? 0];
+      } catch (_) {
+        return [0, 0];
+      }
+    }
+    return [0, 0];
+  }
+
+  /** Get current status of a dispatcher. Returns JSON-encoded status string. */
+  status(ctx: string, dispatcherID: string): string {
+    const result = safeCall(hostOutboxStatus, ctx, dispatcherID) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return typeof result === 'string' ? result : '';
+  }
+}
+
 export class Host {
   readonly processGroups = new ProcessGroups();
   /** Tuple space: list-in, list-out. Use null in patterns for wildcards. */
@@ -808,6 +855,8 @@ export class Host {
   readonly blob: BlobClient = new BlobClient();
   /** Channel client for queue and pub/sub messaging. */
   readonly channel: Channel = new Channel();
+  /** Outbox client for flow-controlled messaging. */
+  readonly outbox: Outbox = new Outbox();
 
   /**
    * Create an ergonomic HTTP client for a named service link.

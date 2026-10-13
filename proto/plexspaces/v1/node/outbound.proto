@@ -13,6 +13,7 @@ import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
+import "plexspaces/v1/common.proto";
 import "plexspaces/prv/circuitbreaker/circuitbreaker.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
@@ -24,78 +25,6 @@ enum OutboundTransport {
   OUTBOUND_TRANSPORT_HTTP = 1;
   OUTBOUND_TRANSPORT_GRPC = 2;
   OUTBOUND_TRANSPORT_CHANNEL = 3;
-}
-
-// Retry policy for outbound HTTP calls (exponential backoff with optional full jitter).
-message HttpRetryPolicy {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "HttpRetryPolicy"
-      description: "Retry configuration for outbound HTTP; idempotent methods only unless allow_non_idempotent_retry is set."
-    }
-  };
-
-  // Maximum attempts including the first try (1 = no retry).
-  uint32 max_attempts = 1 [
-    (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).uint32 = {
-      gte: 1
-      lte: 20
-    },
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Max attempts including the first request; use 1 to disable retry."
-      minimum: 1
-      maximum: 20
-      default: "1"
-    }
-  ];
-
-  google.protobuf.Duration initial_backoff = 2 [
-    (google.api.field_behavior) = OPTIONAL,
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Initial backoff before first retry (e.g. 100ms)."}
-  ];
-
-  google.protobuf.Duration max_backoff = 3 [
-    (google.api.field_behavior) = OPTIONAL,
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Upper bound for backoff cap before jitter."}
-  ];
-
-  // Multiplier for exponential backoff (e.g. 2.0).
-  double backoff_multiplier = 4 [
-    (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).double = {
-      gte: 1.0
-      lte: 64.0
-    },
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Exponential multiplier per retry attempt."
-      minimum: 1
-      maximum: 64
-    }
-  ];
-
-  // Jitter in [0,1] applied as full jitter on the backoff cap (AWS-style).
-  double jitter_ratio = 5 [
-    (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).double = {
-      gte: 0.0
-      lte: 1.0
-    },
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Fraction of full jitter applied to backoff (0 = none, 1 = full jitter)."
-      minimum: 0
-      maximum: 1
-    }
-  ];
-
-  // When false, only GET/HEAD/OPTIONS/TRACE are retried. When true, non-idempotent methods may retry.
-  bool allow_non_idempotent_retry = 6 [
-    (google.api.field_behavior) = OPTIONAL,
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "If false (default proto bool), only safe/idempotent HTTP methods are retried."
-      default: "false"
-    }
-  ];
 }
 
 // Timeouts, retry, and circuit breaker for outbound HTTP clients (connection vs request timeout).
@@ -117,7 +46,7 @@ message ClientTransportPolicy {
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Per-request deadline including body transfer."}
   ];
 
-  HttpRetryPolicy retry = 3 [(google.api.field_behavior) = OPTIONAL];
+  plexspaces.common.v1.RetryPolicy retry = 3 [(google.api.field_behavior) = OPTIONAL];
 
   plexspaces.circuitbreaker.prv.CircuitBreakerConfig circuit_breaker = 4 [(google.api.field_behavior) = OPTIONAL];
 

@@ -82,6 +82,18 @@ impl ChannelError {
 /// Result type for channel operations
 pub type ChannelResult<T> = Result<T, ChannelError>;
 
+const DEFAULT_MAX_RETRIES: u32 = 3;
+
+/// Extract max retry attempts from a ChannelConfig's retry_policy.
+pub fn max_retries_from_config(config: &ChannelConfig) -> u32 {
+    config
+        .retry_policy
+        .as_ref()
+        .map(|p| p.max_attempts)
+        .filter(|&v| v > 0)
+        .unwrap_or(DEFAULT_MAX_RETRIES)
+}
+
 /// Core channel trait for extensible messaging
 ///
 /// ## Purpose
@@ -349,6 +361,7 @@ pub async fn create_channel(config: ChannelConfig) -> ChannelResult<Box<dyn Chan
         )),
     }
 }
+
 
 #[cfg(test)]
 mod tests {

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    response::Json,
+    response::{IntoResponse, Json, Response},
     routing::get,
     Router,
 };
@@ -46,6 +46,7 @@ pub fn node_router(
     };
     Router::new()
         .route("/api/v1/nodes", get(list_connected_nodes))
+        .route("/metrics", get(prometheus_metrics))
         .with_state(state)
 }
 
@@ -116,4 +117,23 @@ async fn list_connected_nodes(
         "next_page_token": resp.next_page_token,
         "total_count": resp.total_count,
     })))
+}
+
+/// GET /metrics — Prometheus text exposition.
+///
+/// Returns all counters from the in-process metrics registry in the standard
+/// Prometheus text format (HELP + TYPE lines, one sample per line). Scrapers
+/// such as Prometheus or VictoriaMetrics point here; human-readable with curl.
+async fn prometheus_metrics(State(s): State<NodeRouteState>) -> Response {
+    let text = if let Some(renderer) = s.service_locator.get_metrics_prometheus_renderer().await {
+        renderer.render_prometheus_text()
+    } else {
+        String::new()
+    };
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        text,
+    )
+        .into_response()
 }

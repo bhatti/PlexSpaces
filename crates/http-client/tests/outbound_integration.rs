@@ -6,8 +6,9 @@ use axum::{routing::get, Router};
 use plexspaces_actor::{OutboundHttpClient, OutboundHttpRequest};
 use plexspaces_http_client::ResilientOutboundHttpClient;
 use plexspaces_proto::circuitbreaker::prv::{CircuitBreakerConfig, FailureStrategy};
+use plexspaces_proto::common::v1::RetryPolicy;
 use plexspaces_proto::node::v1::{
-    ClientTransportPolicy, HttpRetryPolicy, OutboundTransport, RuntimeConfig, ServiceLinkConfig,
+    ClientTransportPolicy, OutboundTransport, RuntimeConfig, ServiceLinkConfig,
 };
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -90,19 +91,19 @@ async fn outbound_http_retries_on_503_then_succeeds() {
     let base = format!("http://{}", addr);
     let mut rt = RuntimeConfig::default();
     rt.default_outbound_client_policy = Some(ClientTransportPolicy {
-        retry: Some(HttpRetryPolicy {
+        retry: Some(RetryPolicy {
             max_attempts: 4,
-            initial_backoff: Some(prost_types::Duration {
+            initial_delay: Some(prost_types::Duration {
                 seconds: 0,
                 nanos: 1_000_000,
             }),
-            max_backoff: Some(prost_types::Duration {
+            max_delay: Some(prost_types::Duration {
                 seconds: 0,
                 nanos: 5_000_000,
             }),
             backoff_multiplier: 2.0,
             jitter_ratio: 0.0,
-            allow_non_idempotent_retry: false,
+            ..Default::default()
         }),
         ..Default::default()
     });
@@ -149,7 +150,7 @@ async fn circuit_opens_after_failures() {
         ..Default::default()
     });
     rt.default_outbound_client_policy = Some(ClientTransportPolicy {
-        retry: Some(HttpRetryPolicy {
+        retry: Some(RetryPolicy {
             max_attempts: 1,
             ..Default::default()
         }),

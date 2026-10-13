@@ -485,6 +485,7 @@ graph LR
 | **StreamingFacet** | `streaming` | Messaging | (streaming facet) |
 | **TransactionFacet** | `transaction` | Persistence | (transaction facet) |
 | **StatelessWorkerFacet** | `stateless_worker` | Scaling | (stateless worker facet) |
+| **AdmissionControlFacet** | `admission_control` | Flow Control | `crates/outbox/src/admission_control_facet.rs` |
 
 ### Facet Categories
 
@@ -535,6 +536,9 @@ This is a deliberate design choice - the name itself communicates durability sem
 **Observability Facets** - Monitoring:
 - `LoggingFacet`: Structured logging
 - `MetricsFacet`: Metrics collection and export
+
+**Flow Control Facets** - Backpressure and admission control:
+- `AdmissionControlFacet`: Receiver-side concurrency limiting. Tracks in-flight messages via atomic counter; rejects with `RESOURCE_EXHAUSTED` and `retry_after_ms` hint when at capacity. Priority 950 (runs before most other facets). Configurable via `AdmissionControlConfig` proto (max concurrent, strategy, retry-after hint). Complements the sender-side `ConcurrencyLimiter` in the outbox relay.
 
 ### Using Facets with SDK Annotations
 
@@ -2803,6 +2807,238 @@ async fn handle_message(&mut self, ctx: &ActorContext, msg: Message) -> Result<(
 
 See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) and [Architecture: FaaS Invocation](architecture.md#faas-invocation) for more details.
 
+## Flow-Controlled Messaging
+
+PlexSpaces provides sender-side and receiver-side flow control for high-fan-out messaging scenarios. The outbox crate (`crates/outbox/`) sits at Layer 6 and composes existing primitives (DB-backed channels, facets, GenServer actors) to deliver throttled, retryable messaging without external infrastructure like Kafka or SQS.
+
+```
+SenderActor
+  └─ outbox.dispatch() → OutboxRelay (AIMD concurrency, DB-backed channel)
+                           ├─ Channel (SQLite/Postgres, durable storage)
+                           └─ drain loop → tell() → TargetActor
+                                                      └─ AdmissionControlFacet
+                                                           ├─ Under limit → process
+                                                           └─ Over limit → RESOURCE_EXHAUSTED + retry_after_ms
+```
+
+### ConcurrencyLimiter (AIMD)
+
+Pure-logic, lock-free concurrency control using the AIMD (Additive Increase Multiplicative Decrease) algorithm — the same approach TCP uses for congestion control.
+
+- **Additive increase**: On successful delivery, limit increases by 1 (up to `max_limit`)
+- **Multiplicative decrease**: On RESOURCE_EXHAUSTED, limit halves (down to `min_limit`)
+- **Permit model**: `try_acquire()` returns an `Option<Permit>`; the permit's `Drop` impl releases the slot
+- **Strategies**: `AIMD` (adaptive) or `FIXED` (static limit, no adjustment)
+- **Configuration**: `ConcurrencyConfig` proto — `initial_limit`, `min_limit`, `max_limit`, `strategy`
+- **Implementation**: `crates/outbox/src/concurrency_limiter.rs` — AtomicU32, CAS loops, zero async
+
+### OutboxRelay
+
+Async drain loop that bridges a durable channel to actor delivery at AIMD-controlled concurrency.
+
+- Dequeues message batches from the channel (batch size bounded by available permits)
+- Acquires concurrency permits before each delivery
+- On success: `limiter.on_success()`, channel `ack()`, increment delivered counter
+- On RESOURCE_EXHAUSTED: `limiter.on_rejection()`, channel `nack(requeue=true)` with exponential backoff
+- On other errors: evaluate `should_retry()` from `crates/common/src/retry.rs`; nack with requeue if retryable, otherwise nack to DLQ
+- Uses the shared `compute_backoff()` utility with full jitter (configurable `jitter_ratio`)
+- **Implementation**: `crates/outbox/src/outbox_relay.rs`
+
+### AdmissionControlFacet (Receiver-Side)
+
+Facet that limits concurrent message processing on an actor. Attached to actors that need receiver-side flow control.
+
+- **Priority**: 950 (runs before most other facets, after security/auth)
+- **`before_method`**: Atomic CAS to increment in-flight count; rejects with `RESOURCE_EXHAUSTED` JSON containing `retry_after_ms` hint when at capacity
+- **`after_method`**: Decrements in-flight (success path)
+- **`on_error`**: Decrements in-flight (error path) — mutually exclusive with `after_method`
+- **Strategies**: `FIXED_LIMIT` (static max concurrent) or `LATENCY_ADAPTIVE` (future: EWMA-based)
+- **Configuration**: `AdmissionControlConfig` proto — `max_concurrent`, `strategy`, `default_retry_after_ms`
+- **Implementation**: `crates/outbox/src/admission_control_facet.rs`
+
+### Dispatch Helpers
+
+Pure utility functions for working with outbox proto types. Located in `crates/outbox/src/dispatch_helpers.rs`:
+
+| Function | Purpose |
+|----------|---------|
+| `parse_dispatch_request()` | Decode a `DispatchRequest` from protobuf bytes |
+| `build_dispatch_response()` | Construct a `DispatchResponse` with accepted/rejected counts |
+| `build_dispatcher_status()` | Build a `DispatcherStatus` from `RelayStats` + `ConcurrencyLimiter` |
+| `validate_config()` | Validate `OutboxConfig` constraints (min/max limits, batch size) |
+
+### Outbox Metrics
+
+All outbox metrics use the `plexspaces_outbox_` prefix and are registered in `unified_metric_definitions()`:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `plexspaces_outbox_relay_delivered_total` | counter | Messages successfully delivered |
+| `plexspaces_outbox_relay_errors_total` | counter | Non-backpressure delivery errors |
+| `plexspaces_outbox_relay_dead_lettered_total` | counter | Messages sent to DLQ |
+| `plexspaces_outbox_relay_retries_total` | counter | Retry attempts |
+| `plexspaces_outbox_relay_backpressure_total` | counter | RESOURCE_EXHAUSTED responses |
+| `plexspaces_outbox_relay_delivery_seconds` | histogram | Delivery duration |
+| `plexspaces_outbox_relay_pending` | gauge | Pending messages in channel |
+| `plexspaces_outbox_limiter_current_limit` | gauge | Current AIMD concurrency limit |
+| `plexspaces_outbox_limiter_in_flight` | gauge | In-flight concurrency permits |
+| `plexspaces_outbox_limiter_success_total` | counter | Permits completed successfully |
+| `plexspaces_outbox_limiter_rejection_total` | counter | RESOURCE_EXHAUSTED rejections (triggers MD) |
+| `plexspaces_outbox_limiter_acquire_rejected_total` | counter | Permit acquisition failures at capacity |
+| `plexspaces_outbox_admission_admitted_total` | counter | Messages admitted |
+| `plexspaces_outbox_admission_rejected_total` | counter | Messages rejected at capacity |
+| `plexspaces_outbox_admission_in_flight` | gauge | Current in-flight messages in admission control |
+
+### PartitionedOutboxRelay (Scalable Fan-Out)
+
+For million-target scenarios where a single relay bottlenecks, `PartitionedOutboxRelay` shards messages across N independent partitions. Each partition has its own channel, AIMD concurrency limiter, and relay task.
+
+**Routing**: `hash(target_actor_id) % N` (FNV-1a) — same target always goes to the same partition, preserving per-recipient message ordering.
+
+**Architecture**:
+```
+PartitionedOutboxRelay (N=4)
+├─ HashRouter: FNV-1a(target_actor_id) % 4 → partition index
+├─ Partition 0: InMemoryChannel → ConcurrencyLimiter → OutboxRelay → deliver()
+├─ Partition 1: InMemoryChannel → ConcurrencyLimiter → OutboxRelay → deliver()
+├─ Partition 2: InMemoryChannel → ConcurrencyLimiter → OutboxRelay → deliver()
+└─ Partition 3: InMemoryChannel → ConcurrencyLimiter → OutboxRelay → deliver()
+```
+
+**Key API**:
+- `PartitionedOutboxRelay::new(id, config, delivery)` — creates N partitions (panics if `num_partitions == 0`)
+- `send(target_actor_id, msg)` — routes to correct partition via hash
+- `run()` — spawns N tokio tasks, returns join handles
+- `stop()` — stops all relays
+- `status()` — aggregates `PartitionedDispatcherStatus` across all partitions
+- `num_partitions()` — returns partition count
+
+#### Configuration
+
+Proto (`PartitionedOutboxConfig` in `outbox.proto`):
+```protobuf
+message PartitionedOutboxConfig {
+  uint32 num_partitions = 1;     // >= 1, required
+  OutboxConfig per_partition = 2; // applied to each partition's relay
+  HashStrategy hash_strategy = 3; // MODULO (default) or CONSISTENT (reserved)
+}
+```
+
+Each partition inherits the `per_partition` config fields:
+- `concurrency` — AIMD limits per partition (each has its own limiter)
+- `retry_policy` — retry/backoff per partition relay
+- `relay_interval_ms` — poll interval per partition (e.g. 5ms)
+- `relay_batch_size` — max dequeue per cycle per partition (e.g. 20)
+
+With 4 partitions and `initial_limit=10`, the aggregate initial concurrency is 4×10=40.
+
+#### State Storage
+
+| State | Where | Lifetime |
+|-------|-------|----------|
+| Pending messages | InMemoryChannel per partition | Process lifetime only — **not durable** |
+| AIMD limit | AtomicU32 per partition limiter | Reconverges from `initial_limit` on restart |
+| Delivered/failed counters | AtomicU64 per partition (RelayStats) | Lost on restart; exposed via `status()` and `plexspaces_outbox_*` metrics |
+| In-flight permits | AtomicU32 per partition limiter | Transient; released on delivery completion |
+
+**For durable partitioned dispatch**, compose N `OutboxRelay` instances manually with DB-backed channels and a `HashRouter`:
+
+```rust
+let router = HashRouter::new(num_partitions);
+let relays: Vec<Arc<OutboxRelay>> = (0..num_partitions)
+    .map(|i| {
+        let channel = create_sqlite_channel(format!("partition-{}", i)).await;
+        let limiter = Arc::new(ConcurrencyLimiter::new(&concurrency_config));
+        Arc::new(OutboxRelay::new(&config, channel, limiter, delivery.clone()))
+    })
+    .collect();
+
+// Route: same API surface, durable storage
+let idx = router.route("actor-123") as usize;
+relays[idx].channel.send(msg).await?;
+```
+
+#### Metrics
+
+All N partition relays emit to the same `plexspaces_outbox_*` metric names (no per-partition labels, per project convention). Counters aggregate across partitions automatically. For per-partition visibility, use `status().partition_statuses[i]`.
+
+#### Scaling: Changing Partition Count
+
+Unlike Kafka, partition channels are transient queues — messages flow through in milliseconds, not days. To change partition count:
+1. Create a new `PartitionedOutboxRelay` with the desired N
+2. Stop sending to the old relay
+3. Wait for the old relay to drain (pending → 0)
+4. `stop()` the old relay
+5. Switch to the new relay
+
+No data movement or rebalancing. No coordination protocol.
+
+#### Gotchas
+
+1. **`num_partitions` must be >= 1** — panics on 0 (matches proto `gte: 1` validation)
+2. **`storage_channel` is ignored** — always creates `InMemoryChannel`; not durable
+3. **Task lifecycle is caller's responsibility** — `run()` returns handles; caller MUST `stop()` + await all handles before dropping. Dropping handles without `stop()` leaks N background tasks.
+4. **Metrics don't distinguish partitions** — all relays emit to shared metric names; use `status()` for per-partition drill-down
+5. **Channel capacity** — each partition's channel is sized at `max(relay_batch_size, 100) × 10`; sending faster than relay drains returns a channel-full error
+6. **Hash function is not configurable** — always FNV-1a mod N. `HASH_STRATEGY_CONSISTENT` is reserved for future use.
+
+#### Testing
+
+```bash
+# All outbox tests (hash_router + partitioned_relay + others):
+cargo test -p plexspaces-outbox --lib
+
+# Partitioned relay tests only:
+cargo test -p plexspaces-outbox --lib -- partitioned_relay
+
+# Hash router tests only:
+cargo test -p plexspaces-outbox --lib -- hash_router
+```
+
+Tests cover: all-messages-delivered (4 partitions × 100 msgs), status aggregation, same-target-same-partition ordering, zero-partitions panic, and failure-isolation (RESOURCE_EXHAUSTED in one partition doesn't affect others).
+
+**Implementation**: `crates/outbox/src/hash_router.rs` (FNV-1a routing), `crates/outbox/src/partitioned_relay.rs` (relay orchestration).
+
+### Shared Retry Utility
+
+All retry/backoff computation across PlexSpaces uses a single `RetryPolicy` proto type (consolidated from 6 prior duplicate types) and a shared Rust implementation in `crates/common/src/retry.rs`:
+
+- `compute_backoff(policy, attempt, rng)` — exponential backoff with configurable jitter ratio
+- `compute_backoff_no_jitter(policy, attempt)` — deterministic variant
+- `should_retry(policy, attempt, error)` — checks max attempts and retryable error filters
+
+The `jitter_ratio` field scales the random window: ratio=0.3 means the result falls in `[0.7*cap, cap]`; ratio=1.0 means full jitter `[0, cap]`.
+
+### Conflict Resolution (OVERWRITE / Last-Write-Wins)
+
+When a message arrives with an `idempotency_key` that matches an already-queued (unprocessed) message, the `ConflictResolutionPolicy` field on `Message` determines behavior:
+
+| Policy | Wire value | Behavior |
+|--------|-----------|----------|
+| `KEEP_ORIGINAL` | 0 (default) | Drop the incoming duplicate; the original queued message is preserved. Use for at-most-once delivery (payments, orders). |
+| `OVERWRITE` | 1 | Replace the queued message with the incoming one (Last-Write-Wins). Use for transient state updates (heartbeats, status signals). |
+
+**Sequence number gating**: If both the queued and incoming messages carry a `sequence_number` header, OVERWRITE only replaces when the incoming sequence is strictly greater. This prevents out-of-order delivery from rolling back newer state.
+
+**Implementation layers**:
+- **In-memory mailbox** (`crates/mailbox/src/mod.rs`): scans the internal queue (VecDeque), removes the matching entry, then enqueues the new message. Sequence number comparison happens before removal.
+- **SQLite channel** (`crates/channel/src/sqlite_backend.rs`): `UPDATE ... SET payload=?, timestamp=? WHERE idempotency_key=? AND acked=0`. If `rows_affected > 0`, the existing row is updated in place (preserving queue position). Otherwise falls through to INSERT.
+- **Postgres channel** (`crates/channel/src/postgres_backend.rs`): same UPDATE-before-INSERT pattern with `SMALLINT` conflict_resolution column.
+
+**Proto definition**: `ConflictResolutionPolicy` enum in `proto/plexspaces/v1/common/idempotency.proto`.
+
+### BackpressureStrategy (Consolidated)
+
+The `BackpressureStrategy` enum is defined once in `proto/plexspaces/v1/common.proto` and used by both mailbox and channel configurations. Three strategies:
+
+| Strategy | Wire value | Behavior |
+|----------|-----------|----------|
+| `ERROR` | 1 (default for bounded) | Return error immediately to the sender. No deadlock risk. |
+| `DROP_OLDEST` | 2 | Drop the oldest message in the buffer to make room. |
+| `DROP_NEWEST` | 3 | Drop the incoming message (silently accept but discard). |
+
+This replaced the prior duplicate definitions in `mailbox.proto` and `channel.proto`. The old `BLOCK` strategy (sender waits for space) was removed to eliminate deadlock scenarios in actor-to-actor messaging.
+
 ## Observability
 
 ### Metrics
@@ -3083,7 +3319,7 @@ pub trait ChannelService: Send + Sync {
 
 ### Channel Backends
 
-PlexSpaces supports multiple channel backends, each optimized for different use cases:
+PlexSpaces supports multiple channel backends, each optimized for different use cases. The **OutboxRelay** (`crates/outbox/`) uses DB-backed channels (SQLite/Postgres) as durable outbox storage, draining messages at AIMD-controlled concurrency — see [Flow-Controlled Messaging](#flow-controlled-messaging) for details.
 
 #### InMemory Channel
 - **Use Case**: Testing and development
@@ -3392,7 +3628,13 @@ to a namespace accessor in the SDKs (Python: `host.kv.*`, Go: `host.KV().*`, Typ
 
 ¹ Alarm functions are co-located in `host-kv` at the WIT level for implementation simplicity; SDK code uses the `host.alarm` / `host.Alarm()` namespace accessor for a clean API surface.
 
-The Object Registry uses a separate interface: `plexspaces:actor/registry@0.1.0` (`register`, `unregister`, `lookup`, `lookup-by-alias`, `discover`, `heartbeat`).
+Additional standalone interfaces in the same WIT package:
+
+| WIT Interface | Functions |
+|---|---|
+| `channels` | `channel-send`, `channel-send-with-options`, `channel-receive`, `channel-publish`, `channel-subscribe`, `channel-unsubscribe`, `channel-ack`, `channel-nack`, `channel-create`, `channel-delete`, `channel-depth` |
+| `outbox` | `outbox-dispatch`, `outbox-status` |
+| `registry` | `register`, `unregister`, `lookup`, `lookup-by-alias`, `discover`, `heartbeat` |
 
 **Deprecated flat interface**: The original single `interface host` with ~60 methods remains compiled
 in for backward compatibility but is deprecated. New code should use the namespaced interfaces and
@@ -3425,6 +3667,15 @@ WASM components are re-instantiated after each `handle()` call (wasmtime Compone
 | Rust | `sdks/rust/plexspaces-sdk` | cargo (native) | Available | `plexspaces_sdk::object_registry::lookup_actor_by_identity(...)` |
 
 Each SDK exposes `register`, `unregister`, `lookup`, `lookup-by-alias`, `discover`, and `heartbeat` for the Object Registry. The `lookup-by-alias` function implements the Orleans grain directory pattern using alias keys of the form `"{actor_type}:{name}:{namespace}:{tenant_id}"`.
+
+All SDKs also expose the **outbox** (flow-controlled messaging) sub-API:
+
+| Language | Accessor | Dispatch | Status |
+|----------|----------|----------|--------|
+| Python | `host.outbox` | `host.outbox.dispatch(ctx, dispatcher_id, targets, payload, msg_type, key)` | `host.outbox.status(ctx, dispatcher_id)` |
+| TypeScript | `host.outbox` | `host.outbox.dispatch(ctx, id, targets, payload, type, key)` | `host.outbox.status(ctx, id)` |
+| Go | `host.Outbox()` | `host.Outbox().Dispatch(ctx, id, targets, payload, type, key)` | `host.Outbox().Status(ctx, id)` |
+| Rust (native) | `plexspaces_sdk::OutboxRelay` | Direct API — `OutboxRelay`, `ConcurrencyLimiter`, `AdmissionControlFacet` | `RelayStats` |
 
 See [SDK documentation](sdk.md) and [WASM deployment guide](wasm-deployment.md) for details.
 

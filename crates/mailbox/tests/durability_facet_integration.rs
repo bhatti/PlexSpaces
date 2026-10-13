@@ -276,7 +276,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let (mailbox, _receiver) = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
+            let (mailbox, _receiver) = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None, None)
                 .await
                 .unwrap();
             // Create and attach DurabilityFacet
@@ -350,7 +350,7 @@ mod tests {
 
             config.channel_config = Some(channel_config);
 
-            let (mailbox, mut receiver) = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None)
+            let (mailbox, mut receiver) = Mailbox::new(config, "recovery-actor".to_string(), String::new(), String::new(), None, None)
                 .await
                 .unwrap();
             // Recover DurabilityFacet (will replay journal)

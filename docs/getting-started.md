@@ -257,6 +257,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - Use `cast_message()` for fire-and-forget messages (with `tell()`)
 - Always use `RequestContext::new_without_auth()` with tenant/namespace (never `internal()`)
 
+**Common API Pitfalls:**
+- `NodeBuilder::new()` takes exactly **one argument** (the node ID string). There is no `.with_node_id()` method.
+- `build_started().await` returns `Arc<Node>` (not a `Result`) — do not use `?`. Use `build()` only if you need a non-Arc `Node`.
+- `spawn_with_facets()` returns `Result<_, Box<dyn Error + Send + Sync>>`. If using `anyhow`, convert with `.map_err(|e| anyhow::anyhow!("{e}"))`.
+- When calling `.send()` on an `Arc<InMemoryChannel>`, you must `use plexspaces_channel::Channel` to bring the `Channel` trait into scope.
+- `ChannelResult<T>` wraps `ChannelError` (implements `std::error::Error`). For `anyhow`, use `.map_err(|e| anyhow::anyhow!("{e}"))`.
+
 ### Python Actor (WASM with SDK)
 
 The [PlexSpaces Python SDK](sdk.md) provides decorator-based actor development with minimal boilerplate:

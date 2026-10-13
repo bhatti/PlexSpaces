@@ -138,6 +138,7 @@ import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common/idempotency.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
@@ -318,28 +319,72 @@ message ErrorDetail {
   map<string, google.protobuf.Any> details = 3;
 }
 
-// Retry policy configuration
+// Canonical retry policy used across PlexSpaces for all retry/backoff configuration.
 message RetryPolicy {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
       title: "Retry Policy"
-      description: "Configuration for retry behavior"
+      description: "Exponential backoff retry policy with optional jitter and error filtering."
     }
   };
 
+  // Max attempts including the first try (1 = no retry, 0/unset = treated as 1 at runtime).
   uint32 max_attempts = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).uint32 = {
-      gte: 1
-      lte: 100
-    }
+    (buf.validate.field).uint32 = {lte: 1000}
   ];
+
+  // Exponential backoff multiplier (e.g., 2.0 for doubling). Default 2.0 when unset.
   double backoff_multiplier = 2 [(buf.validate.field).double = {
     gte: 1.0
-    lte: 10.0
+    lte: 64.0
   }];
-  google.protobuf.Duration initial_delay = 3 [(buf.validate.field).duration.gte.nanos = 1000000]; // >= 1ms
-  google.protobuf.Duration max_delay = 4 [(buf.validate.field).duration.lte.seconds = 3600]; // <= 1 hour
+
+  // Initial delay before first retry (e.g. 100ms). Default 100ms when unset.
+  google.protobuf.Duration initial_delay = 3;
+
+  // Maximum delay cap (e.g. 30s). Default 30s when unset.
+  google.protobuf.Duration max_delay = 4;
+
+  // Jitter ratio [0.0, 1.0] — full jitter on the backoff cap (AWS-style).
+  // 0 = no jitter, 1 = full jitter. Default 0.0 when unset.
+  double jitter_ratio = 5 [
+    (buf.validate.field).double = {
+      gte: 0.0
+      lte: 1.0
+    }
+  ];
+
+  // Error types/codes to retry (empty = retry all retriable errors).
+  // For gRPC: status code names (e.g. "UNAVAILABLE", "RESOURCE_EXHAUSTED").
+  // For HTTP: status codes as strings (e.g. "429", "503").
+  // For actor: error type names.
+  repeated string retryable_errors = 6 [
+    (buf.validate.field).repeated = {
+      max_items: 100
+      items: {
+        string: {max_len: 256}
+      }
+    }
+  ];
+
+  // Allow retry of non-idempotent operations (default false).
+  // When false, only idempotent operations are retried.
+  bool allow_non_idempotent = 7;
+}
+
+// Backpressure strategy when a bounded buffer (mailbox, channel) is full.
+// Canonical definition — used by both mailbox and channel configurations.
+enum BackpressureStrategy {
+  BACKPRESSURE_STRATEGY_UNSPECIFIED = 0;
+
+  // Return error immediately to the sender
+  BACKPRESSURE_STRATEGY_ERROR = 1;
+
+  // Drop the oldest message in the buffer to make room
+  BACKPRESSURE_STRATEGY_DROP_OLDEST = 2;
+
+  // Drop the incoming message (silently accept but discard)
+  BACKPRESSURE_STRATEGY_DROP_NEWEST = 3;
 }
 
 // Quality of Service levels
@@ -941,6 +986,15 @@ message Message {
   // HTTP method for HTTP-based requests (optional)
   // Example: "GET", "POST", "PUT", "DELETE"
   string uri_method = 17 [(buf.validate.field).string.max_len = 16];
+
+  // ==================== CONFLICT RESOLUTION ====================
+
+  // Policy applied when this message's idempotency_key matches a queued message.
+  // KEEP_ORIGINAL (0, default): drop the incoming duplicate; original stays.
+  // OVERWRITE (1): remove the queued copy and enqueue this one (Last-Write-Wins).
+  // Only meaningful when idempotency_key is non-empty.
+  plexspaces.common.v1.ConflictResolutionPolicy conflict_resolution = 18
+      [(google.api.field_behavior) = OPTIONAL];
 }
 
 // RequestContext error codes

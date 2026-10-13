@@ -15,7 +15,7 @@ plexspaces-service-traits = { path = "../service-traits" }
 plexspaces-proto = { workspace = true }
 plexspaces-mailbox = { workspace = true }
 plexspaces-tuplespace = { path = "../tuplespace" }
-plexspaces-channel = { workspace = true }
+plexspaces-channel = { workspace = true, features = ["sqlite-backend", "repository"] }
 plexspaces-common = { path = "../common" }
 plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }
 plexspaces-locks = { workspace = true, features = ["sqlite-backend"] }

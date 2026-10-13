@@ -58,6 +58,21 @@ pub trait MessageSender: Send + Sync {
         message: &[u8],
     ) -> Result<(), String>;
 
+    /// Extended send that carries idempotency metadata to the target mailbox.
+    /// Default delegates to `send_message` (drops meta) — override to propagate.
+    async fn send_message_ex(
+        &self,
+        from: &str,
+        to: &str,
+        message_type: &str,
+        message: &[u8],
+        idempotency_key: &str,
+        conflict_resolution: i32,
+    ) -> Result<(), String> {
+        let _ = (idempotency_key, conflict_resolution);
+        self.send_message(from, to, message_type, message).await
+    }
+
     /// Send a message and wait for reply (request-reply pattern)
     ///
     /// ## Arguments
@@ -574,6 +589,32 @@ impl HostFunctions {
             sender.send_message(from, to, message_type, message).await
         } else {
             // Fallback: log message (for development/testing)
+            tracing::warn!(
+                from = from,
+                to = to,
+                message_type = message_type,
+                message_len = message.len(),
+                "Message sender not configured, message not delivered"
+            );
+            Ok(())
+        }
+    }
+
+    /// Extended send that propagates idempotency_key and conflict_resolution to the Message.
+    pub async fn send_message_ex(
+        &self,
+        from: &str,
+        to: &str,
+        message_type: &str,
+        message: &[u8],
+        idempotency_key: &str,
+        conflict_resolution: i32,
+    ) -> Result<(), String> {
+        if let Some(sender) = &self.message_sender {
+            sender
+                .send_message_ex(from, to, message_type, message, idempotency_key, conflict_resolution)
+                .await
+        } else {
             tracing::warn!(
                 from = from,
                 to = to,

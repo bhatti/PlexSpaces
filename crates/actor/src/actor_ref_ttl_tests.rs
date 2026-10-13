@@ -76,7 +76,7 @@ mod tests {
 
     async fn create_test_mailbox() -> Arc<Mailbox> {
         let (mailbox, _receiver) =
-            Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
+            Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string(), String::new(), String::new(), None, None)
                 .await
                 .expect("Failed to create mailbox");
         Arc::new(mailbox)

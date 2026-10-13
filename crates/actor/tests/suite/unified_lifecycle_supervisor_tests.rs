@@ -130,7 +130,7 @@ async fn test_supervisor_start_child_with_facets() {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
                 let mailbox_pair = Mailbox::new(
-                    MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
+                    MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None, None,
                 )
                 .await
                 .unwrap();
@@ -198,7 +198,7 @@ async fn test_supervisor_restart_preserves_facets() {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
                     let mailbox_pair = Mailbox::new(
-                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None,
+                        MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()), String::new(), String::new(), None, None,
                     )
                     .await
                     .unwrap();
@@ -318,6 +318,7 @@ async fn test_supervisor_restart_sets_self_ref_before_init() {
                         format!("mailbox-{}", actor_id_string),
                         String::new(),
                         String::new(),
+                        None,
                         None,
                     )
                     .await

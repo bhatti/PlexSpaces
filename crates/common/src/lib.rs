@@ -34,6 +34,7 @@ pub mod release_config;
 pub mod release_parser;
 pub mod request_context;
 pub mod request_context_ext;
+pub mod retry;
 pub mod security_validator;
 pub mod service_name_ext;
 pub mod storage_config;
@@ -54,6 +55,10 @@ pub use node_address::{
 pub use plexspaces_proto::config::v1::{AwsConfig, DlqConfig, DynamoDbConfig, SqsConfig};
 pub use plexspaces_proto::services::prv::ServiceName;
 pub use release_config::create_default_release_config;
+pub use retry::{
+    compute_backoff, compute_backoff_no_jitter, default_retry_policy, ms_to_proto_duration,
+    proto_duration_to_ms, should_retry,
+};
 pub use release_parser::{Release, ReleaseError};
 pub use request_context::{RequestContext, RequestContextError, AUTH_REQUIRED_HINT};
 pub use request_context_ext::RequestContextExt;

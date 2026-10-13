@@ -748,6 +748,30 @@ func hostChannelDepth(ctx, channelName string) string {
 }
 
 // ========================================================================
+// Outbox (flow-controlled messaging)
+// ========================================================================
+
+func hostOutboxDispatch(ctx, dispatcherID string, targets []string, payloadJSON, messageType, idempotencyKey, conflictResolution string) string {
+	accepted := len(targets)
+	out, _ := json.Marshal(map[string]any{
+		"accepted": accepted,
+		"rejected": 0,
+	})
+	return string(out)
+}
+
+func hostOutboxStatus(ctx, dispatcherID string) string {
+	out, _ := json.Marshal(map[string]any{
+		"dispatcher_id": dispatcherID,
+		"pending":       0,
+		"in_flight":     0,
+		"delivered":     0,
+		"failed":        0,
+	})
+	return string(out)
+}
+
+// ========================================================================
 // Object Registry stubs
 // ========================================================================
 

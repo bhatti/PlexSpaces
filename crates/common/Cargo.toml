@@ -30,6 +30,8 @@ toml = { workspace = true }
 serde = { workspace = true }
 # Tracing for logging
 tracing = { workspace = true }
+# Random number generation for retry jitter
+rand = "0.8"
 # Home directory access for base_dir default
 dirs = "5.0"
 

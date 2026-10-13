@@ -288,7 +288,7 @@ impl InterceptorChain {
                         Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Retry(cfg)) => {
                             cfg.clone()
                         }
-                        _ => plexspaces_proto::grpc::v1::RetryMiddlewareConfig::default(),
+                        _ => plexspaces_proto::common::v1::RetryPolicy::default(),
                     };
                     Arc::new(crate::retry::RetryInterceptor::new(retry_config))
                 }

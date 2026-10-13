@@ -37,7 +37,7 @@ pub struct MailboxConfig {
     #[prost(uint32, tag="3")]
     pub max_capacity: u32,
     /// Backpressure strategy when queue is full
-    #[prost(enumeration="BackpressureStrategy", tag="4")]
+    #[prost(enumeration="super::super::common::v1::BackpressureStrategy", tag="4")]
     pub backpressure_strategy: i32,
     /// How long (ms) to suggest callers wait before retrying after RESOURCE_EXHAUSTED.
     /// Sent in the `retry-after-ms` gRPC trailing metadata field.
@@ -261,46 +261,6 @@ impl MessagePriority {
             "HIGH" => Some(Self::High),
             "HIGHEST" => Some(Self::Highest),
             "SYSTEM" => Some(Self::System),
-            _ => None,
-        }
-    }
-}
-/// Backpressure strategy when mailbox is full
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum BackpressureStrategy {
-    BackpressureStrategyUnspecified = 0,
-    /// Block sender until space is available
-    Block = 1,
-    /// Drop oldest message in queue
-    DropOldest = 2,
-    /// Drop newest message (reject)
-    DropNewest = 3,
-    /// Return error to sender
-    Error = 4,
-}
-impl BackpressureStrategy {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            BackpressureStrategy::BackpressureStrategyUnspecified => "BACKPRESSURE_STRATEGY_UNSPECIFIED",
-            BackpressureStrategy::Block => "BLOCK",
-            BackpressureStrategy::DropOldest => "DROP_OLDEST",
-            BackpressureStrategy::DropNewest => "DROP_NEWEST",
-            BackpressureStrategy::Error => "ERROR",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "BACKPRESSURE_STRATEGY_UNSPECIFIED" => Some(Self::BackpressureStrategyUnspecified),
-            "BLOCK" => Some(Self::Block),
-            "DROP_OLDEST" => Some(Self::DropOldest),
-            "DROP_NEWEST" => Some(Self::DropNewest),
-            "ERROR" => Some(Self::Error),
             _ => None,
         }
     }

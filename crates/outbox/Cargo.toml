@@ -1,0 +1,33 @@
+[package]
+name = "plexspaces-outbox"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Flow-controlled messaging: AIMD concurrency limiter, outbox relay, admission control facet, and dispatcher actor"
+
+[dependencies]
+plexspaces-proto = { path = "../proto" }
+plexspaces-common = { path = "../common" }
+plexspaces-facet = { path = "../facet" }
+plexspaces-channel = { path = "../channel" }
+
+async-trait = { workspace = true }
+futures = { workspace = true }
+prost = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+metrics = { workspace = true }
+serde_json = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+rand = { workspace = true }
+
+[lib]
+name = "plexspaces_outbox"
+path = "src/lib.rs"

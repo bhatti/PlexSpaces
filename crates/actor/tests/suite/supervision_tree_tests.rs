@@ -87,7 +87,7 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
                     .build()
                     .expect("Failed to create runtime for child factory");
                 let mailbox = rt
-                    .block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone(), String::new(), String::new(), None))
+                    .block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone(), String::new(), String::new(), None, None))
                     .expect("Failed to create mailbox in factory");
                 rt.block_on(
                     super::test_actor_helpers::actor_with_default_service_locator(

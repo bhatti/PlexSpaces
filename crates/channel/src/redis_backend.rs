@@ -281,6 +281,10 @@ impl RedisChannel {
                 .unwrap_or(0),
             ttl: None,
             idempotency_key: fields.get("idempotency_key").cloned().unwrap_or_default(),
+            conflict_resolution: fields
+                .get("conflict_resolution")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             uri_path: fields.get("uri_path").cloned().unwrap_or_default(),
             uri_method: fields.get("uri_method").cloned().unwrap_or_default(),
         }
@@ -525,11 +529,7 @@ impl Channel for RedisChannel {
         let mut conn = self.get_connection().await?;
 
         // Get retry/DLQ config from channel config
-        let max_retries = if self.config.max_retries > 0 {
-            self.config.max_retries
-        } else {
-            3 // Default: 3 retries
-        };
+        let max_retries = crate::channel::max_retries_from_config(&self.config);
         let dlq_enabled = self.config.dlq_enabled;
 
         // Read message to get delivery_count from fields

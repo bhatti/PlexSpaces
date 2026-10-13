@@ -290,11 +290,7 @@ impl Channel for MockChannel {
 
     async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
         // Get retry/DLQ config
-        let max_retries = if self.config.max_retries > 0 {
-            self.config.max_retries
-        } else {
-            3 // Default: 3 retries
-        };
+        let max_retries = crate::channel::max_retries_from_config(&self.config);
         let dlq_enabled = self.config.dlq_enabled;
 
         // Get delivery count

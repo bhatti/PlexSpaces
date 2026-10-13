@@ -85,6 +85,8 @@ pub mod workflow_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Create workflow definition
+*/
         pub async fn create_definition(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateDefinitionRequest>,
@@ -179,6 +181,8 @@ pub mod workflow_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Update workflow definition
+*/
         pub async fn update_definition(
             &mut self,
             request: impl tonic::IntoRequest<super::UpdateDefinitionRequest>,
@@ -209,6 +213,8 @@ pub mod workflow_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Delete workflow definition
+*/
         pub async fn delete_definition(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteDefinitionRequest>,
@@ -458,6 +464,8 @@ pub mod workflow_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with WorkflowServiceServer.
     #[async_trait]
     pub trait WorkflowService: Send + Sync + 'static {
+        /** Create workflow definition
+*/
         async fn create_definition(
             &self,
             request: tonic::Request<super::CreateDefinitionRequest>,
@@ -483,6 +491,8 @@ pub mod workflow_service_server {
             tonic::Response<super::ListDefinitionsResponse>,
             tonic::Status,
         >;
+        /** Update workflow definition
+*/
         async fn update_definition(
             &self,
             request: tonic::Request<super::UpdateDefinitionRequest>,
@@ -490,6 +500,8 @@ pub mod workflow_service_server {
             tonic::Response<super::UpdateDefinitionResponse>,
             tonic::Status,
         >;
+        /** Delete workflow definition
+*/
         async fn delete_definition(
             &self,
             request: tonic::Request<super::DeleteDefinitionRequest>,

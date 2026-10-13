@@ -232,6 +232,7 @@ pub mod instance;
 pub mod instance_pool;
 pub mod memory;
 pub mod module_cache;
+pub mod outbox_host;
 pub mod resource_limits;
 pub mod runtime;
 pub mod simple_component_host;

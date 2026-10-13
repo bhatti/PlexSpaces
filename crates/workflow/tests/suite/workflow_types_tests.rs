@@ -2093,12 +2093,13 @@ async fn test_step_retry_on_failure() -> Result<(), Box<dyn std::error::Error>> 
     let storage = WorkflowStorage::new_in_memory().await?;
     let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
-    let retry_config = RetryConfig {
+    let retry_config = RetryPolicy {
         max_attempts: 3,
-        initial_interval_ms: 10,
-        backoff_rate: 2.0,
-        max_interval_ms: 1000,
+        backoff_multiplier: 2.0,
+        initial_delay: Some(prost_types::Duration { seconds: 0, nanos: 10_000_000 }),
+        max_delay: Some(prost_types::Duration { seconds: 1, nanos: 0 }),
         retryable_errors: vec![],
+        ..Default::default()
     };
 
     let definition = make_workflow_definition(

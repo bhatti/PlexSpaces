@@ -354,11 +354,7 @@ impl Channel for NatsChannel {
         use crate::observability::{backend_name, record_channel_dlq, record_channel_nack};
 
         // Get retry/DLQ config from channel config
-        let _max_retries = if self.config.max_retries > 0 {
-            self.config.max_retries
-        } else {
-            3 // Default: 3 retries
-        };
+        let _max_retries = crate::channel::max_retries_from_config(&self.config);
         let dlq_enabled = self.config.dlq_enabled;
         let backend = backend_name(self.config.provider);
 

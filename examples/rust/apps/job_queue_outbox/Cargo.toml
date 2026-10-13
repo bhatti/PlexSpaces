@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Job Queue Outbox (Rust WASM)
+
+[workspace]
+
+[package]
+name = "job-queue-outbox-wasm"
+version = "1.0.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Job Queue Outbox WASM actor — flow-controlled dispatch via outbox pattern"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.51.0"
+plexspaces-proto = { path = "../../../../crates/proto", default-features = false }
+prost = "0.13"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

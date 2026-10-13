@@ -33,6 +33,32 @@ class IdempotencyBackend(betterproto.Enum):
     """PostgreSQL — durable, multi-node."""
 
 
+class ConflictResolutionPolicy(betterproto.Enum):
+    """
+    Conflict resolution behavior when a message arrives whose idempotency_key
+     matches a message already queued but not yet processed.
+
+     Industry analogues:
+       KEEP_ORIGINAL — at-most-once; original wins (payments, orders, any operation
+                       where re-applying the newer version could cause double-effects)
+       OVERWRITE     — Last-Write-Wins; newer message replaces the queued one
+                       (heartbeats, status updates, any transient "current state" signal)
+
+     If headers["sequence_number"] is present on both messages, OVERWRITE only
+     replaces the queued message when the incoming sequence_number is strictly greater.
+    """
+
+    KEEP_ORIGINAL = 0
+    """
+    Drop the incoming duplicate; the original queued message is preserved. (default)
+    """
+
+    OVERWRITE = 1
+    """
+    Remove the queued message and enqueue the incoming one (Last-Write-Wins).
+    """
+
+
 @dataclass(eq=False, repr=False)
 class IdempotencyConfig(betterproto.Message):
     """

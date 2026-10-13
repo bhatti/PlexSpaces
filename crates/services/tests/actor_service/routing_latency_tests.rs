@@ -139,11 +139,10 @@ fn print_stats(label: &str, samples: &[Duration]) {
     us.sort_unstable();
     let n = us.len();
     let mean = us.iter().sum::<u128>() / n as u128;
-    let p50 = us[n / 2];
     let p95 = us[(n as f64 * 0.95) as usize];
     let p99 = us[(n as f64 * 0.99) as usize];
     let max = us[n - 1];
-    println!("[latency] {label:<45} n={n:>3}  mean={mean:>5}µs  p50={p50:>5}µs  p95={p95:>5}µs  p99={p99:>5}µs  max={max:>5}µs");
+    println!("[latency] {label:<45} n={n:>3}  mean={mean:>5}µs  p95={p95:>5}µs  p99={p99:>5}µs  max={max:>5}µs");
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -316,6 +315,7 @@ async fn virtual_actor_activation_breakdown() {
                         format!("bench-mailbox-{i}"),
                         "test-tenant".to_string(),
                         ns.to_string(),
+                        None,
                         None,
                     ).await.unwrap();
                 }

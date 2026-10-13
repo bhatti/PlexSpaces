@@ -520,16 +520,26 @@ impl WorkflowExecutor {
     /// ## Formula
     /// backoff = min(initial_backoff * multiplier^(attempt-1), max_backoff)
     /// jittered_backoff = backoff * (1 + random(-jitter, +jitter))
-    fn calculate_backoff(policy: &RetryConfig, attempt: u32) -> Duration {
-        let initial_ms = policy.initial_interval_ms as u128;
+    fn calculate_backoff(policy: &RetryPolicy, attempt: u32) -> Duration {
+        let initial_ms = policy
+            .initial_delay
+            .as_ref()
+            .map(|d| (d.seconds.max(0) as u128) * 1000 + (d.nanos.max(0) as u128) / 1_000_000)
+            .unwrap_or(100);
+        let max_ms = policy
+            .max_delay
+            .as_ref()
+            .map(|d| (d.seconds.max(0) as u128) * 1000 + (d.nanos.max(0) as u128) / 1_000_000)
+            .unwrap_or(30_000);
+        let mult = if policy.backoff_multiplier >= 1.0 {
+            policy.backoff_multiplier
+        } else {
+            2.0
+        };
         let base_backoff = initial_ms
-            .checked_mul(policy.backoff_rate.powi((attempt - 1) as i32) as u128)
-            .unwrap_or(policy.max_interval_ms as u128);
-
-        let capped_backoff = base_backoff.min(policy.max_interval_ms as u128);
-
-        // Apply jitter (for now, no jitter in tests)
-        // In real implementation: jittered = capped * (1.0 + rand(-jitter, +jitter))
+            .checked_mul(mult.powi((attempt - 1) as i32) as u128)
+            .unwrap_or(max_ms);
+        let capped_backoff = base_backoff.min(max_ms);
         Duration::from_millis(capped_backoff as u64)
     }
 
@@ -1511,13 +1521,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_backoff() {
-        // RetryConfig: initial_interval_ms=100, backoff_rate=2.0, max_interval_ms=10000
-        let policy = RetryConfig {
+        let policy = RetryPolicy {
             max_attempts: 5,
-            initial_interval_ms: 100,
-            backoff_rate: 2.0,
-            max_interval_ms: 10000,
+            backoff_multiplier: 2.0,
+            initial_delay: Some(prost_types::Duration { seconds: 0, nanos: 100_000_000 }),
+            max_delay: Some(prost_types::Duration { seconds: 10, nanos: 0 }),
             retryable_errors: vec![],
+            ..Default::default()
         };
 
         // First retry: 100ms * 2^0 = 100ms
@@ -1539,12 +1549,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_backoff_capped() {
-        let policy = RetryConfig {
+        let policy = RetryPolicy {
             max_attempts: 10,
-            initial_interval_ms: 1000,
-            backoff_rate: 2.0,
-            max_interval_ms: 5000,
+            backoff_multiplier: 2.0,
+            initial_delay: Some(prost_types::Duration { seconds: 1, nanos: 0 }),
+            max_delay: Some(prost_types::Duration { seconds: 5, nanos: 0 }),
             retryable_errors: vec![],
+            ..Default::default()
         };
 
         // Should cap at max_interval_ms (5s)

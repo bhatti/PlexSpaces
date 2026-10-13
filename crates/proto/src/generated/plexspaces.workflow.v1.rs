@@ -27,7 +27,7 @@ pub struct WorkflowDefinition {
     pub default_timeout: ::core::option::Option<::prost_types::Duration>,
     /// Default retry policy for steps
     #[prost(message, optional, tag="6")]
-    pub default_retry: ::core::option::Option<RetryConfig>,
+    pub default_retry: ::core::option::Option<super::super::common::v1::RetryPolicy>,
     /// User-defined labels
     #[prost(map="string, string", tag="7")]
     pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
@@ -65,7 +65,7 @@ pub struct Step {
     pub timeout: ::core::option::Option<::prost_types::Duration>,
     /// Retry configuration
     #[prost(message, optional, tag="6")]
-    pub retry: ::core::option::Option<RetryConfig>,
+    pub retry: ::core::option::Option<super::super::common::v1::RetryPolicy>,
     /// Step ID to run on error (compensation/saga)
     #[prost(string, tag="7")]
     pub on_error: ::prost::alloc::string::String,
@@ -73,40 +73,8 @@ pub struct Step {
     #[prost(message, optional, tag="8")]
     pub config: ::core::option::Option<::prost_types::Struct>,
 }
-/// Retry configuration
-///
-/// Exponential backoff retry policy with error type matching.
-/// When fields are unset (proto3 default: 0 for numbers, empty for repeated), runtime defaults apply:
-/// - max_attempts: 1 (single attempt, no retries)
-/// - initial_interval_ms: 100
-/// - backoff_rate: 2.0 (exponential: delay = initial * rate^(attempt-1) capped at max_interval_ms)
-/// - max_interval_ms: 30000
-/// Runtime applies full jitter to delay (multiply by random in (0, 1]) before sleeping between retries.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RetryConfig {
-    /// Maximum retry attempts (1 = single attempt, no retries; unset/0 treated as 1 at runtime)
-    ///
-    /// 0 or 1–1000
-    #[prost(uint32, tag="1")]
-    pub max_attempts: u32,
-    /// Initial retry interval (milliseconds). Default 100 when unset.
-    ///
-    /// 0 or 1–300000
-    #[prost(uint32, tag="2")]
-    pub initial_interval_ms: u32,
-    /// Exponential backoff rate (e.g., 2.0 for doubling). Default 2.0 when unset.
-    #[prost(double, tag="3")]
-    pub backoff_rate: f64,
-    /// Maximum retry interval (milliseconds). Default 30000 when unset.
-    ///
-    /// 0 or 1–3600000
-    #[prost(uint32, tag="4")]
-    pub max_interval_ms: u32,
-    /// Error types to retry (empty = retry all)
-    #[prost(string, repeated, tag="5")]
-    pub retryable_errors: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
+// Retry configuration
+//
 // ==================== Workflow Execution ====================
 
 /// Workflow execution (metadata)
@@ -608,6 +576,141 @@ impl WorkflowError {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

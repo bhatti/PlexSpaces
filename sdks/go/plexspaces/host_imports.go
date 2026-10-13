@@ -750,6 +750,94 @@ func hostChannelDepth(ctx, channelName string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
+// ========================================================================
+// Outbox (flow-controlled messaging)
+// ========================================================================
+
+// wasmStrHdr mirrors the Go string header layout in TinyGo's runtime.
+// Used to extract the data pointer and length without reflection or fmt.
+type wasmStrHdr struct {
+	Data unsafe.Pointer
+	Len  int
+}
+
+// wasmStrPtr returns the data pointer of a Go string as unsafe.Pointer.
+// Returns nil for empty strings (canonical ABI accepts (nil, 0) for empty list).
+func wasmStrPtr(s string) unsafe.Pointer {
+	if len(s) == 0 {
+		return unsafe.Pointer(uintptr(0))
+	}
+	return (*wasmStrHdr)(unsafe.Pointer(&s)).Data
+}
+
+// buildWasmStringList builds the canonical ABI memory layout for list<string>:
+// n*8 bytes where each 8-byte slot is (ptr: u32 LE, len: u32 LE) for one string.
+// Returns (pointer to element array, count of strings, backing buffer).
+// The caller must keep the returned []byte alive for the duration of the host call.
+func buildWasmStringList(strs []string) (unsafe.Pointer, uint32, []byte) {
+	n := len(strs)
+	if n == 0 {
+		return unsafe.Pointer(uintptr(0)), 0, nil
+	}
+	buf := make([]byte, n*8)
+	for i, s := range strs {
+		hdr := (*wasmStrHdr)(unsafe.Pointer(&s))
+		ptr32 := uint32(uintptr(hdr.Data))
+		len32 := uint32(hdr.Len)
+		buf[i*8+0] = byte(ptr32)
+		buf[i*8+1] = byte(ptr32 >> 8)
+		buf[i*8+2] = byte(ptr32 >> 16)
+		buf[i*8+3] = byte(ptr32 >> 24)
+		buf[i*8+4] = byte(len32)
+		buf[i*8+5] = byte(len32 >> 8)
+		buf[i*8+6] = byte(len32 >> 16)
+		buf[i*8+7] = byte(len32 >> 24)
+	}
+	return unsafe.Pointer(&buf[0]), uint32(n), buf
+}
+
+// outbox-dispatch takes target-actor-ids: list<string>.
+// Canonical ABI for list<string> input: (elemArrayPtr: i32, elemCount: i32).
+// Each element in the array is (strPtr: i32, strLen: i32) = 8 bytes.
+// We cannot use a Go string here — a string's len is byte-count, but list<string>
+// expects element-count. We must use (unsafe.Pointer, uint32) explicitly.
+//
+//go:wasmimport plexspaces:actor/outbox@0.1.0 outbox-dispatch
+func rawHostOutboxDispatch(
+	ctxPtr unsafe.Pointer, ctxLen uint32,
+	dispatcherIDPtr unsafe.Pointer, dispatcherIDLen uint32,
+	targetIDsPtr unsafe.Pointer, targetIDsLen uint32,
+	payloadPtr unsafe.Pointer, payloadLen uint32,
+	messageTypePtr unsafe.Pointer, messageTypeLen uint32,
+	idempotencyKeyPtr unsafe.Pointer, idempotencyKeyLen uint32,
+	conflictResolutionPtr unsafe.Pointer, conflictResolutionLen uint32,
+	retptr unsafe.Pointer,
+)
+
+func hostOutboxDispatch(ctx, dispatcherID string, targets []string, payloadJSON, messageType, idempotencyKey, conflictResolution string) string {
+	targetsPtr, targetsLen, elemBuf := buildWasmStringList(targets)
+	rawHostOutboxDispatch(
+		wasmStrPtr(ctx), uint32(len(ctx)),
+		wasmStrPtr(dispatcherID), uint32(len(dispatcherID)),
+		targetsPtr, targetsLen,
+		wasmStrPtr(payloadJSON), uint32(len(payloadJSON)),
+		wasmStrPtr(messageType), uint32(len(messageType)),
+		wasmStrPtr(idempotencyKey), uint32(len(idempotencyKey)),
+		wasmStrPtr(conflictResolution), uint32(len(conflictResolution)),
+		unsafe.Pointer(&retArea),
+	)
+	_ = elemBuf // keep backing buffer alive for the duration of the host call
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/outbox@0.1.0 outbox-status
+func rawHostOutboxStatus(ctx, dispatcherID string, retptr unsafe.Pointer)
+
+func hostOutboxStatus(ctx, dispatcherID string) string {
+	rawHostOutboxStatus(ctx, dispatcherID, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
 //go:wasmimport plexspaces:actor/registry@0.1.0 register
 func rawHostRegistryRegister(request string, retptr unsafe.Pointer)
 

@@ -25,23 +25,19 @@
 //! 3. A node registered in a cluster namespace is visible in that namespace
 //! 4. A node only sees registrations from its own namespace (cluster isolation)
 
-use plexspaces_actor::{NodeRegistryTrait, ServiceLocator, ServiceLocatorBase};
+use plexspaces_actor::{ServiceLocator, ServiceLocatorBase};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::sleep; // used by cluster/isolation tests
 
-/// Helper: spawn start() in background then poll until the node appears in ObjectRegistry.
+/// Helper: spawn start() in background then poll until the node appears in NodeRegistry.
 ///
-/// The node registers itself in ObjectRegistry inside `start()`, before the gRPC server
-/// begins serving — so the spawned task will always complete registration before blocking.
-async fn start_node_background(node: Arc<Node>) {
-    let n = node.clone();
-    tokio::spawn(async move {
-        let _ = n.start().await;
-    });
-
+/// NodeRegistry is written by start() directly (before any timer fires), so this works
+/// with both real time and paused tokio time.  ObjectRegistry is only written by the
+/// heartbeat loop — do NOT poll that here.
+async fn wait_for_node_registration(node: &Arc<Node>) {
     let node_id = node.id().as_str().to_string();
     let cluster_name = {
         let c = node.config().cluster_name.clone();
@@ -51,14 +47,12 @@ async fn start_node_background(node: Arc<Node>) {
             Some(c)
         }
     };
-
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
-    loop {
-        sleep(Duration::from_millis(50)).await;
-        if tokio::time::Instant::now() >= deadline {
-            panic!("Node {} did not register within 8s", node_id);
-        }
-        let Some(obj_reg) = node.service_locator().get_object_registry().await else {
+    // Yield up to 2000 times to give the spawned start() task and its
+    // spawn_blocking (SQLite init) rounds to complete and write to NodeRegistry.
+    // 2000 is generous; start() writes NodeRegistry after ~10-20 await points.
+    for _ in 0..2000 {
+        tokio::task::yield_now().await;
+        let Some(node_reg) = node.service_locator().get_node_registry().await else {
             continue;
         };
         let ctx = if let Some(ref cluster) = cluster_name {
@@ -70,21 +64,68 @@ async fn start_node_background(node: Arc<Node>) {
                 .request_context_for_system_operations()
                 .await
         };
-        if obj_reg
-            .lookup_full(&ctx, ObjectType::ObjectTypeNode, &node_id)
-            .await
-            .ok()
-            .flatten()
-            .is_some()
-        {
-            break;
+        if let Ok((nodes, _)) = node_reg.list_nodes(&ctx, None, 100, "").await {
+            if nodes.iter().any(|n| n.node_id == node_id) {
+                return;
+            }
         }
     }
-    // Extra wait to ensure heartbeat has run at least once
-    sleep(Duration::from_millis(150)).await;
+    panic!(
+        "Node {} did not register in NodeRegistry within 2000 yield rounds",
+        node_id
+    );
+}
+
+
+/// Poll ObjectRegistry until the node appears (heartbeat has fired at least once).
+///
+/// The heartbeat loop runs on real tokio time (sleep(heartbeat_interval_ms)).
+/// We poll with yield_now() in a tight loop; real time progresses between scheduler
+/// rounds, so the heartbeat eventually fires without any explicit sleep.
+///
+/// Returns the first ObjectRegistration seen.
+async fn wait_for_first_heartbeat(
+    node: &Arc<Node>,
+    ctx: &plexspaces_actor::RequestContext,
+    node_id: &str,
+) -> plexspaces_proto::object_registry::v1::ObjectRegistration {
+    let object_registry = node
+        .service_locator()
+        .get_object_registry()
+        .await
+        .expect("ObjectRegistry should be available");
+
+    // The heartbeat interval is 100 ms.  We spin with yield_now() for up to 1M
+    // rounds; each round takes 1-10 µs under load so this covers 1-10 s of real
+    // time — far more than the 100 ms heartbeat interval.
+    for _ in 0u64..1_000_000 {
+        tokio::task::yield_now().await;
+        if let Ok(Some(reg)) = object_registry
+            .lookup_full(ctx, ObjectType::ObjectTypeNode, node_id)
+            .await
+        {
+            if reg.last_heartbeat.is_some() {
+                return reg;
+            }
+        }
+    }
+    panic!(
+        "Node {} did not appear in ObjectRegistry with a heartbeat within 1M yield rounds",
+        node_id
+    );
 }
 
 /// Test that a node registers itself and its heartbeat timestamp advances.
+///
+/// Strategy:
+/// 1. Use real time throughout — `build()` and `start()` use sqlx which breaks under
+///    paused tokio time (`max_connections(1)` pool conflicts with `tokio::time::pause`).
+/// 2. Poll NodeRegistry with yield_now() until start() registers the node.
+/// 3. Poll ObjectRegistry with yield_now() until the heartbeat loop writes the entry.
+///    Real tokio time progresses between scheduler rounds, so the 100 ms heartbeat
+///    fires naturally — no sleep needed.
+/// 4. Capture the first heartbeat timestamp, then poll again until a SECOND heartbeat
+///    write appears (timestamp must advance).
 #[tokio::test]
 async fn test_node_registration_and_heartbeat() {
     let node = Arc::new(
@@ -96,28 +137,20 @@ async fn test_node_registration_and_heartbeat() {
             .await,
     );
 
-    start_node_background(node.clone()).await;
+    let n = node.clone();
+    tokio::spawn(async move {
+        let _ = n.start().await;
+    });
 
-    let object_registry = node
-        .service_locator()
-        .get_object_registry()
-        .await
-        .expect("ObjectRegistry should be available");
+    // Wait for NodeRegistry registration (start() writes this before any timer fires).
+    wait_for_node_registration(&node).await;
 
     let ctx = node
         .service_locator()
         .request_context_for_system_operations()
         .await;
 
-    let registration = object_registry
-        .lookup_full(&ctx, ObjectType::ObjectTypeNode, "test-node-1")
-        .await
-        .expect("lookup should not error")
-        .expect("node should be registered");
-
-    assert_eq!(registration.object_id, "test-node-1");
-    assert_eq!(registration.object_type, ObjectType::ObjectTypeNode as i32);
-
+    // Verify NodeRegistry
     let node_registry = node
         .service_locator()
         .get_node_registry()
@@ -131,47 +164,45 @@ async fn test_node_registration_and_heartbeat() {
         "node should appear in NodeRegistry list"
     );
 
-    let initial_heartbeat = registration.last_heartbeat.clone();
+    // Wait for the heartbeat loop to fire and write into ObjectRegistry.
+    // yield_now() lets real tokio time advance enough for the 100 ms heartbeat to run.
+    let first = wait_for_first_heartbeat(&node, &ctx, "test-node-1").await;
+    assert_eq!(first.object_id, "test-node-1");
+    assert_eq!(first.object_type, ObjectType::ObjectTypeNode as i32);
+    let initial_heartbeat = first.last_heartbeat.clone();
 
-    // Poll until heartbeat advances (heartbeat_interval_ms=100; allow up to 5s under load)
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let updated = loop {
-        sleep(Duration::from_millis(50)).await;
-        let reg = object_registry
+    // Wait for a SECOND heartbeat: poll until the timestamp is strictly later.
+    let object_registry = node
+        .service_locator()
+        .get_object_registry()
+        .await
+        .expect("ObjectRegistry should be available");
+
+    let mut advanced = false;
+    for _ in 0u64..1_000_000 {
+        tokio::task::yield_now().await;
+        if let Ok(Some(updated)) = object_registry
             .lookup_full(&ctx, ObjectType::ObjectTypeNode, "test-node-1")
             .await
-            .expect("lookup should not error")
-            .expect("node should still be registered");
-        let advanced = match (&initial_heartbeat, &reg.last_heartbeat) {
-            (Some(init), Some(after)) => {
-                after.seconds > init.seconds
-                    || (after.seconds == init.seconds && after.nanos > init.nanos)
+        {
+            let newer = match (&initial_heartbeat, &updated.last_heartbeat) {
+                (Some(init), Some(after)) => {
+                    after.seconds > init.seconds
+                        || (after.seconds == init.seconds && after.nanos > init.nanos)
+                }
+                _ => false,
+            };
+            if newer {
+                advanced = true;
+                break;
             }
-            (None, Some(_)) => true,
-            _ => false,
-        };
-        if advanced {
-            break reg;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "heartbeat timestamp did not advance within 5s"
-        );
-    };
-
-    assert!(
-        updated.last_heartbeat.is_some(),
-        "heartbeat timestamp should be set"
-    );
-    if let (Some(initial), Some(after)) = (initial_heartbeat, &updated.last_heartbeat) {
-        assert!(
-            after.seconds > initial.seconds
-                || (after.seconds == initial.seconds && after.nanos > initial.nanos),
-            "heartbeat timestamp should advance: initial={:?} after={:?}",
-            initial,
-            after
-        );
     }
+    assert!(
+        advanced,
+        "heartbeat timestamp should advance beyond initial={:?}",
+        initial_heartbeat
+    );
 
     node.shutdown(Duration::from_secs(5))
         .await

@@ -134,6 +134,7 @@ import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "plexspaces/v1/mailbox/mailbox.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/supervision/supervision;plexspaces_supervision_v1";
@@ -225,13 +226,6 @@ enum RestartPolicy {
   RESTART_POLICY_EXPONENTIAL_BACKOFF = 4;
 }
 
-// Configuration for exponential backoff restart policy
-message ExponentialBackoffConfig {
-  uint64 initial_delay_ms = 1;
-  uint64 max_delay_ms = 2;
-  double factor = 3;
-}
-
 // Child specification
 //
 // ## Erlang/OTP Equivalent
@@ -287,7 +281,14 @@ message ChildSpec {
   map<string, string> metadata = 10;
 
   // Exponential backoff config (when restart = RESTART_POLICY_EXPONENTIAL_BACKOFF)
-  optional ExponentialBackoffConfig exponential_backoff = 11;
+  optional plexspaces.common.v1.RetryPolicy exponential_backoff = 11;
+
+  // Per-actor mailbox configuration. When unset, inherits the node default (IN_MEMORY).
+  // Set channel_provider = SQLITE or POSTGRES to use the shared node DB pool for
+  // a durable, DB-backed mailbox (no per-actor pool; uses node-wide shared connection).
+  // DB-backed mailboxes should NOT use the admission_control facet — the DB itself
+  // acts as the buffer; throttling at the inbox level defeats the purpose.
+  optional plexspaces.mailbox.v1.MailboxConfig mailbox_config = 12;
 }
 
 // Supervisor specification (canonical definition)

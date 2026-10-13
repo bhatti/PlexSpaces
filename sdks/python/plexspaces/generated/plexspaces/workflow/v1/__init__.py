@@ -119,7 +119,7 @@ class WorkflowDefinition(betterproto.Message):
     default_timeout: timedelta = betterproto.message_field(5)
     """Default timeout for entire workflow"""
 
-    default_retry: "RetryConfig" = betterproto.message_field(6)
+    default_retry: "__common_v1__.RetryPolicy" = betterproto.message_field(6)
     """Default retry policy for steps"""
 
     labels: Dict[str, str] = betterproto.map_field(
@@ -157,7 +157,7 @@ class Step(betterproto.Message):
     timeout: timedelta = betterproto.message_field(5)
     """Step-specific timeout"""
 
-    retry: "RetryConfig" = betterproto.message_field(6)
+    retry: "__common_v1__.RetryPolicy" = betterproto.message_field(6)
     """Retry configuration"""
 
     on_error: str = betterproto.string_field(7)
@@ -165,40 +165,6 @@ class Step(betterproto.Message):
 
     config: "betterproto_lib_google_protobuf.Struct" = betterproto.message_field(8)
     """Type-specific configuration (JSON)"""
-
-
-@dataclass(eq=False, repr=False)
-class RetryConfig(betterproto.Message):
-    """
-    Retry configuration
-
-     Exponential backoff retry policy with error type matching.
-     When fields are unset (proto3 default: 0 for numbers, empty for repeated), runtime defaults apply:
-     - max_attempts: 1 (single attempt, no retries)
-     - initial_interval_ms: 100
-     - backoff_rate: 2.0 (exponential: delay = initial * rate^(attempt-1) capped at max_interval_ms)
-     - max_interval_ms: 30000
-     Runtime applies full jitter to delay (multiply by random in (0, 1]) before sleeping between retries.
-    """
-
-    max_attempts: int = betterproto.uint32_field(1)
-    """
-    Maximum retry attempts (1 = single attempt, no retries; unset/0 treated as 1 at runtime)
-    """
-
-    initial_interval_ms: int = betterproto.uint32_field(2)
-    """Initial retry interval (milliseconds). Default 100 when unset."""
-
-    backoff_rate: float = betterproto.double_field(3)
-    """
-    Exponential backoff rate (e.g., 2.0 for doubling). Default 2.0 when unset.
-    """
-
-    max_interval_ms: int = betterproto.uint32_field(4)
-    """Maximum retry interval (milliseconds). Default 30000 when unset."""
-
-    retryable_errors: List[str] = betterproto.string_field(5)
-    """Error types to retry (empty = retry all)"""
 
 
 @dataclass(eq=False, repr=False)

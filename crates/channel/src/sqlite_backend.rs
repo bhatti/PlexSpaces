@@ -61,7 +61,7 @@ use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
     channel_config, ChannelConfig, ChannelProvider, ChannelStats, SqliteConfig,
 };
-use plexspaces_proto::common::v1::Message;
+use plexspaces_proto::common::v1::{ConflictResolutionPolicy, Message};
 use prost_types::Timestamp;
 use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
 use std::collections::HashMap;
@@ -84,6 +84,8 @@ use tokio::sync::RwLock;
 #[derive(Clone)]
 pub struct SqliteChannel {
     config: ChannelConfig,
+    tenant_id: String,
+    namespace: String,
     sqlite_config: SqliteConfig,
     pool: SqlitePool,
     table_name: String,
@@ -229,6 +231,8 @@ impl SqliteChannel {
 
         let channel = Self {
             config,
+            tenant_id: String::new(),
+            namespace: String::new(),
             sqlite_config,
             pool,
             table_name,
@@ -248,16 +252,84 @@ impl SqliteChannel {
         Ok(channel)
     }
 
-    async fn ensure_schema(pool: &SqlitePool, table_name: &str) -> ChannelResult<()> {
+    /// Create a SqliteChannel using an existing shared pool (injected by the node).
+    ///
+    /// For 1000+ virtual workers, all workers on the same node share one SqlitePool,
+    /// avoiding per-actor pool overhead. The `channel_messages` table must already
+    /// exist: in production it is created by migration 008; in tests the caller must
+    /// invoke `SqliteChannel::ensure_schema()` on the pool first (the repository does
+    /// this automatically in `SqliteChannelRepository::new()`).
+    ///
+    /// This constructor is intentionally `pub(crate)`: all channel creation flows
+    /// through `SqliteChannelRepository::get_or_create()` so that caching and
+    /// schema setup are handled in one place.
+    pub(crate) async fn from_shared_pool(
+        ctx: &plexspaces_common::RequestContext,
+        pool: SqlitePool,
+        config: ChannelConfig,
+    ) -> ChannelResult<Self> {
+        use plexspaces_common::RequestContextExt;
+        let tenant_id = ctx.tenant_id().to_string();
+        let namespace = ctx.namespace().to_string();
+
+        let table_name = "channel_messages".to_string();
+
+        tracing::info!(
+            channel_name = %config.name,
+            tenant_id = %tenant_id,
+            namespace = %namespace,
+            backend = "SQLite(shared)",
+            "Channel created using shared node pool"
+        );
+
+        let channel = Self {
+            config,
+            tenant_id,
+            namespace,
+            sqlite_config: SqliteConfig {
+                database_path: "(shared)".to_string(),
+                table_name: table_name.clone(),
+                wal_mode: true,
+                cleanup_acked: false,
+                cleanup_age_seconds: 0,
+            },
+            pool,
+            table_name,
+            stats: Arc::new(ChannelStatsData {
+                messages_sent: AtomicU64::new(0),
+                messages_received: AtomicU64::new(0),
+                messages_pending: AtomicU64::new(0),
+                messages_failed: AtomicU64::new(0),
+            }),
+            closed: Arc::new(AtomicBool::new(false)),
+            pending_acks: Arc::new(RwLock::new(HashMap::new())),
+        };
+
+        channel.recover_unacked_messages().await?;
+        Ok(channel)
+    }
+
+    /// Create the `channel_messages` table and its indexes if they do not yet exist.
+    ///
+    /// Called once by `SqliteChannelRepository::new()` so that all subsequent
+    /// `from_shared_pool()` calls can assume the schema is present.
+    /// Safe to call on production pools that already have the migration applied —
+    /// all statements use `IF NOT EXISTS`.
+    pub(crate) async fn ensure_schema(pool: &SqlitePool, table_name: &str) -> ChannelResult<()> {
         let create_table_sql = format!(
             r#"CREATE TABLE IF NOT EXISTS {} (
-                id TEXT PRIMARY KEY,
-                channel_name TEXT NOT NULL,
-                payload BLOB NOT NULL,
-                headers_json TEXT NOT NULL DEFAULT '{{}}',
-                timestamp INTEGER NOT NULL,
-                acked INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
+                id                  TEXT    PRIMARY KEY,
+                tenant_id           TEXT    NOT NULL DEFAULT '',
+                namespace           TEXT    NOT NULL DEFAULT '',
+                channel_name        TEXT    NOT NULL,
+                payload             BLOB    NOT NULL,
+                headers_json        TEXT    NOT NULL DEFAULT '{{}}',
+                idempotency_key     TEXT    NOT NULL DEFAULT '',
+                conflict_resolution INTEGER NOT NULL DEFAULT 0,
+                timestamp           INTEGER NOT NULL,
+                acked               INTEGER NOT NULL DEFAULT 0,
+                dead_lettered       INTEGER NOT NULL DEFAULT 0,
+                created_at          INTEGER NOT NULL
             )"#,
             table_name
         );
@@ -266,43 +338,43 @@ impl SqliteChannel {
             .await
             .map_err(|e| ChannelError::BackendError(e.to_string()))?;
 
-        let unacked_index = format!("idx_{}_unacked", table_name);
-        let create_unacked_index_sql = format!(
-            "CREATE INDEX IF NOT EXISTS {} ON {}(channel_name, acked) WHERE acked = 0",
-            unacked_index, table_name
-        );
-        sqlx::query(&create_unacked_index_sql)
-            .execute(pool)
-            .await
-            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        // Hot path: tenant+namespace-scoped poll of pending unacked messages
+        sqlx::query(&format!(
+            "CREATE INDEX IF NOT EXISTS idx_{}_unacked ON {}(tenant_id, namespace, channel_name, created_at) WHERE acked = 0 AND dead_lettered = 0",
+            table_name, table_name
+        )).execute(pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
 
-        let name_index = format!("idx_{}_channel_name", table_name);
-        let create_name_index_sql = format!(
-            "CREATE INDEX IF NOT EXISTS {} ON {}(channel_name)",
-            name_index, table_name
-        );
-        sqlx::query(&create_name_index_sql)
-            .execute(pool)
-            .await
-            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        // OVERWRITE path: find existing unacked message with same idempotency_key, tenant-scoped
+        sqlx::query(&format!(
+            "CREATE INDEX IF NOT EXISTS idx_{}_idempotency ON {}(tenant_id, namespace, channel_name, idempotency_key) WHERE idempotency_key != '' AND acked = 0",
+            table_name, table_name
+        )).execute(pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
+
+        // DLQ monitoring, tenant-scoped
+        sqlx::query(&format!(
+            "CREATE INDEX IF NOT EXISTS idx_{}_dlq ON {}(tenant_id, namespace, channel_name, dead_lettered) WHERE dead_lettered = 1",
+            table_name, table_name
+        )).execute(pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
 
         Ok(())
     }
 
     /// Recover unacked messages from database
     async fn recover_unacked_messages(&self) -> ChannelResult<()> {
-        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at
+        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at, 7=idempotency_key, 8=conflict_resolution
         let query_sql = format!(
             r#"
-            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at
+            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at, idempotency_key, conflict_resolution
             FROM {}
-            WHERE channel_name = ? AND acked = 0
+            WHERE tenant_id = ? AND namespace = ? AND channel_name = ? AND acked = 0 AND dead_lettered = 0
             ORDER BY created_at ASC
             "#,
             self.table_name
         );
 
         let rows = sqlx::query(&query_sql)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .fetch_all(&self.pool)
             .await
@@ -320,6 +392,8 @@ impl SqliteChannel {
             let timestamp_ms: i64 = row.get(4);
             let headers: std::collections::HashMap<String, String> =
                 serde_json::from_str(&headers_json).unwrap_or_default();
+            let idempotency_key: String = row.try_get(7).unwrap_or_default();
+            let conflict_resolution: i32 = row.try_get(8).unwrap_or(0);
 
             // Reconstruct Message
             let message = Message {
@@ -331,6 +405,8 @@ impl SqliteChannel {
                     nanos: ((timestamp_ms % 1000) * 1_000_000) as i32,
                 }),
                 headers,
+                idempotency_key,
+                conflict_resolution,
                 ..Default::default()
             };
 
@@ -352,6 +428,10 @@ impl SqliteChannel {
         }
 
         Ok(())
+    }
+
+    fn conflict_resolution(message: &Message) -> i32 {
+        message.conflict_resolution
     }
 
     /// Helper to convert SystemTime to Unix timestamp (milliseconds)
@@ -387,12 +467,14 @@ impl SqliteChannel {
         let delete_sql = format!(
             r#"
             DELETE FROM {}
-            WHERE channel_name = ? AND acked = 1 AND created_at < ?
+            WHERE tenant_id = ? AND namespace = ? AND channel_name = ? AND acked = 1 AND created_at < ?
             "#,
             self.table_name
         );
 
         let result = sqlx::query(&delete_sql)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .bind(cutoff_time)
             .execute(&self.pool)
@@ -429,20 +511,54 @@ impl Channel for SqliteChannel {
         let headers_json =
             serde_json::to_string(&message.headers).unwrap_or_else(|_| "{}".to_string());
 
+        // OVERWRITE (LWW): update the queued row's content in place, preserving its queue
+        // position (created_at unchanged). Only INSERT if no unacked row exists for this key.
+        let conflict_resolution = Self::conflict_resolution(&message);
+        if conflict_resolution == ConflictResolutionPolicy::ConflictResolutionPolicyOverwrite as i32
+            && !message.idempotency_key.is_empty()
+        {
+            let update_sql = format!(
+                "UPDATE {} SET payload = ?, headers_json = ?, conflict_resolution = ?, timestamp = ? \
+                 WHERE tenant_id = ? AND namespace = ? AND channel_name = ? AND idempotency_key = ? AND acked = 0",
+                self.table_name
+            );
+            let result = sqlx::query(&update_sql)
+                .bind(&message.payload)
+                .bind(&headers_json)
+                .bind(conflict_resolution)
+                .bind(timestamp_ms)
+                .bind(&self.tenant_id)
+                .bind(&self.namespace)
+                .bind(&self.config.name)
+                .bind(&message.idempotency_key)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| ChannelError::BackendError(format!("OVERWRITE update failed: {}", e)))?;
+
+            if result.rows_affected() > 0 {
+                // Updated an existing queued row in place; message count unchanged.
+                self.stats.messages_sent.fetch_add(1, Ordering::Relaxed);
+                return Ok(msg_id);
+            }
+            // No unacked row with this key — fall through to INSERT.
+        }
+
         // Insert message into database
         let insert_sql = format!(
-            r#"
-            INSERT INTO {} (id, channel_name, payload, headers_json, timestamp, acked, created_at)
-            VALUES (?, ?, ?, ?, ?, 0, ?)
-            "#,
+            r#"INSERT INTO {} (id, tenant_id, namespace, channel_name, payload, headers_json, idempotency_key, conflict_resolution, timestamp, acked, dead_lettered, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)"#,
             self.table_name
         );
 
         sqlx::query(&insert_sql)
             .bind(&message.id)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .bind(&message.payload)
             .bind(&headers_json)
+            .bind(&message.idempotency_key)
+            .bind(conflict_resolution)
             .bind(timestamp_ms)
             .bind(created_at)
             .execute(&self.pool)
@@ -460,12 +576,12 @@ impl Channel for SqliteChannel {
         let mut messages = Vec::new();
 
         // Query unacked messages
-        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at
+        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at, 7=idempotency_key, 8=conflict_resolution
         let query_sql = format!(
             r#"
-            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at
+            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at, idempotency_key, conflict_resolution
             FROM {}
-            WHERE channel_name = ? AND acked = 0
+            WHERE tenant_id = ? AND namespace = ? AND channel_name = ? AND acked = 0 AND dead_lettered = 0
             ORDER BY created_at ASC
             LIMIT ?
             "#,
@@ -473,6 +589,8 @@ impl Channel for SqliteChannel {
         );
 
         let rows = sqlx::query(&query_sql)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .bind(max_messages as i64)
             .fetch_all(&self.pool)
@@ -488,6 +606,8 @@ impl Channel for SqliteChannel {
             let timestamp_ms: i64 = row.get(4);
             let headers: std::collections::HashMap<String, String> =
                 serde_json::from_str(&headers_json).unwrap_or_default();
+            let idempotency_key: String = row.try_get(7).unwrap_or_default();
+            let conflict_resolution: i32 = row.try_get(8).unwrap_or(0);
 
             let message = Message {
                 id: id.clone(),
@@ -498,6 +618,8 @@ impl Channel for SqliteChannel {
                     nanos: ((timestamp_ms % 1000) * 1_000_000) as i32,
                 }),
                 headers,
+                idempotency_key,
+                conflict_resolution,
                 ..Default::default()
             };
 
@@ -553,13 +675,15 @@ impl Channel for SqliteChannel {
         let check_sql = format!(
             r#"
             SELECT acked FROM {}
-            WHERE id = ? AND channel_name = ?
+            WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?
             "#,
             self.table_name
         );
 
         let acked_status: Option<i32> = sqlx::query_scalar(&check_sql)
             .bind(message_id)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .fetch_optional(&self.pool)
             .await
@@ -599,13 +723,15 @@ impl Channel for SqliteChannel {
             r#"
             UPDATE {}
             SET acked = 1
-            WHERE id = ? AND channel_name = ? AND acked = 0
+            WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ? AND acked = 0
             "#,
             self.table_name
         );
 
         let result = sqlx::query(&update_sql)
             .bind(message_id)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .execute(&self.pool)
             .await
@@ -646,24 +772,22 @@ impl Channel for SqliteChannel {
 
     async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
         // Get retry/DLQ config from channel config
-        let max_retries = if self.config.max_retries > 0 {
-            self.config.max_retries
-        } else {
-            3 // Default: 3 retries
-        };
+        let max_retries = crate::channel::max_retries_from_config(&self.config);
         let dlq_enabled = self.config.dlq_enabled;
 
         // Check if message exists
         let check_sql = format!(
             r#"
             SELECT acked FROM {}
-            WHERE id = ? AND channel_name = ?
+            WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?
             "#,
             self.table_name
         );
 
         let acked_status: Option<i32> = sqlx::query_scalar(&check_sql)
             .bind(message_id)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .fetch_optional(&self.pool)
             .await
@@ -684,13 +808,15 @@ impl Channel for SqliteChannel {
                 r#"
                 UPDATE {}
                 SET acked = 0
-                WHERE id = ? AND channel_name = ?
+                WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?
                 "#,
                 self.table_name
             );
 
             let result = sqlx::query(&update_sql)
                 .bind(message_id)
+                .bind(&self.tenant_id)
+                .bind(&self.namespace)
                 .bind(&self.config.name)
                 .execute(&self.pool)
                 .await
@@ -722,13 +848,15 @@ impl Channel for SqliteChannel {
                     r#"
                     SELECT id, channel_name, payload, sender_id, correlation_id, reply_to, partition_key
                     FROM {}
-                    WHERE id = ? AND channel_name = ?
+                    WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?
                     "#,
                     self.table_name
                 );
 
                 let row = sqlx::query(&select_sql)
                     .bind(message_id)
+                    .bind(&self.tenant_id)
+                    .bind(&self.namespace)
                     .bind(&self.config.name)
                     .fetch_optional(&self.pool)
                     .await
@@ -794,16 +922,18 @@ impl Channel for SqliteChannel {
     }
 
     async fn get_stats(&self) -> ChannelResult<ChannelStats> {
-        // Count pending messages
+        // Count pending messages, tenant-scoped
         let count_sql = format!(
             r#"
             SELECT COUNT(*) FROM {}
-            WHERE channel_name = ? AND acked = 0
+            WHERE tenant_id = ? AND namespace = ? AND channel_name = ? AND acked = 0
             "#,
             self.table_name
         );
 
         let row = sqlx::query(&count_sql)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
             .bind(&self.config.name)
             .fetch_one(&self.pool)
             .await
@@ -1009,4 +1139,82 @@ mod tests {
         assert_eq!(stats.messages_sent, 3);
         assert_eq!(stats.messages_pending, 3);
     }
+
+    #[tokio::test]
+    async fn test_send_overwrite_policy_replaces_queued() {
+        let config = create_test_config(":memory:".to_string());
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        // Send first message with idempotency key + OVERWRITE
+        let mut msg1 = create_test_message("msg1", "original");
+        msg1.idempotency_key = "key-1".to_string();
+        msg1.conflict_resolution = 1;
+        channel.send(msg1).await.unwrap();
+
+        // Verify it is queued; nack with requeue so acked stays 0
+        let queued = channel.receive(10).await.unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].payload, b"original");
+        channel.nack(&queued[0].id, true).await.unwrap();
+
+        // Send second message with same key, OVERWRITE — existing row updated in place
+        let mut msg2 = create_test_message("msg2", "updated");
+        msg2.idempotency_key = "key-1".to_string();
+        msg2.conflict_resolution = 1;
+        channel.send(msg2).await.unwrap();
+
+        // Only one message; payload is updated but row id (queue position) is preserved
+        let queued2 = channel.receive(10).await.unwrap();
+        assert_eq!(queued2.len(), 1);
+        assert_eq!(queued2[0].id, "msg1"); // UPDATE preserves original row id
+        assert_eq!(queued2[0].payload, b"updated");
+    }
+
+    #[tokio::test]
+    async fn test_send_keep_original_does_not_delete_queued() {
+        let config = create_test_config(":memory:".to_string());
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        // KEEP_ORIGINAL (0 = default, no header needed — no OVERWRITE delete)
+        let mut msg1 = create_test_message("msg1", "first");
+        msg1.idempotency_key = "key-keep".to_string();
+        channel.send(msg1).await.unwrap();
+
+        let queued = channel.receive(10).await.unwrap();
+        channel.nack(&queued[0].id, true).await.unwrap();
+
+        let mut msg2 = create_test_message("msg2", "second");
+        msg2.idempotency_key = "key-keep".to_string();
+        channel.send(msg2).await.unwrap();
+
+        // Both rows exist — the channel layer does not deduplicate (mailbox layer does)
+        let queued2 = channel.receive(10).await.unwrap();
+        assert_eq!(queued2.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_from_shared_pool() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(":memory:")
+            .await
+            .unwrap();
+        // In production the repository calls ensure_schema once; replicate that here.
+        SqliteChannel::ensure_schema(&pool, "channel_messages").await.unwrap();
+        let config = create_test_config(":memory:".to_string());
+        use plexspaces_common::RequestContextExt;
+        let ctx = plexspaces_common::RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "default".to_string(),
+        );
+        let channel = SqliteChannel::from_shared_pool(&ctx, pool, config).await.unwrap();
+
+        let msg = create_test_message("shared-msg1", "hello shared");
+        channel.send(msg).await.unwrap();
+
+        let received = channel.receive(1).await.unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].payload, b"hello shared");
+    }
 }
+

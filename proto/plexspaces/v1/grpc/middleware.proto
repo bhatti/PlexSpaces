@@ -56,6 +56,7 @@ import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/grpc/middleware;plexspaces_grpc_v1";
 
@@ -106,7 +107,7 @@ message MiddlewareSpec {
     RateLimitMiddlewareConfig rate_limit = 14;
     AuthMiddlewareConfig auth = 15;
     CircuitBreakerMiddlewareConfig circuit_breaker = 16;
-    RetryMiddlewareConfig retry = 17;
+    plexspaces.common.v1.RetryPolicy retry = 17;
     LoggingMiddlewareConfig logging = 18;
   }
 }
@@ -403,31 +404,6 @@ message CircuitBreakerMiddlewareConfig {
 
   // Time window for counting failures
   google.protobuf.Duration window = 4;
-}
-
-// Retry middleware configuration
-//
-// ## Purpose
-// Automatically retries failed requests with exponential backoff.
-//
-// ## Design Notes
-// - Only retries idempotent methods by default
-// - Backoff prevents overwhelming downstream service
-message RetryMiddlewareConfig {
-  // Maximum retry attempts
-  uint32 max_retries = 1;
-
-  // Initial retry delay
-  google.protobuf.Duration initial_delay = 2;
-
-  // Maximum retry delay
-  google.protobuf.Duration max_delay = 3;
-
-  // Backoff multiplier (2.0 = exponential)
-  double backoff_factor = 4;
-
-  // Retryable gRPC status codes
-  repeated int32 retryable_status_codes = 5;
 }
 
 // Logging middleware configuration

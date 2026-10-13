@@ -1115,6 +1115,12 @@ mod tests {
         ) {
         }
 
+        async fn register_channel_repository(
+            &self,
+            _repo: std::sync::Arc<dyn plexspaces_channel::ChannelRepository>,
+        ) {
+        }
+
         async fn register_lock_manager(
             &self,
             service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>,

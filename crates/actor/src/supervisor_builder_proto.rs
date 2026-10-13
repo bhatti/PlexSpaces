@@ -212,10 +212,19 @@ impl ProtoSupervisorBuilder {
             Ok(ProtoRestartPolicy::RestartPolicyTemporary) => Ok(RestartPolicy::Temporary),
             Ok(ProtoRestartPolicy::RestartPolicyExponentialBackoff) => {
                 let eb = child_spec.exponential_backoff.as_ref();
+                let initial_delay_ms = eb
+                    .and_then(|e| e.initial_delay.as_ref())
+                    .map(|d| (d.seconds as u64) * 1000 + (d.nanos as u64) / 1_000_000)
+                    .unwrap_or(100);
+                let max_delay_ms = eb
+                    .and_then(|e| e.max_delay.as_ref())
+                    .map(|d| (d.seconds as u64) * 1000 + (d.nanos as u64) / 1_000_000)
+                    .unwrap_or(30_000);
+                let factor = eb.map(|e| e.backoff_multiplier).unwrap_or(2.0);
                 Ok(RestartPolicy::ExponentialBackoff {
-                    initial_delay_ms: eb.map(|e| e.initial_delay_ms).unwrap_or(100),
-                    max_delay_ms: eb.map(|e| e.max_delay_ms).unwrap_or(30_000),
-                    factor: eb.map(|e| e.factor).unwrap_or(2.0),
+                    initial_delay_ms,
+                    max_delay_ms,
+                    factor,
                 })
             }
             Err(_) => Err(SupervisorError::ConfigError(format!(

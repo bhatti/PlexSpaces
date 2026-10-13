@@ -18,38 +18,35 @@
 
 use crate::chain::{Interceptor, InterceptorError};
 use async_trait::async_trait;
+use plexspaces_proto::common::v1::RetryPolicy;
 use plexspaces_proto::grpc::v1::{
     InterceptorDecision, InterceptorRequest, InterceptorResponse, InterceptorResult,
-    RetryMiddlewareConfig,
 };
 
 /// Retry interceptor for identifying retryable errors
 pub struct RetryInterceptor {
-    /// Configuration
-    config: RetryMiddlewareConfig,
+    config: RetryPolicy,
 }
 
 impl RetryInterceptor {
     /// Create RetryInterceptor from proto config
-    pub fn new(config: RetryMiddlewareConfig) -> Self {
+    pub fn new(config: RetryPolicy) -> Self {
         Self { config }
     }
 
     /// Check if a status code is retryable
     fn is_retryable(&self, status_code: i32) -> bool {
-        self.config.retryable_status_codes.contains(&status_code)
+        if self.config.retryable_errors.is_empty() {
+            return false;
+        }
+        let code_str = status_code.to_string();
+        self.config.retryable_errors.contains(&code_str)
     }
 
     /// Calculate backoff delay for retry attempt
-    ///
-    /// ## Arguments
-    /// * `attempt` - Retry attempt number (0 = first retry)
-    ///
-    /// ## Returns
-    /// Backoff delay in milliseconds
     pub fn calculate_backoff(&self, attempt: u32) -> u64 {
-        if attempt >= self.config.max_retries {
-            return 0; // No more retries
+        if attempt >= self.config.max_attempts {
+            return 0;
         }
 
         let initial_delay_ms = self
@@ -57,27 +54,29 @@ impl RetryInterceptor {
             .initial_delay
             .as_ref()
             .map(|d| (d.seconds as u64 * 1000) + (d.nanos as u64 / 1_000_000))
-            .unwrap_or(100); // Default 100ms
+            .unwrap_or(100);
 
         let max_delay_ms = self
             .config
             .max_delay
             .as_ref()
             .map(|d| (d.seconds as u64 * 1000) + (d.nanos as u64 / 1_000_000))
-            .unwrap_or(5000); // Default 5 seconds
+            .unwrap_or(5000);
 
-        // Exponential backoff: initial_delay * (backoff_factor ^ attempt)
-        let delay =
-            (initial_delay_ms as f64 * self.config.backoff_factor.powi(attempt as i32)) as u64;
+        let multiplier = if self.config.backoff_multiplier == 0.0 {
+            2.0
+        } else {
+            self.config.backoff_multiplier
+        };
 
-        // Cap at max_delay
+        let delay = (initial_delay_ms as f64 * multiplier.powi(attempt as i32)) as u64;
         delay.min(max_delay_ms)
     }
 }
 
 impl Default for RetryInterceptor {
     fn default() -> Self {
-        Self::new(RetryMiddlewareConfig::default())
+        Self::new(RetryPolicy::default())
     }
 }
 

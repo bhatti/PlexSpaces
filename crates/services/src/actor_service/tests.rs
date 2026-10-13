@@ -537,7 +537,7 @@ async fn test_register_and_unregister_local_actor() {
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
     let (mailbox_inner, _rx) =
-        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .expect("Failed to create mailbox");
     let mailbox = Arc::new(mailbox_inner);
@@ -604,6 +604,7 @@ async fn test_canonical_actor_id_from_client_target_resolves_bare_live_actor_typ
             String::new(),
             "app-ns".to_string(),
             None,
+            None,
         )
         .await
         .expect("Failed to create mailbox");
@@ -640,6 +641,7 @@ async fn test_canonical_actor_id_from_client_target_name_colon_type_hits_live_ac
             "weather//weather_actor_wasm::app-ns@node1".to_string(),
             String::new(),
             "app-ns".to_string(),
+            None,
             None,
         )
         .await
@@ -816,7 +818,7 @@ async fn test_route_message_local_routing() {
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
     let (mailbox_inner, mut mailbox_rx) =
-        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .expect("Failed to create mailbox");
     let mailbox = Arc::new(mailbox_inner);
@@ -920,7 +922,7 @@ async fn test_send_message_success() {
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
     let (mailbox_inner, mut mailbox_rx) =
-        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .expect("Failed to create mailbox");
     let mailbox = Arc::new(mailbox_inner);
@@ -970,7 +972,7 @@ async fn test_send_message_with_timeout() {
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
     let (mailbox_inner, _mailbox_rx) =
-        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .expect("Failed to create mailbox");
     let mailbox = Arc::new(mailbox_inner);
@@ -1028,7 +1030,7 @@ async fn test_send_message_converts_timeout_correctly() {
     let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
     let (mailbox_inner, _rx) =
-        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config_default(), actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .expect("Failed to create mailbox");
     let mailbox = Arc::new(mailbox_inner);

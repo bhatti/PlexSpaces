@@ -22,6 +22,7 @@ plexspaces-facet = { path = "../../../crates/facet", optional = true }
 plexspaces-journaling = { path = "../../../crates/journaling", optional = true }
 plexspaces-workflow = { path = "../../../crates/workflow", optional = true }
 plexspaces-common = { path = "../../../crates/common", optional = true }
+plexspaces-outbox = { path = "../../../crates/outbox", optional = true }
 async-trait = { workspace = true, optional = true }
 base64 = "0.22"
 serde = { workspace = true }
@@ -48,6 +49,7 @@ native = [
     "dep:plexspaces-facet",
     "dep:plexspaces-journaling",
     "dep:plexspaces-node",
+    "dep:plexspaces-outbox",
     "plexspaces-proto/grpc",
     "dep:plexspaces-workflow",
     "dep:prost-types",

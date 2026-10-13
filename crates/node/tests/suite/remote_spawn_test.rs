@@ -431,7 +431,7 @@ async fn test_node_route_local_message() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let (mailbox_inner, mut mailbox_rx) =
-        Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let mailbox = Arc::new(mailbox_inner);

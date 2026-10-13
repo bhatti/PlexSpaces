@@ -28,13 +28,11 @@ pub struct ChannelConfig {
     /// Optional: Dead-letter queue for failed messages
     #[prost(string, tag="21")]
     pub dead_letter_queue: ::prost::alloc::string::String,
-    /// Maximum number of retries before sending to DLQ (default: 3)
-    /// After N failures, message is sent to Dead Letter Queue instead of requeuing
-    /// Set to 0 to disable retries (immediate DLQ on first failure)
-    /// Only applies to channels that support ack/nack/dlq (Redis, Kafka, etc.)
-    /// InMemory channels ignore this (no retry/DLQ support)
-    #[prost(uint32, tag="22")]
-    pub max_retries: u32,
+    /// Retry policy for failed messages (backoff, max attempts, jitter).
+    /// When set, messages that fail are retried per this policy before going to DLQ.
+    /// Only applies to channels that support ack/nack/dlq (Redis, Kafka, SQLite, etc.)
+    #[prost(message, optional, tag="22")]
+    pub retry_policy: ::core::option::Option<super::super::common::v1::RetryPolicy>,
     /// Enable Dead Letter Queue (DLQ) for failed messages (default: true)
     /// When enabled, messages that fail max_retries times are sent to DLQ
     /// When disabled, messages are dropped after max_retries failures
@@ -72,7 +70,7 @@ pub mod channel_config {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct InMemoryConfig {
-    #[prost(enumeration="in_memory_config::BackpressureStrategy", tag="1")]
+    #[prost(enumeration="super::super::common::v1::BackpressureStrategy", tag="1")]
     pub backpressure: i32,
     /// Timeout for blocking sends
     #[prost(message, optional, tag="2")]
@@ -80,46 +78,6 @@ pub struct InMemoryConfig {
     /// Timeout for blocking receives
     #[prost(message, optional, tag="3")]
     pub receive_timeout: ::core::option::Option<::prost_types::Duration>,
-}
-/// Nested message and enum types in `InMemoryConfig`.
-pub mod in_memory_config {
-    /// Backpressure strategy when channel is full
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-    #[repr(i32)]
-    pub enum BackpressureStrategy {
-        /// Block sender until space available
-        BackpressureStrategyBlock = 0,
-        /// Drop oldest message
-        BackpressureStrategyDropOldest = 1,
-        /// Drop newest message (reject send)
-        BackpressureStrategyDropNewest = 2,
-        /// Return error to sender
-        BackpressureStrategyError = 3,
-    }
-    impl BackpressureStrategy {
-        /// String value of the enum field names used in the ProtoBuf definition.
-        ///
-        /// The values are not transformed in any way and thus are considered stable
-        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-        pub fn as_str_name(&self) -> &'static str {
-            match self {
-                BackpressureStrategy::BackpressureStrategyBlock => "BACKPRESSURE_STRATEGY_BLOCK",
-                BackpressureStrategy::BackpressureStrategyDropOldest => "BACKPRESSURE_STRATEGY_DROP_OLDEST",
-                BackpressureStrategy::BackpressureStrategyDropNewest => "BACKPRESSURE_STRATEGY_DROP_NEWEST",
-                BackpressureStrategy::BackpressureStrategyError => "BACKPRESSURE_STRATEGY_ERROR",
-            }
-        }
-        /// Creates an enum from field names used in the ProtoBuf definition.
-        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-            match value {
-                "BACKPRESSURE_STRATEGY_BLOCK" => Some(Self::BackpressureStrategyBlock),
-                "BACKPRESSURE_STRATEGY_DROP_OLDEST" => Some(Self::BackpressureStrategyDropOldest),
-                "BACKPRESSURE_STRATEGY_DROP_NEWEST" => Some(Self::BackpressureStrategyDropNewest),
-                "BACKPRESSURE_STRATEGY_ERROR" => Some(Self::BackpressureStrategyError),
-                _ => None,
-            }
-        }
-    }
 }
 /// Redis Streams configuration
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -762,6 +720,141 @@ impl ChannelErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

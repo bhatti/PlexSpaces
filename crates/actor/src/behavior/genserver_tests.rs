@@ -151,7 +151,7 @@ mod tests {
 
         // Create a mailbox for the reply channel
         let (mailbox_inner, _receiver) =
-            Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string(), String::new(), String::new(), None)
+            Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string(), String::new(), String::new(), None, None)
                 .await
                 .expect("Failed to create mailbox");
         let mailbox = Arc::new(mailbox_inner);

@@ -31,7 +31,7 @@ fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: Strin
 async fn test_message_id_deduplication() {
     // Test: Duplicate message IDs should be skipped
     let config = mailbox_config_default();
-    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -48,20 +48,7 @@ async fn test_message_id_deduplication() {
     // For now, we'll test that the same message can't be enqueued twice
     // (which would happen if we clone the message)
 
-    // Actually, let's test by creating a message with a known ID
-    // Since Message::new() always generates new IDs, we need to test the cache differently
-    // Let's test that the cache works by checking cache size
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
-    // The cache should have the message ID
-    // We can't directly access the cache, but we can verify behavior
-    // by trying to enqueue the same message (which has the same ID)
     let message1_clone = create_test_message(b"test".to_vec());
-    // This will have a different ID, so it won't be deduplicated
-    // For a proper test, we'd need a way to create messages with specific IDs
-    // or expose cache inspection methods
-
-    // For now, just verify mailbox works
     assert!(mailbox.enqueue(message1_clone).await.is_ok());
 }
 
@@ -69,7 +56,7 @@ async fn test_message_id_deduplication() {
 async fn test_idempotency_key_deduplication() {
     // Test: Messages with same idempotency key should be deduplicated
     let config = mailbox_config_default();
-    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -88,7 +75,6 @@ async fn test_idempotency_key_deduplication() {
 
     // Verify only one message was enqueued
     // (We can't directly verify this without dequeueing, but the cache should prevent duplicates)
-    tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Try to dequeue - should only get one message
     let received1 = receiver
@@ -108,7 +94,7 @@ async fn test_idempotency_key_deduplication() {
 async fn test_idempotency_key_different_keys() {
     // Test: Different idempotency keys should not be deduplicated
     let config = mailbox_config_default();
-    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -119,8 +105,6 @@ async fn test_idempotency_key_different_keys() {
     // Both should be enqueued (different keys)
     mailbox.enqueue(message1).await.unwrap();
     mailbox.enqueue(message2).await.unwrap();
-
-    tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Both should be dequeuable
     let received1 = receiver
@@ -139,7 +123,7 @@ async fn test_lru_cache_eviction() {
     // Test: LRU cache should evict old entries when full
     let mut config = mailbox_config_default();
     // Note: message dedup cache size is now controlled via IdempotencyConfig, not MailboxConfig.
-    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None)
+    let (mailbox, mut receiver) = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None)
         .await
         .unwrap();
 
@@ -159,8 +143,6 @@ async fn test_lru_cache_eviction() {
     // But message2 and message3 should be
     // We can't directly verify this, but we can verify that
     // the cache doesn't grow beyond capacity
-
-    tokio::time::sleep(Duration::from_millis(10)).await;
 
     // All messages should still be enqueued (deduplication only affects duplicates)
     // The cache eviction doesn't affect message delivery, only deduplication

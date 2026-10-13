@@ -231,7 +231,7 @@ pub fn make_step(
     config: Value,
     next: Option<String>,
     on_error: Option<String>,
-    retry: Option<RetryConfig>,
+    retry: Option<RetryPolicy>,
 ) -> Step {
     Step {
         id: id.into(),

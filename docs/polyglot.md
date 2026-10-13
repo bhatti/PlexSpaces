@@ -767,11 +767,10 @@ func (c *Counter) Handle(from, msgType, payloadJSON string) string {
     switch msgType {
     case "increment":
         c.Value++
-        data, _ := json.Marshal(map[string]any{"value": c.Value})
-        return string(data)
+        // Use SafeMarshal — NOT json.Marshal (see TinyGo Safety section below)
+        return plexspaces.SafeMarshal(map[string]any{"value": c.Value})
     case "get":
-        data, _ := json.Marshal(map[string]any{"value": c.Value})
-        return string(data)
+        return plexspaces.SafeMarshal(map[string]any{"value": c.Value})
     default:
         return `{"error":"unknown operation"}`
     }
@@ -817,6 +816,71 @@ tinygo build -target=wasi -o counter.wasm .
 ```
 
 **See**: `examples/go/apps/migrating_erlang_otp/` for a complete Go WASM example (rate limiter)
+
+#### ⚠️ TinyGo WASM: JSON and fmt Safety Rules
+
+TinyGo compiles Go to WebAssembly using LLVM. Certain standard library imports corrupt
+the WASM function table at link time, causing `call_indirect` traps at runtime — even if
+the offending code is never called.
+
+**FORBIDDEN in TinyGo WASM actors:**
+
+| Pattern | Why it breaks |
+|---------|--------------|
+| `encoding/json.Marshal(...)` | Links `fmtsort` into the function table, shifting indices used by actor interface dispatch |
+| `encoding/json.Unmarshal(...)` | Adds ~60 `encoding/json.state*` function pointers to the element table, shifting all actor dispatch indices |
+| `fmt.Sprintf(...)`, `fmt.Errorf(...)`, `fmt.Sscanf(...)` | Interface dispatch via `%v`/`%d`/`%w` verbs triggers `call_indirect` with wrong table entry |
+| `map[string]any{"k": intValue}` passed to `json.Marshal` | Same as `json.Marshal` — triggers `fmtsort` linkage |
+
+**SAFE alternatives:**
+
+```go
+// ❌ WRONG — corrupts function table (Marshal links fmtsort)
+data, _ := json.Marshal(map[string]any{"value": c.Value})
+return string(data)
+
+// ✅ CORRECT — use SafeMarshal (type-switch, no fmtsort)
+return plexspaces.SafeMarshal(map[string]any{"value": c.Value})
+
+// ✅ CORRECT — raw string building (zero allocations)
+return `{"value":` + strconv.Itoa(c.Value) + `}`
+
+// ❌ WRONG — Unmarshal adds 60+ element table entries
+var req struct{ Targets []string `json:"targets"` }
+json.Unmarshal([]byte(payloadJSON), &req)
+
+// ✅ CORRECT — use WasmJSON* helpers instead of Unmarshal
+actorID := plexspaces.WasmJSONExtractStr(configJSON, "actor_id")
+batchSize := plexspaces.WasmJSONExtractInt(payloadJSON, "batch_size")
+// For string arrays: WasmJSONFindArray + WasmJSONSplitArray
+arrJSON := plexspaces.WasmJSONFindArray(payloadJSON, "targets") // "[...]" with brackets
+inner := arrJSON[1 : len(arrJSON)-1]                           // strip brackets
+items := plexspaces.WasmJSONSplitArray(inner)                  // top-level comma split
+
+// ✅ CORRECT — use strconv instead of fmt.Sprintf
+key := prefix + "seq:" + strconv.FormatInt(seq, 10)  // not fmt.Sprintf("%sseq:%d", prefix, seq)
+```
+
+**`list<string>` WIT parameters**: Go cannot pass `[]string` directly to a WIT `list<string>` import using
+`//go:wasmimport`. The SDK builds the canonical ABI memory layout (array of `(ptr, len)` pairs) automatically
+when you call `host.Outbox().Dispatch()` or `host.Outbox().DispatchWithTargets()` — do NOT pass a JSON string.
+
+**State persistence**: TinyGo WASM actors are re-instantiated after every `handle()` call.
+All mutable fields must be preserved via `WASMStateful`:
+
+```go
+type WASMStateful interface {
+    MarshalStateWASM() string           // called after handle() — return JSON
+    UnmarshalStateWASM(string) bool     // called before handle() — restore fields
+}
+```
+
+**`plexspaces.SafeMarshal`** handles these types safely: `bool`, `int`, `int32`, `int64`,
+`uint32`, `uint64`, `float32`, `float64`, `string`, `map[string]any`, `map[string]string`,
+`[]string`, `[]int`, `[]int64`, `[]float64`. Unknown types emit `null`.
+
+**Read-side helpers** (`WasmJSONFindObject`, `WasmJSONExtractStr`, `WasmJSONExtractInt`,
+`WasmJSONFindArray`) parse JSON via byte-level scanning — no reflection, no allocations.
 
 ## Deployment
 

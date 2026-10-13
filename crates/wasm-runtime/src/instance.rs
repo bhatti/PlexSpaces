@@ -37,6 +37,7 @@ pub struct ComponentContext {
     pub process_groups_impl: crate::component_host::ProcessGroupsImpl,
     pub locks_impl: crate::component_host::LocksImpl,
     pub registry_impl: crate::component_host::RegistryImpl,
+    pub outbox_impl: crate::component_host::OutboxImpl,
     /// Actor-world host for deployable polyglot components.
     pub simple_host_impl: crate::simple_component_host::SimpleHostImpl,
 }
@@ -459,6 +460,10 @@ impl WasmInstance {
                                 actor_id: parsed_actor_id.clone(),
                                 host_functions: context_clone.host_functions.clone(),
                             },
+                            outbox_impl: crate::component_host::OutboxImpl::new(
+                                parsed_actor_id.clone(),
+                                context_clone.host_functions.clone(),
+                            ),
                             simple_host_impl: crate::simple_component_host::SimpleHostImpl::new(
                                 parsed_actor_id.clone(),
                                 context_clone.host_functions.clone(),
@@ -1660,6 +1665,10 @@ impl WasmInstance {
                 actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
+            outbox_impl: crate::component_host::OutboxImpl::new(
+                parsed_actor_id.clone(),
+                instance_ctx.host_functions.clone(),
+            ),
             simple_host_impl: crate::simple_component_host::SimpleHostImpl::new(
                 parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
@@ -1839,6 +1848,10 @@ impl WasmInstance {
                 actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
+            outbox_impl: crate::component_host::OutboxImpl::new(
+                parsed_actor_id.clone(),
+                instance_ctx.host_functions.clone(),
+            ),
             simple_host_impl: crate::simple_component_host::SimpleHostImpl::new(
                 parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),

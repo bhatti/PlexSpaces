@@ -268,6 +268,7 @@ impl TaskRouter {
             ttl: None,
             delivery_count: 0,
             idempotency_key: String::new(),
+            conflict_resolution: 0,
             correlation_id: String::new(),
             reply_to: String::new(),
             partition_key: String::new(),

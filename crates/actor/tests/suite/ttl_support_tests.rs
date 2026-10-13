@@ -125,7 +125,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     )
     .expect("ttl test actor id should be valid");
     let (mailbox_inner, mut mailbox_receiver) =
-        Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None)
+        Mailbox::new(mailbox_config, actor_id.to_string(), String::new(), String::new(), None, None)
             .await
             .unwrap();
     let mailbox = Arc::new(mailbox_inner);

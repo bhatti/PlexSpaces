@@ -314,7 +314,7 @@ async fn test_actor_ref_local_unchanged() {
     // Test: Local ActorRef should work the same (no ServiceLocator needed)
     use plexspaces_mailbox::mailbox_config_default;
     let (mailbox_inner, mut mailbox_receiver) = Mailbox::new(
-        mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+        mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
     )
     .await
     .unwrap();

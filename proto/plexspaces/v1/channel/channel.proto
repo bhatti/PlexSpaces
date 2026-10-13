@@ -180,12 +180,10 @@ message ChannelConfig {
   // Optional: Dead-letter queue for failed messages
   string dead_letter_queue = 21;
 
-  // Maximum number of retries before sending to DLQ (default: 3)
-  // After N failures, message is sent to Dead Letter Queue instead of requeuing
-  // Set to 0 to disable retries (immediate DLQ on first failure)
-  // Only applies to channels that support ack/nack/dlq (Redis, Kafka, etc.)
-  // InMemory channels ignore this (no retry/DLQ support)
-  uint32 max_retries = 22;
+  // Retry policy for failed messages (backoff, max attempts, jitter).
+  // When set, messages that fail are retried per this policy before going to DLQ.
+  // Only applies to channels that support ack/nack/dlq (Redis, Kafka, SQLite, etc.)
+  plexspaces.common.v1.RetryPolicy retry_policy = 22;
 
   // Enable Dead Letter Queue (DLQ) for failed messages (default: true)
   // When enabled, messages that fail max_retries times are sent to DLQ
@@ -197,22 +195,7 @@ message ChannelConfig {
 
 // In-memory channel configuration
 message InMemoryConfig {
-  // Backpressure strategy when channel is full
-  enum BackpressureStrategy {
-    // Block sender until space available
-    BACKPRESSURE_STRATEGY_BLOCK = 0;
-
-    // Drop oldest message
-    BACKPRESSURE_STRATEGY_DROP_OLDEST = 1;
-
-    // Drop newest message (reject send)
-    BACKPRESSURE_STRATEGY_DROP_NEWEST = 2;
-
-    // Return error to sender
-    BACKPRESSURE_STRATEGY_ERROR = 3;
-  }
-
-  BackpressureStrategy backpressure = 1;
+  plexspaces.common.v1.BackpressureStrategy backpressure = 1;
 
   // Timeout for blocking sends
   google.protobuf.Duration send_timeout = 2;

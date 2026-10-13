@@ -22,7 +22,7 @@
 //! Measures checkpoint, journal, and retention performance to detect regressions.
 //!
 //! ## Metrics Tracked
-//! - Snapshot creation latency (P50, P95, P99)
+//! - Snapshot creation latency (P95, P99)
 //! - Snapshot loading latency
 //! - Journal write throughput (entries/sec)
 //! - Side effect recording latency

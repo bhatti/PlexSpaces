@@ -409,9 +409,8 @@ impl Channel for InMemoryChannel {
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use plexspaces_proto::channel::v1::{
-        in_memory_config, DeliveryGuarantee, InMemoryConfig, OrderingGuarantee,
-    };
+    use plexspaces_proto::channel::v1::{DeliveryGuarantee, InMemoryConfig, OrderingGuarantee};
+    use plexspaces_proto::common::v1::BackpressureStrategy;
     use prost_types::Duration as ProtoDuration;
 
     fn create_test_config(capacity: u64) -> ChannelConfig {
@@ -422,8 +421,7 @@ mod tests {
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
             backend_config: Some(channel_config::BackendConfig::InMemory(InMemoryConfig {
-                backpressure: in_memory_config::BackpressureStrategy::BackpressureStrategyBlock
-                    as i32,
+                backpressure: BackpressureStrategy::BackpressureStrategyError as i32,
                 send_timeout: Some(ProtoDuration {
                     seconds: 1,
                     nanos: 0,

@@ -66,6 +66,7 @@ fn make_call_message(payload: Vec<u8>) -> ProtoMessage {
         partition_key: String::new(),
         uri_method: String::new(),
         uri_path: String::new(),
+        conflict_resolution: 0,
     }
 }
 

@@ -44,6 +44,7 @@ fn create_proto_message_common(
         ttl: None,
         headers: std::collections::HashMap::new(),
         idempotency_key: String::new(),
+            conflict_resolution: 0,
         uri_method: String::new(),
         uri_path: String::new(),
         ..Default::default()
@@ -65,6 +66,7 @@ fn create_proto_message(
         payload,
         timestamp: None,
         idempotency_key: String::new(),
+            conflict_resolution: 0,
         priority: 25,
         ttl: None,
         headers: std::collections::HashMap::new(),

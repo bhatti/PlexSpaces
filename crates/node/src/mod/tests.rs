@@ -127,7 +127,7 @@ async fn test_actor_registration() {
 
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -191,7 +191,7 @@ async fn test_actor_unregistration() {
 
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -282,7 +282,7 @@ async fn test_duplicate_actor_registration() {
 
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -351,7 +351,7 @@ async fn test_route_message_local() {
 
     let (mailbox_inner, mut mailbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -643,7 +643,7 @@ async fn test_spawn_actor_detects_panic() {
     register_actor_for_test(node.as_ref(), &supervisor_id, {
         let (mbox, _receiver) =
             Mailbox::new(
-                mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+                mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
             )
             .await
             .unwrap();
@@ -689,7 +689,7 @@ async fn test_tell_to_remote_node() {
     // Register actor on node2
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -831,7 +831,7 @@ async fn test_find_actor_via_tuplespace() {
     // Register actor on node2 (this writes to node2's TupleSpace)
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -943,7 +943,7 @@ async fn test_monitor_local_actor() {
     // Register a local actor
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -986,7 +986,7 @@ async fn test_monitor_local_actor() {
     // Register supervisor so it has a mailbox to receive __DOWN__ messages.
     let (sup_mailbox_inner, mut sup_mailbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("sup-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("sup-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1108,7 +1108,7 @@ async fn test_handle_actor_termination_multiple_monitors() {
     // Register a local actor
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1154,21 +1154,21 @@ async fn test_handle_actor_termination_multiple_monitors() {
 
     let (sup1_mbox_inner, mut sup1_mbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("sup1-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("sup1-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
     let sup1_mbox = Arc::new(sup1_mbox_inner);
     let (sup2_mbox_inner, mut sup2_mbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("sup2-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("sup2-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
     let sup2_mbox = Arc::new(sup2_mbox_inner);
     let (sup3_mbox_inner, mut sup3_mbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("sup3-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("sup3-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1336,7 +1336,7 @@ async fn test_handle_lifecycle_event_terminated() {
     // Register actor and monitor it
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1408,7 +1408,7 @@ async fn test_handle_lifecycle_event_terminated() {
     let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
     let (sup_mbox_inner, mut sup_mbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1464,7 +1464,7 @@ async fn test_handle_lifecycle_event_failed() {
     // Register actor and monitor it
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1536,7 +1536,7 @@ async fn test_handle_lifecycle_event_failed() {
     let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
     let (sup_mbox_inner, mut sup_mbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("sup-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1622,7 +1622,7 @@ async fn test_stats_tracking() {
     // Register an actor
     let (mailbox_inner, mut mailbox_receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1757,7 +1757,7 @@ async fn test_register_actor_with_config() {
 
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1852,7 +1852,7 @@ async fn test_register_actor_without_config() {
 
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -1913,7 +1913,7 @@ async fn test_unregister_actor_removes_config() {
 
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -2009,7 +2009,7 @@ async fn test_calculate_node_capacity_with_actors() {
     // Register first actor with resources
     let (mailbox1_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-1-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-1-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -2074,7 +2074,7 @@ async fn test_calculate_node_capacity_with_actors() {
     // Register second actor with resources
     let (mailbox2_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-2-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-2-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -2186,7 +2186,7 @@ async fn test_calculate_node_capacity_with_actor_without_resources() {
     // Register actor without resource requirements
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            plexspaces_mailbox::mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            plexspaces_mailbox::mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -2269,7 +2269,7 @@ async fn test_calculate_node_capacity_after_unregister() {
     // Register actor with resources
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();
@@ -2363,7 +2363,7 @@ async fn test_calculate_node_capacity_with_partial_resource_spec() {
     use std::sync::Arc;
     let (mailbox_inner, _receiver) =
         Mailbox::new(
-            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None,
+            mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new()), String::new(), String::new(), None, None,
         )
         .await
         .unwrap();

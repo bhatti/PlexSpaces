@@ -35,7 +35,7 @@
 //! ```
 
 use plexspaces_proto::channel::v1::*;
-use plexspaces_proto::common::v1::Message;
+use plexspaces_proto::common::v1::{Message, RetryPolicy};
 
 #[cfg(feature = "test-utils")]
 use plexspaces_channel::ChannelResult;
@@ -53,7 +53,10 @@ fn create_test_config_with_retry_dlq(
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
-        max_retries,
+        retry_policy: Some(RetryPolicy {
+            max_attempts: max_retries,
+            ..Default::default()
+        }),
         dlq_enabled,
         dead_letter_queue: if dlq_enabled {
             format!("{}-dlq", name)
@@ -212,7 +215,10 @@ mod sqlite_tests {
             capacity: 100,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
-            max_retries: 3,
+            retry_policy: Some(RetryPolicy {
+                max_attempts: 3,
+                ..Default::default()
+            }),
             dlq_enabled: true,
             dead_letter_queue: format!("{}-dlq", name),
             backend_config: Some(channel_config::BackendConfig::Sqlite(SqliteConfig {
@@ -403,7 +409,10 @@ mod redis_tests {
             capacity: 100,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
-            max_retries: 3,
+            retry_policy: Some(RetryPolicy {
+                max_attempts: 3,
+                ..Default::default()
+            }),
             dlq_enabled: true,
             dead_letter_queue: format!("{}-dlq", name),
             backend_config: Some(channel_config::BackendConfig::Redis(RedisConfig {

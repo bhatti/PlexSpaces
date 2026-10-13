@@ -346,7 +346,7 @@ type WorkflowDefinition struct {
 	// Default timeout for entire workflow
 	DefaultTimeout *durationpb.Duration `protobuf:"bytes,5,opt,name=default_timeout,json=defaultTimeout,proto3" json:"default_timeout,omitempty"` // Max 24 hours
 	// Default retry policy for steps
-	DefaultRetry *RetryConfig `protobuf:"bytes,6,opt,name=default_retry,json=defaultRetry,proto3" json:"default_retry,omitempty"`
+	DefaultRetry *v1.RetryPolicy `protobuf:"bytes,6,opt,name=default_retry,json=defaultRetry,proto3" json:"default_retry,omitempty"`
 	// User-defined labels
 	Labels map[string]string `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Creation timestamp
@@ -422,7 +422,7 @@ func (x *WorkflowDefinition) GetDefaultTimeout() *durationpb.Duration {
 	return nil
 }
 
-func (x *WorkflowDefinition) GetDefaultRetry() *RetryConfig {
+func (x *WorkflowDefinition) GetDefaultRetry() *v1.RetryPolicy {
 	if x != nil {
 		return x.DefaultRetry
 	}
@@ -466,7 +466,7 @@ type Step struct {
 	// Step-specific timeout
 	Timeout *durationpb.Duration `protobuf:"bytes,5,opt,name=timeout,proto3" json:"timeout,omitempty"` // Max 1 hour
 	// Retry configuration
-	Retry *RetryConfig `protobuf:"bytes,6,opt,name=retry,proto3" json:"retry,omitempty"`
+	Retry *v1.RetryPolicy `protobuf:"bytes,6,opt,name=retry,proto3" json:"retry,omitempty"`
 	// Step ID to run on error (compensation/saga)
 	OnError string `protobuf:"bytes,7,opt,name=on_error,json=onError,proto3" json:"on_error,omitempty"`
 	// Type-specific configuration (JSON)
@@ -540,7 +540,7 @@ func (x *Step) GetTimeout() *durationpb.Duration {
 	return nil
 }
 
-func (x *Step) GetRetry() *RetryConfig {
+func (x *Step) GetRetry() *v1.RetryPolicy {
 	if x != nil {
 		return x.Retry
 	}
@@ -557,96 +557,6 @@ func (x *Step) GetOnError() string {
 func (x *Step) GetConfig() *structpb.Struct {
 	if x != nil {
 		return x.Config
-	}
-	return nil
-}
-
-// Retry configuration
-//
-// Exponential backoff retry policy with error type matching.
-// When fields are unset (proto3 default: 0 for numbers, empty for repeated), runtime defaults apply:
-// - max_attempts: 1 (single attempt, no retries)
-// - initial_interval_ms: 100
-// - backoff_rate: 2.0 (exponential: delay = initial * rate^(attempt-1) capped at max_interval_ms)
-// - max_interval_ms: 30000
-// Runtime applies full jitter to delay (multiply by random in (0, 1]) before sleeping between retries.
-type RetryConfig struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Maximum retry attempts (1 = single attempt, no retries; unset/0 treated as 1 at runtime)
-	MaxAttempts uint32 `protobuf:"varint,1,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"` // 0 or 1–1000
-	// Initial retry interval (milliseconds). Default 100 when unset.
-	InitialIntervalMs uint32 `protobuf:"varint,2,opt,name=initial_interval_ms,json=initialIntervalMs,proto3" json:"initial_interval_ms,omitempty"` // 0 or 1–300000
-	// Exponential backoff rate (e.g., 2.0 for doubling). Default 2.0 when unset.
-	BackoffRate float64 `protobuf:"fixed64,3,opt,name=backoff_rate,json=backoffRate,proto3" json:"backoff_rate,omitempty"`
-	// Maximum retry interval (milliseconds). Default 30000 when unset.
-	MaxIntervalMs uint32 `protobuf:"varint,4,opt,name=max_interval_ms,json=maxIntervalMs,proto3" json:"max_interval_ms,omitempty"` // 0 or 1–3600000
-	// Error types to retry (empty = retry all)
-	RetryableErrors []string `protobuf:"bytes,5,rep,name=retryable_errors,json=retryableErrors,proto3" json:"retryable_errors,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
-}
-
-func (x *RetryConfig) Reset() {
-	*x = RetryConfig{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RetryConfig) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RetryConfig) ProtoMessage() {}
-
-func (x *RetryConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RetryConfig.ProtoReflect.Descriptor instead.
-func (*RetryConfig) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *RetryConfig) GetMaxAttempts() uint32 {
-	if x != nil {
-		return x.MaxAttempts
-	}
-	return 0
-}
-
-func (x *RetryConfig) GetInitialIntervalMs() uint32 {
-	if x != nil {
-		return x.InitialIntervalMs
-	}
-	return 0
-}
-
-func (x *RetryConfig) GetBackoffRate() float64 {
-	if x != nil {
-		return x.BackoffRate
-	}
-	return 0
-}
-
-func (x *RetryConfig) GetMaxIntervalMs() uint32 {
-	if x != nil {
-		return x.MaxIntervalMs
-	}
-	return 0
-}
-
-func (x *RetryConfig) GetRetryableErrors() []string {
-	if x != nil {
-		return x.RetryableErrors
 	}
 	return nil
 }
@@ -692,7 +602,7 @@ type WorkflowExecution struct {
 
 func (x *WorkflowExecution) Reset() {
 	*x = WorkflowExecution{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[3]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -704,7 +614,7 @@ func (x *WorkflowExecution) String() string {
 func (*WorkflowExecution) ProtoMessage() {}
 
 func (x *WorkflowExecution) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[3]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -717,7 +627,7 @@ func (x *WorkflowExecution) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowExecution.ProtoReflect.Descriptor instead.
 func (*WorkflowExecution) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{3}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WorkflowExecution) GetExecutionId() string {
@@ -856,7 +766,7 @@ type StepExecution struct {
 
 func (x *StepExecution) Reset() {
 	*x = StepExecution{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -868,7 +778,7 @@ func (x *StepExecution) String() string {
 func (*StepExecution) ProtoMessage() {}
 
 func (x *StepExecution) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -881,7 +791,7 @@ func (x *StepExecution) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepExecution.ProtoReflect.Descriptor instead.
 func (*StepExecution) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{4}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *StepExecution) GetStepExecutionId() string {
@@ -964,7 +874,7 @@ type CreateDefinitionRequest struct {
 
 func (x *CreateDefinitionRequest) Reset() {
 	*x = CreateDefinitionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -976,7 +886,7 @@ func (x *CreateDefinitionRequest) String() string {
 func (*CreateDefinitionRequest) ProtoMessage() {}
 
 func (x *CreateDefinitionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -989,7 +899,7 @@ func (x *CreateDefinitionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateDefinitionRequest.ProtoReflect.Descriptor instead.
 func (*CreateDefinitionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{5}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CreateDefinitionRequest) GetRequestId() string {
@@ -1016,7 +926,7 @@ type CreateDefinitionResponse struct {
 
 func (x *CreateDefinitionResponse) Reset() {
 	*x = CreateDefinitionResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1028,7 +938,7 @@ func (x *CreateDefinitionResponse) String() string {
 func (*CreateDefinitionResponse) ProtoMessage() {}
 
 func (x *CreateDefinitionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1041,7 +951,7 @@ func (x *CreateDefinitionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateDefinitionResponse.ProtoReflect.Descriptor instead.
 func (*CreateDefinitionResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{6}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CreateDefinitionResponse) GetRequestId() string {
@@ -1069,7 +979,7 @@ type GetDefinitionRequest struct {
 
 func (x *GetDefinitionRequest) Reset() {
 	*x = GetDefinitionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1081,7 +991,7 @@ func (x *GetDefinitionRequest) String() string {
 func (*GetDefinitionRequest) ProtoMessage() {}
 
 func (x *GetDefinitionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1094,7 +1004,7 @@ func (x *GetDefinitionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDefinitionRequest.ProtoReflect.Descriptor instead.
 func (*GetDefinitionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{7}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetDefinitionRequest) GetRequestId() string {
@@ -1128,7 +1038,7 @@ type GetDefinitionResponse struct {
 
 func (x *GetDefinitionResponse) Reset() {
 	*x = GetDefinitionResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1140,7 +1050,7 @@ func (x *GetDefinitionResponse) String() string {
 func (*GetDefinitionResponse) ProtoMessage() {}
 
 func (x *GetDefinitionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1153,7 +1063,7 @@ func (x *GetDefinitionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDefinitionResponse.ProtoReflect.Descriptor instead.
 func (*GetDefinitionResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{8}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetDefinitionResponse) GetRequestId() string {
@@ -1182,7 +1092,7 @@ type ListDefinitionsRequest struct {
 
 func (x *ListDefinitionsRequest) Reset() {
 	*x = ListDefinitionsRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1194,7 +1104,7 @@ func (x *ListDefinitionsRequest) String() string {
 func (*ListDefinitionsRequest) ProtoMessage() {}
 
 func (x *ListDefinitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1207,7 +1117,7 @@ func (x *ListDefinitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDefinitionsRequest.ProtoReflect.Descriptor instead.
 func (*ListDefinitionsRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{9}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListDefinitionsRequest) GetRequestId() string {
@@ -1249,7 +1159,7 @@ type ListDefinitionsResponse struct {
 
 func (x *ListDefinitionsResponse) Reset() {
 	*x = ListDefinitionsResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1261,7 +1171,7 @@ func (x *ListDefinitionsResponse) String() string {
 func (*ListDefinitionsResponse) ProtoMessage() {}
 
 func (x *ListDefinitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1274,7 +1184,7 @@ func (x *ListDefinitionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDefinitionsResponse.ProtoReflect.Descriptor instead.
 func (*ListDefinitionsResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{10}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListDefinitionsResponse) GetRequestId() string {
@@ -1308,7 +1218,7 @@ type UpdateDefinitionRequest struct {
 
 func (x *UpdateDefinitionRequest) Reset() {
 	*x = UpdateDefinitionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1320,7 +1230,7 @@ func (x *UpdateDefinitionRequest) String() string {
 func (*UpdateDefinitionRequest) ProtoMessage() {}
 
 func (x *UpdateDefinitionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1333,7 +1243,7 @@ func (x *UpdateDefinitionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateDefinitionRequest.ProtoReflect.Descriptor instead.
 func (*UpdateDefinitionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{11}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UpdateDefinitionRequest) GetRequestId() string {
@@ -1360,7 +1270,7 @@ type UpdateDefinitionResponse struct {
 
 func (x *UpdateDefinitionResponse) Reset() {
 	*x = UpdateDefinitionResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[12]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1372,7 +1282,7 @@ func (x *UpdateDefinitionResponse) String() string {
 func (*UpdateDefinitionResponse) ProtoMessage() {}
 
 func (x *UpdateDefinitionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[12]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1385,7 +1295,7 @@ func (x *UpdateDefinitionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateDefinitionResponse.ProtoReflect.Descriptor instead.
 func (*UpdateDefinitionResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{12}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *UpdateDefinitionResponse) GetRequestId() string {
@@ -1413,7 +1323,7 @@ type DeleteDefinitionRequest struct {
 
 func (x *DeleteDefinitionRequest) Reset() {
 	*x = DeleteDefinitionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[13]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1425,7 +1335,7 @@ func (x *DeleteDefinitionRequest) String() string {
 func (*DeleteDefinitionRequest) ProtoMessage() {}
 
 func (x *DeleteDefinitionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[13]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1438,7 +1348,7 @@ func (x *DeleteDefinitionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteDefinitionRequest.ProtoReflect.Descriptor instead.
 func (*DeleteDefinitionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{13}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeleteDefinitionRequest) GetRequestId() string {
@@ -1476,7 +1386,7 @@ type StartExecutionRequest struct {
 
 func (x *StartExecutionRequest) Reset() {
 	*x = StartExecutionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[14]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1488,7 +1398,7 @@ func (x *StartExecutionRequest) String() string {
 func (*StartExecutionRequest) ProtoMessage() {}
 
 func (x *StartExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[14]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1501,7 +1411,7 @@ func (x *StartExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartExecutionRequest.ProtoReflect.Descriptor instead.
 func (*StartExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{14}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StartExecutionRequest) GetRequestId() string {
@@ -1556,7 +1466,7 @@ type StartExecutionResponse struct {
 
 func (x *StartExecutionResponse) Reset() {
 	*x = StartExecutionResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[15]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1568,7 +1478,7 @@ func (x *StartExecutionResponse) String() string {
 func (*StartExecutionResponse) ProtoMessage() {}
 
 func (x *StartExecutionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[15]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1581,7 +1491,7 @@ func (x *StartExecutionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartExecutionResponse.ProtoReflect.Descriptor instead.
 func (*StartExecutionResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{15}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StartExecutionResponse) GetRequestId() string {
@@ -1608,7 +1518,7 @@ type GetExecutionRequest struct {
 
 func (x *GetExecutionRequest) Reset() {
 	*x = GetExecutionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[16]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1620,7 +1530,7 @@ func (x *GetExecutionRequest) String() string {
 func (*GetExecutionRequest) ProtoMessage() {}
 
 func (x *GetExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[16]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1633,7 +1543,7 @@ func (x *GetExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExecutionRequest.ProtoReflect.Descriptor instead.
 func (*GetExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{16}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetExecutionRequest) GetRequestId() string {
@@ -1660,7 +1570,7 @@ type GetExecutionResponse struct {
 
 func (x *GetExecutionResponse) Reset() {
 	*x = GetExecutionResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[17]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1672,7 +1582,7 @@ func (x *GetExecutionResponse) String() string {
 func (*GetExecutionResponse) ProtoMessage() {}
 
 func (x *GetExecutionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[17]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1685,7 +1595,7 @@ func (x *GetExecutionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExecutionResponse.ProtoReflect.Descriptor instead.
 func (*GetExecutionResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{17}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetExecutionResponse) GetRequestId() string {
@@ -1717,7 +1627,7 @@ type ListExecutionsRequest struct {
 
 func (x *ListExecutionsRequest) Reset() {
 	*x = ListExecutionsRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[18]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1729,7 +1639,7 @@ func (x *ListExecutionsRequest) String() string {
 func (*ListExecutionsRequest) ProtoMessage() {}
 
 func (x *ListExecutionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[18]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1742,7 +1652,7 @@ func (x *ListExecutionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutionsRequest.ProtoReflect.Descriptor instead.
 func (*ListExecutionsRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{18}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListExecutionsRequest) GetRequestId() string {
@@ -1805,7 +1715,7 @@ type ListExecutionsResponse struct {
 
 func (x *ListExecutionsResponse) Reset() {
 	*x = ListExecutionsResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[19]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1817,7 +1727,7 @@ func (x *ListExecutionsResponse) String() string {
 func (*ListExecutionsResponse) ProtoMessage() {}
 
 func (x *ListExecutionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[19]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1830,7 +1740,7 @@ func (x *ListExecutionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutionsResponse.ProtoReflect.Descriptor instead.
 func (*ListExecutionsResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{19}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListExecutionsResponse) GetRequestId() string {
@@ -1865,7 +1775,7 @@ type CancelExecutionRequest struct {
 
 func (x *CancelExecutionRequest) Reset() {
 	*x = CancelExecutionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[20]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1877,7 +1787,7 @@ func (x *CancelExecutionRequest) String() string {
 func (*CancelExecutionRequest) ProtoMessage() {}
 
 func (x *CancelExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[20]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1890,7 +1800,7 @@ func (x *CancelExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelExecutionRequest.ProtoReflect.Descriptor instead.
 func (*CancelExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{20}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CancelExecutionRequest) GetRequestId() string {
@@ -1926,7 +1836,7 @@ type SignalExecutionRequest struct {
 
 func (x *SignalExecutionRequest) Reset() {
 	*x = SignalExecutionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[21]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1938,7 +1848,7 @@ func (x *SignalExecutionRequest) String() string {
 func (*SignalExecutionRequest) ProtoMessage() {}
 
 func (x *SignalExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[21]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1951,7 +1861,7 @@ func (x *SignalExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignalExecutionRequest.ProtoReflect.Descriptor instead.
 func (*SignalExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{21}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SignalExecutionRequest) GetRequestId() string {
@@ -1993,7 +1903,7 @@ type QueryExecutionRequest struct {
 
 func (x *QueryExecutionRequest) Reset() {
 	*x = QueryExecutionRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[22]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2005,7 +1915,7 @@ func (x *QueryExecutionRequest) String() string {
 func (*QueryExecutionRequest) ProtoMessage() {}
 
 func (x *QueryExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[22]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2018,7 +1928,7 @@ func (x *QueryExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryExecutionRequest.ProtoReflect.Descriptor instead.
 func (*QueryExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{22}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *QueryExecutionRequest) GetRequestId() string {
@@ -2052,7 +1962,7 @@ type QueryExecutionResponse struct {
 
 func (x *QueryExecutionResponse) Reset() {
 	*x = QueryExecutionResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[23]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2064,7 +1974,7 @@ func (x *QueryExecutionResponse) String() string {
 func (*QueryExecutionResponse) ProtoMessage() {}
 
 func (x *QueryExecutionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[23]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2077,7 +1987,7 @@ func (x *QueryExecutionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryExecutionResponse.ProtoReflect.Descriptor instead.
 func (*QueryExecutionResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{23}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *QueryExecutionResponse) GetRequestId() string {
@@ -2105,7 +2015,7 @@ type GetStepExecutionsRequest struct {
 
 func (x *GetStepExecutionsRequest) Reset() {
 	*x = GetStepExecutionsRequest{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[24]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2117,7 +2027,7 @@ func (x *GetStepExecutionsRequest) String() string {
 func (*GetStepExecutionsRequest) ProtoMessage() {}
 
 func (x *GetStepExecutionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[24]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2130,7 +2040,7 @@ func (x *GetStepExecutionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStepExecutionsRequest.ProtoReflect.Descriptor instead.
 func (*GetStepExecutionsRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{24}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GetStepExecutionsRequest) GetRequestId() string {
@@ -2165,7 +2075,7 @@ type GetStepExecutionsResponse struct {
 
 func (x *GetStepExecutionsResponse) Reset() {
 	*x = GetStepExecutionsResponse{}
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[25]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2177,7 +2087,7 @@ func (x *GetStepExecutionsResponse) String() string {
 func (*GetStepExecutionsResponse) ProtoMessage() {}
 
 func (x *GetStepExecutionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[25]
+	mi := &file_plexspaces_v1_workflow_workflow_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2190,7 +2100,7 @@ func (x *GetStepExecutionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStepExecutionsResponse.ProtoReflect.Descriptor instead.
 func (*GetStepExecutionsResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{25}
+	return file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetStepExecutionsResponse) GetRequestId() string {
@@ -2218,14 +2128,14 @@ var File_plexspaces_v1_workflow_workflow_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_workflow_workflow_proto_rawDesc = "" +
 	"\n" +
-	"%plexspaces/v1/workflow/workflow.proto\x12\x16plexspaces.workflow.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xe1\x05\n" +
+	"%plexspaces/v1/workflow/workflow.proto\x12\x16plexspaces.workflow.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xdf\x05\n" +
 	"\x12WorkflowDefinition\x12\x1d\n" +
 	"\x02id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\x12!\n" +
 	"\x04name\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x04name\x12&\n" +
 	"\aversion\x18\x03 \x01(\tB\f\xe0A\x02\xbaH\x06r\x04\x10\x01\x18@R\aversion\x12B\n" +
 	"\x05steps\x18\x04 \x03(\v2\x1c.plexspaces.workflow.v1.StepB\x0e\xe0A\x02\xbaH\b\x92\x01\x05\b\x01\x10\xe8\aR\x05steps\x12P\n" +
-	"\x0fdefault_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationB\f\xbaH\t\xaa\x01\x06\"\x04\b\x80\xa3\x05R\x0edefaultTimeout\x12H\n" +
-	"\rdefault_retry\x18\x06 \x01(\v2#.plexspaces.workflow.v1.RetryConfigR\fdefaultRetry\x12N\n" +
+	"\x0fdefault_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationB\f\xbaH\t\xaa\x01\x06\"\x04\b\x80\xa3\x05R\x0edefaultTimeout\x12F\n" +
+	"\rdefault_retry\x18\x06 \x01(\v2!.plexspaces.common.v1.RetryPolicyR\fdefaultRetry\x12N\n" +
 	"\x06labels\x18\a \x03(\v26.plexspaces.workflow.v1.WorkflowDefinition.LabelsEntryR\x06labels\x12>\n" +
 	"\n" +
 	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\tcreatedAt\x12>\n" +
@@ -2234,26 +2144,18 @@ const file_plexspaces_v1_workflow_workflow_proto_rawDesc = "" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:v\x92As\n" +
-	"q*\x13Workflow Definition2<Versioned workflow template defining steps and configuration\xd2\x01\x02id\xd2\x01\x04name\xd2\x01\aversion\xd2\x01\x05steps\"\xe2\x03\n" +
+	"q*\x13Workflow Definition2<Versioned workflow template defining steps and configuration\xd2\x01\x02id\xd2\x01\x04name\xd2\x01\aversion\xd2\x01\x05steps\"\xe0\x03\n" +
 	"\x04Step\x12\x1d\n" +
 	"\x02id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\x12!\n" +
 	"\x04name\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x04name\x129\n" +
 	"\x04type\x18\x03 \x01(\x0e2 .plexspaces.workflow.v1.StepTypeB\x03\xe0A\x02R\x04type\x12'\n" +
 	"\n" +
 	"depends_on\x18\x04 \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\tdependsOn\x12@\n" +
-	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\atimeout\x129\n" +
-	"\x05retry\x18\x06 \x01(\v2#.plexspaces.workflow.v1.RetryConfigR\x05retry\x12#\n" +
+	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\atimeout\x127\n" +
+	"\x05retry\x18\x06 \x01(\v2!.plexspaces.common.v1.RetryPolicyR\x05retry\x12#\n" +
 	"\bon_error\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\aonError\x12/\n" +
 	"\x06config\x18\b \x01(\v2\x17.google.protobuf.StructR\x06config:a\x92A^\n" +
-	"\\*\rWorkflow Step28Single step in workflow with type-specific configuration\xd2\x01\x02id\xd2\x01\x04name\xd2\x01\x04type\"\x89\x03\n" +
-	"\vRetryConfig\x12+\n" +
-	"\fmax_attempts\x18\x01 \x01(\rB\b\xbaH\x05*\x03\x18\xe8\aR\vmaxAttempts\x129\n" +
-	"\x13initial_interval_ms\x18\x02 \x01(\rB\t\xbaH\x06*\x04\x18\xe0\xa7\x12R\x11initialIntervalMs\x12:\n" +
-	"\fbackoff_rate\x18\x03 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00$@)\x00\x00\x00\x00\x00\x00\xf0?R\vbackoffRate\x122\n" +
-	"\x0fmax_interval_ms\x18\x04 \x01(\rB\n" +
-	"\xbaH\a*\x05\x18\x80\xdd\xdb\x01R\rmaxIntervalMs\x12:\n" +
-	"\x10retryable_errors\x18\x05 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fretryableErrors:f\x92Ac\n" +
-	"a*\x13Retry Configuration2JExponential backoff retry policy. Unset max_attempts means 1 (no retries).\"\xcb\b\n" +
+	"\\*\rWorkflow Step28Single step in workflow with type-specific configuration\xd2\x01\x02id\xd2\x01\x04name\xd2\x01\x04type\"\xcb\b\n" +
 	"\x11WorkflowExecution\x12.\n" +
 	"\fexecution_id\x18\x01 \x01(\tB\v\xe0A\x03\xbaH\x05r\x03\x18\xff\x01R\vexecutionId\x122\n" +
 	"\rdefinition_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fdefinitionId\x12;\n" +
@@ -2514,7 +2416,7 @@ func file_plexspaces_v1_workflow_workflow_proto_rawDescGZIP() []byte {
 }
 
 var file_plexspaces_v1_workflow_workflow_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_plexspaces_v1_workflow_workflow_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_plexspaces_v1_workflow_workflow_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_plexspaces_v1_workflow_workflow_proto_goTypes = []any{
 	(StepType)(0),                     // 0: plexspaces.workflow.v1.StepType
 	(ExecutionStatus)(0),              // 1: plexspaces.workflow.v1.ExecutionStatus
@@ -2522,36 +2424,36 @@ var file_plexspaces_v1_workflow_workflow_proto_goTypes = []any{
 	(WorkflowError)(0),                // 3: plexspaces.workflow.v1.WorkflowError
 	(*WorkflowDefinition)(nil),        // 4: plexspaces.workflow.v1.WorkflowDefinition
 	(*Step)(nil),                      // 5: plexspaces.workflow.v1.Step
-	(*RetryConfig)(nil),               // 6: plexspaces.workflow.v1.RetryConfig
-	(*WorkflowExecution)(nil),         // 7: plexspaces.workflow.v1.WorkflowExecution
-	(*StepExecution)(nil),             // 8: plexspaces.workflow.v1.StepExecution
-	(*CreateDefinitionRequest)(nil),   // 9: plexspaces.workflow.v1.CreateDefinitionRequest
-	(*CreateDefinitionResponse)(nil),  // 10: plexspaces.workflow.v1.CreateDefinitionResponse
-	(*GetDefinitionRequest)(nil),      // 11: plexspaces.workflow.v1.GetDefinitionRequest
-	(*GetDefinitionResponse)(nil),     // 12: plexspaces.workflow.v1.GetDefinitionResponse
-	(*ListDefinitionsRequest)(nil),    // 13: plexspaces.workflow.v1.ListDefinitionsRequest
-	(*ListDefinitionsResponse)(nil),   // 14: plexspaces.workflow.v1.ListDefinitionsResponse
-	(*UpdateDefinitionRequest)(nil),   // 15: plexspaces.workflow.v1.UpdateDefinitionRequest
-	(*UpdateDefinitionResponse)(nil),  // 16: plexspaces.workflow.v1.UpdateDefinitionResponse
-	(*DeleteDefinitionRequest)(nil),   // 17: plexspaces.workflow.v1.DeleteDefinitionRequest
-	(*StartExecutionRequest)(nil),     // 18: plexspaces.workflow.v1.StartExecutionRequest
-	(*StartExecutionResponse)(nil),    // 19: plexspaces.workflow.v1.StartExecutionResponse
-	(*GetExecutionRequest)(nil),       // 20: plexspaces.workflow.v1.GetExecutionRequest
-	(*GetExecutionResponse)(nil),      // 21: plexspaces.workflow.v1.GetExecutionResponse
-	(*ListExecutionsRequest)(nil),     // 22: plexspaces.workflow.v1.ListExecutionsRequest
-	(*ListExecutionsResponse)(nil),    // 23: plexspaces.workflow.v1.ListExecutionsResponse
-	(*CancelExecutionRequest)(nil),    // 24: plexspaces.workflow.v1.CancelExecutionRequest
-	(*SignalExecutionRequest)(nil),    // 25: plexspaces.workflow.v1.SignalExecutionRequest
-	(*QueryExecutionRequest)(nil),     // 26: plexspaces.workflow.v1.QueryExecutionRequest
-	(*QueryExecutionResponse)(nil),    // 27: plexspaces.workflow.v1.QueryExecutionResponse
-	(*GetStepExecutionsRequest)(nil),  // 28: plexspaces.workflow.v1.GetStepExecutionsRequest
-	(*GetStepExecutionsResponse)(nil), // 29: plexspaces.workflow.v1.GetStepExecutionsResponse
-	nil,                               // 30: plexspaces.workflow.v1.WorkflowDefinition.LabelsEntry
-	nil,                               // 31: plexspaces.workflow.v1.WorkflowExecution.LabelsEntry
-	nil,                               // 32: plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntry
-	nil,                               // 33: plexspaces.workflow.v1.StartExecutionRequest.LabelsEntry
-	nil,                               // 34: plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntry
-	(*durationpb.Duration)(nil),       // 35: google.protobuf.Duration
+	(*WorkflowExecution)(nil),         // 6: plexspaces.workflow.v1.WorkflowExecution
+	(*StepExecution)(nil),             // 7: plexspaces.workflow.v1.StepExecution
+	(*CreateDefinitionRequest)(nil),   // 8: plexspaces.workflow.v1.CreateDefinitionRequest
+	(*CreateDefinitionResponse)(nil),  // 9: plexspaces.workflow.v1.CreateDefinitionResponse
+	(*GetDefinitionRequest)(nil),      // 10: plexspaces.workflow.v1.GetDefinitionRequest
+	(*GetDefinitionResponse)(nil),     // 11: plexspaces.workflow.v1.GetDefinitionResponse
+	(*ListDefinitionsRequest)(nil),    // 12: plexspaces.workflow.v1.ListDefinitionsRequest
+	(*ListDefinitionsResponse)(nil),   // 13: plexspaces.workflow.v1.ListDefinitionsResponse
+	(*UpdateDefinitionRequest)(nil),   // 14: plexspaces.workflow.v1.UpdateDefinitionRequest
+	(*UpdateDefinitionResponse)(nil),  // 15: plexspaces.workflow.v1.UpdateDefinitionResponse
+	(*DeleteDefinitionRequest)(nil),   // 16: plexspaces.workflow.v1.DeleteDefinitionRequest
+	(*StartExecutionRequest)(nil),     // 17: plexspaces.workflow.v1.StartExecutionRequest
+	(*StartExecutionResponse)(nil),    // 18: plexspaces.workflow.v1.StartExecutionResponse
+	(*GetExecutionRequest)(nil),       // 19: plexspaces.workflow.v1.GetExecutionRequest
+	(*GetExecutionResponse)(nil),      // 20: plexspaces.workflow.v1.GetExecutionResponse
+	(*ListExecutionsRequest)(nil),     // 21: plexspaces.workflow.v1.ListExecutionsRequest
+	(*ListExecutionsResponse)(nil),    // 22: plexspaces.workflow.v1.ListExecutionsResponse
+	(*CancelExecutionRequest)(nil),    // 23: plexspaces.workflow.v1.CancelExecutionRequest
+	(*SignalExecutionRequest)(nil),    // 24: plexspaces.workflow.v1.SignalExecutionRequest
+	(*QueryExecutionRequest)(nil),     // 25: plexspaces.workflow.v1.QueryExecutionRequest
+	(*QueryExecutionResponse)(nil),    // 26: plexspaces.workflow.v1.QueryExecutionResponse
+	(*GetStepExecutionsRequest)(nil),  // 27: plexspaces.workflow.v1.GetStepExecutionsRequest
+	(*GetStepExecutionsResponse)(nil), // 28: plexspaces.workflow.v1.GetStepExecutionsResponse
+	nil,                               // 29: plexspaces.workflow.v1.WorkflowDefinition.LabelsEntry
+	nil,                               // 30: plexspaces.workflow.v1.WorkflowExecution.LabelsEntry
+	nil,                               // 31: plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntry
+	nil,                               // 32: plexspaces.workflow.v1.StartExecutionRequest.LabelsEntry
+	nil,                               // 33: plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntry
+	(*durationpb.Duration)(nil),       // 34: google.protobuf.Duration
+	(*v1.RetryPolicy)(nil),            // 35: plexspaces.common.v1.RetryPolicy
 	(*timestamppb.Timestamp)(nil),     // 36: google.protobuf.Timestamp
 	(*structpb.Struct)(nil),           // 37: google.protobuf.Struct
 	(*v1.PageRequest)(nil),            // 38: plexspaces.common.v1.PageRequest
@@ -2561,14 +2463,14 @@ var file_plexspaces_v1_workflow_workflow_proto_goTypes = []any{
 }
 var file_plexspaces_v1_workflow_workflow_proto_depIdxs = []int32{
 	5,  // 0: plexspaces.workflow.v1.WorkflowDefinition.steps:type_name -> plexspaces.workflow.v1.Step
-	35, // 1: plexspaces.workflow.v1.WorkflowDefinition.default_timeout:type_name -> google.protobuf.Duration
-	6,  // 2: plexspaces.workflow.v1.WorkflowDefinition.default_retry:type_name -> plexspaces.workflow.v1.RetryConfig
-	30, // 3: plexspaces.workflow.v1.WorkflowDefinition.labels:type_name -> plexspaces.workflow.v1.WorkflowDefinition.LabelsEntry
+	34, // 1: plexspaces.workflow.v1.WorkflowDefinition.default_timeout:type_name -> google.protobuf.Duration
+	35, // 2: plexspaces.workflow.v1.WorkflowDefinition.default_retry:type_name -> plexspaces.common.v1.RetryPolicy
+	29, // 3: plexspaces.workflow.v1.WorkflowDefinition.labels:type_name -> plexspaces.workflow.v1.WorkflowDefinition.LabelsEntry
 	36, // 4: plexspaces.workflow.v1.WorkflowDefinition.created_at:type_name -> google.protobuf.Timestamp
 	36, // 5: plexspaces.workflow.v1.WorkflowDefinition.updated_at:type_name -> google.protobuf.Timestamp
 	0,  // 6: plexspaces.workflow.v1.Step.type:type_name -> plexspaces.workflow.v1.StepType
-	35, // 7: plexspaces.workflow.v1.Step.timeout:type_name -> google.protobuf.Duration
-	6,  // 8: plexspaces.workflow.v1.Step.retry:type_name -> plexspaces.workflow.v1.RetryConfig
+	34, // 7: plexspaces.workflow.v1.Step.timeout:type_name -> google.protobuf.Duration
+	35, // 8: plexspaces.workflow.v1.Step.retry:type_name -> plexspaces.common.v1.RetryPolicy
 	37, // 9: plexspaces.workflow.v1.Step.config:type_name -> google.protobuf.Struct
 	1,  // 10: plexspaces.workflow.v1.WorkflowExecution.status:type_name -> plexspaces.workflow.v1.ExecutionStatus
 	37, // 11: plexspaces.workflow.v1.WorkflowExecution.input:type_name -> google.protobuf.Struct
@@ -2577,7 +2479,7 @@ var file_plexspaces_v1_workflow_workflow_proto_depIdxs = []int32{
 	36, // 14: plexspaces.workflow.v1.WorkflowExecution.started_at:type_name -> google.protobuf.Timestamp
 	36, // 15: plexspaces.workflow.v1.WorkflowExecution.completed_at:type_name -> google.protobuf.Timestamp
 	36, // 16: plexspaces.workflow.v1.WorkflowExecution.updated_at:type_name -> google.protobuf.Timestamp
-	31, // 17: plexspaces.workflow.v1.WorkflowExecution.labels:type_name -> plexspaces.workflow.v1.WorkflowExecution.LabelsEntry
+	30, // 17: plexspaces.workflow.v1.WorkflowExecution.labels:type_name -> plexspaces.workflow.v1.WorkflowExecution.LabelsEntry
 	36, // 18: plexspaces.workflow.v1.WorkflowExecution.last_heartbeat:type_name -> google.protobuf.Timestamp
 	2,  // 19: plexspaces.workflow.v1.StepExecution.status:type_name -> plexspaces.workflow.v1.StepStatus
 	37, // 20: plexspaces.workflow.v1.StepExecution.input:type_name -> google.protobuf.Struct
@@ -2588,50 +2490,50 @@ var file_plexspaces_v1_workflow_workflow_proto_depIdxs = []int32{
 	4,  // 25: plexspaces.workflow.v1.CreateDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
 	4,  // 26: plexspaces.workflow.v1.GetDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
 	38, // 27: plexspaces.workflow.v1.ListDefinitionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
-	32, // 28: plexspaces.workflow.v1.ListDefinitionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntry
+	31, // 28: plexspaces.workflow.v1.ListDefinitionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntry
 	4,  // 29: plexspaces.workflow.v1.ListDefinitionsResponse.definitions:type_name -> plexspaces.workflow.v1.WorkflowDefinition
 	39, // 30: plexspaces.workflow.v1.ListDefinitionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
 	4,  // 31: plexspaces.workflow.v1.UpdateDefinitionRequest.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
 	4,  // 32: plexspaces.workflow.v1.UpdateDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
 	37, // 33: plexspaces.workflow.v1.StartExecutionRequest.input:type_name -> google.protobuf.Struct
-	33, // 34: plexspaces.workflow.v1.StartExecutionRequest.labels:type_name -> plexspaces.workflow.v1.StartExecutionRequest.LabelsEntry
-	7,  // 35: plexspaces.workflow.v1.GetExecutionResponse.execution:type_name -> plexspaces.workflow.v1.WorkflowExecution
+	32, // 34: plexspaces.workflow.v1.StartExecutionRequest.labels:type_name -> plexspaces.workflow.v1.StartExecutionRequest.LabelsEntry
+	6,  // 35: plexspaces.workflow.v1.GetExecutionResponse.execution:type_name -> plexspaces.workflow.v1.WorkflowExecution
 	38, // 36: plexspaces.workflow.v1.ListExecutionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
 	1,  // 37: plexspaces.workflow.v1.ListExecutionsRequest.status:type_name -> plexspaces.workflow.v1.ExecutionStatus
-	34, // 38: plexspaces.workflow.v1.ListExecutionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntry
+	33, // 38: plexspaces.workflow.v1.ListExecutionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntry
 	36, // 39: plexspaces.workflow.v1.ListExecutionsRequest.started_after:type_name -> google.protobuf.Timestamp
 	36, // 40: plexspaces.workflow.v1.ListExecutionsRequest.started_before:type_name -> google.protobuf.Timestamp
-	7,  // 41: plexspaces.workflow.v1.ListExecutionsResponse.executions:type_name -> plexspaces.workflow.v1.WorkflowExecution
+	6,  // 41: plexspaces.workflow.v1.ListExecutionsResponse.executions:type_name -> plexspaces.workflow.v1.WorkflowExecution
 	39, // 42: plexspaces.workflow.v1.ListExecutionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
 	40, // 43: plexspaces.workflow.v1.SignalExecutionRequest.data:type_name -> google.protobuf.Value
 	40, // 44: plexspaces.workflow.v1.QueryExecutionResponse.result:type_name -> google.protobuf.Value
 	38, // 45: plexspaces.workflow.v1.GetStepExecutionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
-	8,  // 46: plexspaces.workflow.v1.GetStepExecutionsResponse.step_executions:type_name -> plexspaces.workflow.v1.StepExecution
+	7,  // 46: plexspaces.workflow.v1.GetStepExecutionsResponse.step_executions:type_name -> plexspaces.workflow.v1.StepExecution
 	39, // 47: plexspaces.workflow.v1.GetStepExecutionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
-	9,  // 48: plexspaces.workflow.v1.WorkflowService.CreateDefinition:input_type -> plexspaces.workflow.v1.CreateDefinitionRequest
-	11, // 49: plexspaces.workflow.v1.WorkflowService.GetDefinition:input_type -> plexspaces.workflow.v1.GetDefinitionRequest
-	13, // 50: plexspaces.workflow.v1.WorkflowService.ListDefinitions:input_type -> plexspaces.workflow.v1.ListDefinitionsRequest
-	15, // 51: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:input_type -> plexspaces.workflow.v1.UpdateDefinitionRequest
-	17, // 52: plexspaces.workflow.v1.WorkflowService.DeleteDefinition:input_type -> plexspaces.workflow.v1.DeleteDefinitionRequest
-	18, // 53: plexspaces.workflow.v1.WorkflowService.StartExecution:input_type -> plexspaces.workflow.v1.StartExecutionRequest
-	20, // 54: plexspaces.workflow.v1.WorkflowService.GetExecution:input_type -> plexspaces.workflow.v1.GetExecutionRequest
-	22, // 55: plexspaces.workflow.v1.WorkflowService.ListExecutions:input_type -> plexspaces.workflow.v1.ListExecutionsRequest
-	24, // 56: plexspaces.workflow.v1.WorkflowService.CancelExecution:input_type -> plexspaces.workflow.v1.CancelExecutionRequest
-	25, // 57: plexspaces.workflow.v1.WorkflowService.SignalExecution:input_type -> plexspaces.workflow.v1.SignalExecutionRequest
-	26, // 58: plexspaces.workflow.v1.WorkflowService.QueryExecution:input_type -> plexspaces.workflow.v1.QueryExecutionRequest
-	28, // 59: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:input_type -> plexspaces.workflow.v1.GetStepExecutionsRequest
-	10, // 60: plexspaces.workflow.v1.WorkflowService.CreateDefinition:output_type -> plexspaces.workflow.v1.CreateDefinitionResponse
-	12, // 61: plexspaces.workflow.v1.WorkflowService.GetDefinition:output_type -> plexspaces.workflow.v1.GetDefinitionResponse
-	14, // 62: plexspaces.workflow.v1.WorkflowService.ListDefinitions:output_type -> plexspaces.workflow.v1.ListDefinitionsResponse
-	16, // 63: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:output_type -> plexspaces.workflow.v1.UpdateDefinitionResponse
+	8,  // 48: plexspaces.workflow.v1.WorkflowService.CreateDefinition:input_type -> plexspaces.workflow.v1.CreateDefinitionRequest
+	10, // 49: plexspaces.workflow.v1.WorkflowService.GetDefinition:input_type -> plexspaces.workflow.v1.GetDefinitionRequest
+	12, // 50: plexspaces.workflow.v1.WorkflowService.ListDefinitions:input_type -> plexspaces.workflow.v1.ListDefinitionsRequest
+	14, // 51: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:input_type -> plexspaces.workflow.v1.UpdateDefinitionRequest
+	16, // 52: plexspaces.workflow.v1.WorkflowService.DeleteDefinition:input_type -> plexspaces.workflow.v1.DeleteDefinitionRequest
+	17, // 53: plexspaces.workflow.v1.WorkflowService.StartExecution:input_type -> plexspaces.workflow.v1.StartExecutionRequest
+	19, // 54: plexspaces.workflow.v1.WorkflowService.GetExecution:input_type -> plexspaces.workflow.v1.GetExecutionRequest
+	21, // 55: plexspaces.workflow.v1.WorkflowService.ListExecutions:input_type -> plexspaces.workflow.v1.ListExecutionsRequest
+	23, // 56: plexspaces.workflow.v1.WorkflowService.CancelExecution:input_type -> plexspaces.workflow.v1.CancelExecutionRequest
+	24, // 57: plexspaces.workflow.v1.WorkflowService.SignalExecution:input_type -> plexspaces.workflow.v1.SignalExecutionRequest
+	25, // 58: plexspaces.workflow.v1.WorkflowService.QueryExecution:input_type -> plexspaces.workflow.v1.QueryExecutionRequest
+	27, // 59: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:input_type -> plexspaces.workflow.v1.GetStepExecutionsRequest
+	9,  // 60: plexspaces.workflow.v1.WorkflowService.CreateDefinition:output_type -> plexspaces.workflow.v1.CreateDefinitionResponse
+	11, // 61: plexspaces.workflow.v1.WorkflowService.GetDefinition:output_type -> plexspaces.workflow.v1.GetDefinitionResponse
+	13, // 62: plexspaces.workflow.v1.WorkflowService.ListDefinitions:output_type -> plexspaces.workflow.v1.ListDefinitionsResponse
+	15, // 63: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:output_type -> plexspaces.workflow.v1.UpdateDefinitionResponse
 	41, // 64: plexspaces.workflow.v1.WorkflowService.DeleteDefinition:output_type -> plexspaces.common.v1.Empty
-	19, // 65: plexspaces.workflow.v1.WorkflowService.StartExecution:output_type -> plexspaces.workflow.v1.StartExecutionResponse
-	21, // 66: plexspaces.workflow.v1.WorkflowService.GetExecution:output_type -> plexspaces.workflow.v1.GetExecutionResponse
-	23, // 67: plexspaces.workflow.v1.WorkflowService.ListExecutions:output_type -> plexspaces.workflow.v1.ListExecutionsResponse
+	18, // 65: plexspaces.workflow.v1.WorkflowService.StartExecution:output_type -> plexspaces.workflow.v1.StartExecutionResponse
+	20, // 66: plexspaces.workflow.v1.WorkflowService.GetExecution:output_type -> plexspaces.workflow.v1.GetExecutionResponse
+	22, // 67: plexspaces.workflow.v1.WorkflowService.ListExecutions:output_type -> plexspaces.workflow.v1.ListExecutionsResponse
 	41, // 68: plexspaces.workflow.v1.WorkflowService.CancelExecution:output_type -> plexspaces.common.v1.Empty
 	41, // 69: plexspaces.workflow.v1.WorkflowService.SignalExecution:output_type -> plexspaces.common.v1.Empty
-	27, // 70: plexspaces.workflow.v1.WorkflowService.QueryExecution:output_type -> plexspaces.workflow.v1.QueryExecutionResponse
-	29, // 71: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:output_type -> plexspaces.workflow.v1.GetStepExecutionsResponse
+	26, // 70: plexspaces.workflow.v1.WorkflowService.QueryExecution:output_type -> plexspaces.workflow.v1.QueryExecutionResponse
+	28, // 71: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:output_type -> plexspaces.workflow.v1.GetStepExecutionsResponse
 	60, // [60:72] is the sub-list for method output_type
 	48, // [48:60] is the sub-list for method input_type
 	48, // [48:48] is the sub-list for extension type_name
@@ -2644,14 +2546,14 @@ func file_plexspaces_v1_workflow_workflow_proto_init() {
 	if File_plexspaces_v1_workflow_workflow_proto != nil {
 		return
 	}
-	file_plexspaces_v1_workflow_workflow_proto_msgTypes[3].OneofWrappers = []any{}
+	file_plexspaces_v1_workflow_workflow_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plexspaces_v1_workflow_workflow_proto_rawDesc), len(file_plexspaces_v1_workflow_workflow_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   31,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

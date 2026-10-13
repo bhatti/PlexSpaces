@@ -26,6 +26,7 @@ members = [
     "crates/elastic-pool",
     "crates/http-client",
     "crates/locks",
+    "crates/outbox",
     "crates/scheduler",
     "crates/cli",
     "crates/dashboard",
@@ -63,6 +64,7 @@ default-members = [
     "crates/elastic-pool",
     "crates/http-client",
     "crates/locks",
+    "crates/outbox",
     "crates/scheduler",
     # Excluded from default (rarely changed or optional):
     # "crates/wasm-runtime",    # Only needed for WASM actors
@@ -207,6 +209,7 @@ bytes = "1.7"
 bincode = "1.3"
 
 # Utilities
+rand = "0.8"
 uuid = { version = "1.6", features = ["v4", "v7", "serde"] }
 ulid = { version = "1.1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }

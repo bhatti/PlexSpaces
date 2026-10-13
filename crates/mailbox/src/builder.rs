@@ -58,6 +58,7 @@ pub struct MailboxBuilder {
     config: MailboxConfig,
     channel_provider: Option<ChannelProvider>,
     channel_config: Option<ChannelConfig>,
+    injected_channel: Option<std::sync::Arc<dyn plexspaces_channel::Channel>>,
 }
 
 impl MailboxBuilder {
@@ -73,7 +74,17 @@ impl MailboxBuilder {
             config: mailbox_config_default(),
             channel_provider: None, // Will default to InMemory
             channel_config: None,
+            injected_channel: None,
         }
+    }
+
+    /// Inject a pre-created channel (e.g., from ChannelRepository) as the mailbox backend.
+    ///
+    /// When set, the mailbox skips channel creation and uses this channel directly,
+    /// enabling durable mailboxes backed by the node's shared DB pool.
+    pub fn with_channel(mut self, channel: std::sync::Arc<dyn plexspaces_channel::Channel>) -> Self {
+        self.injected_channel = Some(channel);
+        self
     }
 
     /// Use in-memory channel backend (default)
@@ -268,8 +279,8 @@ impl MailboxBuilder {
             config.channel_config = Some(ch_config);
         }
 
-        // Create mailbox
-        Mailbox::new(config, mailbox_id, String::new(), String::new(), None).await
+        // Create mailbox (injected_channel overrides DB-backed channel creation when set)
+        Mailbox::new(config, mailbox_id, String::new(), String::new(), None, self.injected_channel).await
     }
 }
 
@@ -348,7 +359,7 @@ mod tests {
         use crate::BackpressureStrategy;
 
         let _pair = MailboxBuilder::new()
-            .with_backpressure(BackpressureStrategy::DropOldest)
+            .with_backpressure(BackpressureStrategy::BackpressureStrategyDropOldest)
             .build("test-mailbox".to_string())
             .await
             .unwrap();
@@ -406,7 +417,7 @@ mod tests {
             .with_in_memory()
             .with_capacity(3000)
             .with_ordering(crate::OrderingStrategy::OrderingFifo)
-            .with_backpressure(crate::BackpressureStrategy::Error)
+            .with_backpressure(crate::BackpressureStrategy::BackpressureStrategyError)
             .build("test-mailbox".to_string())
             .await
             .unwrap();
@@ -452,7 +463,7 @@ mod tests {
         let mut config = mailbox_config_default();
         config.channel_provider = 999; // Invalid backend value
 
-        let result = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None).await;
+        let result = Mailbox::new(config, "test-mailbox".to_string(), String::new(), String::new(), None, None).await;
 
         // Should fail because backend is invalid
         assert!(result.is_err());

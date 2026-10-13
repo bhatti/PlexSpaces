@@ -129,7 +129,7 @@
 //! - WorkflowDefinition: Versioned workflow template
 //! - WorkflowExecution: Running instance metadata
 //! - Step types: Task, Parallel, Map, Choice, Wait, Signal
-//! - RetryConfig: Exponential backoff retry policy
+//! - RetryPolicy: Exponential backoff retry policy (canonical, from common.proto)
 //!
 //! ### Hybrid Storage Architecture
 //! - **Journal** (via DurabilityFacet): Source of truth for workflow state
@@ -219,7 +219,7 @@ pub use storage::sql::{
 };
 pub use storage::WorkflowStorage;
 pub use types::{
-    ExecutionStatus, ExecutionStatusExt, RetryConfig, Step, StepExecution, StepExecutionExt,
+    ExecutionStatus, ExecutionStatusExt, RetryPolicy, Step, StepExecution, StepExecutionExt,
     StepStatus, StepStatusExt, StepType, WorkflowDefinition, WorkflowError, WorkflowErrorProto,
     WorkflowExecution, WorkflowExecutionExt, WorkflowExecutionOutputExt,
 };

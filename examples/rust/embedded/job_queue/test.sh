@@ -23,6 +23,7 @@ OUTPUT=$(CARGO_TARGET_DIR="${REPO_ROOT}/target" cargo run 2>&1)
 echo "$OUTPUT"
 
 PASS=0
+TOTAL=9
 
 if echo "$OUTPUT" | grep -q "All benchmark assertions passed"; then
     PASS=$((PASS + 1))
@@ -40,12 +41,32 @@ if echo "$OUTPUT" | grep -q "Partitioned relay assertions passed"; then
     PASS=$((PASS + 1))
 fi
 
-if [ "$PASS" -ge 4 ]; then
+if echo "$OUTPUT" | grep -q "UC1 Thundering herd assertions passed"; then
+    PASS=$((PASS + 1))
+fi
+
+if echo "$OUTPUT" | grep -q "UC2 Config wave deploy assertions passed"; then
+    PASS=$((PASS + 1))
+fi
+
+if echo "$OUTPUT" | grep -q "UC3 Heartbeat coalescing assertions passed"; then
+    PASS=$((PASS + 1))
+fi
+
+if echo "$OUTPUT" | grep -q "UC4 Telemetry fallback assertions passed"; then
+    PASS=$((PASS + 1))
+fi
+
+if echo "$OUTPUT" | grep -q "UC5 Reliable offline delivery assertions passed"; then
+    PASS=$((PASS + 1))
+fi
+
+if [ "$PASS" -ge "$TOTAL" ]; then
     echo ""
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}${BOLD}  Job Queue (Rust Embedded) — All tests passed ($PASS/4 checks)${NC}"
+    echo -e "${GREEN}${BOLD}  Job Queue (Rust Embedded) — All tests passed ($PASS/$TOTAL checks)${NC}"
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════════════${NC}"
 else
-    echo -e "${RED}FAIL: Only $PASS/4 checks passed${NC}"
+    echo -e "${RED}FAIL: Only $PASS/$TOTAL checks passed${NC}"
     exit 1
 fi

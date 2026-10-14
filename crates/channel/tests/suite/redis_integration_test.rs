@@ -344,7 +344,7 @@ async fn test_redis_nack_requeue() {
     assert_eq!(messages.len(), 1);
 
     // Nack with requeue
-    channel.nack(&msg_id, true).await.expect("Failed to nack");
+    channel.nack(&msg_id, true, None).await.expect("Failed to nack");
 
     // Message should be redelivered
     let redelivered = channel

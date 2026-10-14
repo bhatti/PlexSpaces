@@ -67,7 +67,7 @@ use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 /// SQLite channel implementation for durable messaging
@@ -329,6 +329,8 @@ impl SqliteChannel {
                 timestamp           INTEGER NOT NULL,
                 acked               INTEGER NOT NULL DEFAULT 0,
                 dead_lettered       INTEGER NOT NULL DEFAULT 0,
+                delivery_count      INTEGER NOT NULL DEFAULT 0,
+                send_at             INTEGER NOT NULL DEFAULT 0,
                 created_at          INTEGER NOT NULL
             )"#,
             table_name
@@ -338,9 +340,10 @@ impl SqliteChannel {
             .await
             .map_err(|e| ChannelError::BackendError(e.to_string()))?;
 
-        // Hot path: tenant+namespace-scoped poll of pending unacked messages
+        // Hot path: tenant+namespace-scoped poll of pending unacked messages eligible for delivery.
+        // send_at in leading position so the relay query (send_at <= ?) uses the index.
         sqlx::query(&format!(
-            "CREATE INDEX IF NOT EXISTS idx_{}_unacked ON {}(tenant_id, namespace, channel_name, created_at) WHERE acked = 0 AND dead_lettered = 0",
+            "CREATE INDEX IF NOT EXISTS idx_{}_unacked ON {}(tenant_id, namespace, channel_name, send_at, created_at) WHERE acked = 0 AND dead_lettered = 0",
             table_name, table_name
         )).execute(pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
 
@@ -361,13 +364,14 @@ impl SqliteChannel {
 
     /// Recover unacked messages from database
     async fn recover_unacked_messages(&self) -> ChannelResult<()> {
-        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at, 7=idempotency_key, 8=conflict_resolution
         let query_sql = format!(
             r#"
-            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at, idempotency_key, conflict_resolution
+            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at,
+                   idempotency_key, conflict_resolution, delivery_count
             FROM {}
             WHERE tenant_id = ? AND namespace = ? AND channel_name = ? AND acked = 0 AND dead_lettered = 0
-            ORDER BY created_at ASC
+                  AND (send_at = 0 OR send_at <= ?)
+            ORDER BY send_at ASC, created_at ASC
             "#,
             self.table_name
         );
@@ -376,6 +380,7 @@ impl SqliteChannel {
             .bind(&self.tenant_id)
             .bind(&self.namespace)
             .bind(&self.config.name)
+            .bind(Self::system_time_to_unix_ms(SystemTime::now()))
             .fetch_all(&self.pool)
             .await
             .map_err(|e| {
@@ -394,8 +399,8 @@ impl SqliteChannel {
                 serde_json::from_str(&headers_json).unwrap_or_default();
             let idempotency_key: String = row.try_get(7).unwrap_or_default();
             let conflict_resolution: i32 = row.try_get(8).unwrap_or(0);
+            let delivery_count: i32 = row.try_get(9).unwrap_or(0);
 
-            // Reconstruct Message
             let message = Message {
                 id: id.clone(),
                 channel: self.config.name.clone(),
@@ -407,6 +412,7 @@ impl SqliteChannel {
                 headers,
                 idempotency_key,
                 conflict_resolution,
+                delivery_count: delivery_count as u32,
                 ..Default::default()
             };
 
@@ -414,16 +420,15 @@ impl SqliteChannel {
             recovered_count += 1;
         }
 
-        // Update stats
         self.stats
             .messages_pending
             .store(recovered_count, Ordering::Relaxed);
 
         if recovered_count > 0 {
             tracing::info!(
-                "Recovered {} unacked messages for channel '{}'",
-                recovered_count,
-                self.config.name
+                recovered = recovered_count,
+                channel = %self.config.name,
+                "Recovered unacked messages"
             );
         }
 
@@ -543,10 +548,9 @@ impl Channel for SqliteChannel {
             // No unacked row with this key — fall through to INSERT.
         }
 
-        // Insert message into database
         let insert_sql = format!(
-            r#"INSERT INTO {} (id, tenant_id, namespace, channel_name, payload, headers_json, idempotency_key, conflict_resolution, timestamp, acked, dead_lettered, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)"#,
+            r#"INSERT INTO {} (id, tenant_id, namespace, channel_name, payload, headers_json, idempotency_key, conflict_resolution, timestamp, acked, dead_lettered, delivery_count, send_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)"#,
             self.table_name
         );
 
@@ -574,15 +578,17 @@ impl Channel for SqliteChannel {
 
     async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         let mut messages = Vec::new();
+        let now_ms = Self::system_time_to_unix_ms(SystemTime::now());
 
-        // Query unacked messages
-        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at, 7=idempotency_key, 8=conflict_resolution
         let query_sql = format!(
             r#"
-            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at, idempotency_key, conflict_resolution
+            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at,
+                   idempotency_key, conflict_resolution, delivery_count
             FROM {}
-            WHERE tenant_id = ? AND namespace = ? AND channel_name = ? AND acked = 0 AND dead_lettered = 0
-            ORDER BY created_at ASC
+            WHERE tenant_id = ? AND namespace = ? AND channel_name = ?
+              AND acked = 0 AND dead_lettered = 0
+              AND (send_at = 0 OR send_at <= ?)
+            ORDER BY send_at ASC, created_at ASC
             LIMIT ?
             "#,
             self.table_name
@@ -592,6 +598,7 @@ impl Channel for SqliteChannel {
             .bind(&self.tenant_id)
             .bind(&self.namespace)
             .bind(&self.config.name)
+            .bind(now_ms)
             .bind(max_messages as i64)
             .fetch_all(&self.pool)
             .await
@@ -608,6 +615,7 @@ impl Channel for SqliteChannel {
                 serde_json::from_str(&headers_json).unwrap_or_default();
             let idempotency_key: String = row.try_get(7).unwrap_or_default();
             let conflict_resolution: i32 = row.try_get(8).unwrap_or(0);
+            let delivery_count: i32 = row.try_get(9).unwrap_or(0);
 
             let message = Message {
                 id: id.clone(),
@@ -620,17 +628,16 @@ impl Channel for SqliteChannel {
                 headers,
                 idempotency_key,
                 conflict_resolution,
+                delivery_count: delivery_count as u32,
                 ..Default::default()
             };
 
             messages.push(message.clone());
 
-            // Store in pending acks
             let mut pending_acks = self.pending_acks.write().await;
             pending_acks.insert(id, message);
         }
 
-        // Update stats
         if !messages.is_empty() {
             self.stats
                 .messages_received
@@ -770,21 +777,21 @@ impl Channel for SqliteChannel {
         Ok(())
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
-        // Get retry/DLQ config from channel config
-        let max_retries = crate::channel::max_retries_from_config(&self.config);
-        let dlq_enabled = self.config.dlq_enabled;
+    async fn nack(&self, message_id: &str, requeue: bool, delay: Option<Duration>) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_dlq, record_channel_nack, record_channel_nack_delayed, record_channel_latency_from_start};
+        use std::time::Instant;
 
-        // Check if message exists
+        let start = Instant::now();
+        let backend = backend_name(self.config.provider);
+        let dlq_enabled = self.config.dlq_enabled;
+        let max_retries = crate::channel::max_retries_from_config(&self.config);
+
         let check_sql = format!(
-            r#"
-            SELECT acked FROM {}
-            WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?
-            "#,
+            "SELECT delivery_count FROM {} WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?",
             self.table_name
         );
 
-        let acked_status: Option<i32> = sqlx::query_scalar(&check_sql)
+        let delivery_count: Option<i32> = sqlx::query_scalar(&check_sql)
             .bind(message_id)
             .bind(&self.tenant_id)
             .bind(&self.namespace)
@@ -795,25 +802,24 @@ impl Channel for SqliteChannel {
                 ChannelError::BackendError(format!("Failed to check message status: {}", e))
             })?;
 
-        if acked_status.is_none() {
-            return Err(ChannelError::MessageNotFound(message_id.to_string()));
-        }
+        let current_delivery_count = match delivery_count {
+            Some(c) => c as u32,
+            None => return Err(ChannelError::MessageNotFound(message_id.to_string())),
+        };
 
-        // For now, we don't track delivery_count (it's not in the schema)
-        // We'll use a simple approach: if requeue is true, reset acked flag
-        // In a production system, you'd want to add delivery_count to the schema
-        if requeue {
-            // Reset acked flag to 0 (requeue)
+        if requeue && current_delivery_count < max_retries {
+            let send_at_ms = delay
+                .map(|d: Duration| Self::system_time_to_unix_ms(SystemTime::now()) + d.as_millis() as i64)
+                .unwrap_or(0);
+
             let update_sql = format!(
-                r#"
-                UPDATE {}
-                SET acked = 0
-                WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?
-                "#,
+                "UPDATE {} SET acked = 0, delivery_count = delivery_count + 1, send_at = ? \
+                 WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?",
                 self.table_name
             );
 
             let result = sqlx::query(&update_sql)
+                .bind(send_at_ms)
                 .bind(message_id)
                 .bind(&self.tenant_id)
                 .bind(&self.namespace)
@@ -828,96 +834,73 @@ impl Channel for SqliteChannel {
                 return Err(ChannelError::MessageNotFound(message_id.to_string()));
             }
 
-            // Remove from pending acks (will be re-added on next receive)
             let mut pending_acks = self.pending_acks.write().await;
             pending_acks.remove(message_id);
 
-            crate::observability::record_channel_nack(
+            if let Some(d) = delay {
+                record_channel_nack_delayed(
+                    &self.config.name,
+                    message_id,
+                    d,
+                    current_delivery_count + 1,
+                    backend,
+                );
+            }
+
+            record_channel_nack(
                 &self.config.name,
                 message_id,
                 true,
-                1, // delivery_count not tracked in schema, use 1 as placeholder
-                crate::observability::backend_name(self.config.provider),
+                current_delivery_count + 1,
+                backend,
             );
         } else {
-            // Send to DLQ if enabled, otherwise mark as acked (drop)
             if dlq_enabled && !self.config.dead_letter_queue.is_empty() {
-                // Read message from main table
-                // Note: delivery_count is not in schema, so we exclude it from SELECT
-                let select_sql = format!(
-                    r#"
-                    SELECT id, channel_name, payload, sender_id, correlation_id, reply_to, partition_key
-                    FROM {}
-                    WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?
-                    "#,
+                let update_sql = format!(
+                    "UPDATE {} SET dead_lettered = 1, delivery_count = delivery_count + 1 \
+                     WHERE id = ? AND tenant_id = ? AND namespace = ? AND channel_name = ?",
                     self.table_name
                 );
 
-                let row = sqlx::query(&select_sql)
+                sqlx::query(&update_sql)
                     .bind(message_id)
                     .bind(&self.tenant_id)
                     .bind(&self.namespace)
                     .bind(&self.config.name)
-                    .fetch_optional(&self.pool)
+                    .execute(&self.pool)
                     .await
                     .map_err(|e| {
-                        ChannelError::BackendError(format!("Failed to read message for DLQ: {}", e))
+                        ChannelError::BackendError(format!("Failed to dead-letter message: {}", e))
                     })?;
 
-                if let Some(row) = row {
-                    // Insert into DLQ table
-                    // Note: delivery_count is not in schema, so we use 0 as placeholder
-                    let dlq_table = format!("{}_dlq", self.config.dead_letter_queue);
-                    let insert_dlq_sql = format!(
-                        r#"
-                        INSERT INTO {} (id, channel_name, payload, sender_id, correlation_id, reply_to, partition_key, failed_at, error_reason)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        "#,
-                        dlq_table
-                    );
+                let mut pending_acks = self.pending_acks.write().await;
+                pending_acks.remove(message_id);
 
-                    let failed_at = chrono::Utc::now();
-                    sqlx::query(&insert_dlq_sql)
-                        .bind(row.get::<String, _>(0)) // id
-                        .bind(row.get::<String, _>(1)) // channel_name
-                        .bind(row.get::<Vec<u8>, _>(2)) // payload
-                        .bind(row.get::<String, _>(3)) // sender_id
-                        .bind(row.get::<String, _>(4)) // correlation_id
-                        .bind(row.get::<String, _>(5)) // reply_to
-                        .bind(row.get::<String, _>(6)) // partition_key
-                        .bind(failed_at.to_rfc3339())
-                        .bind(format!("Max retries exceeded: {}", max_retries))
-                        .execute(&self.pool)
-                        .await
-                        .map_err(|e| {
-                            ChannelError::BackendError(format!("Failed to insert into DLQ: {}", e))
-                        })?;
-
-                    // Mark original as acked (remove from main table)
-                    self.ack(message_id).await?;
-
-                    crate::observability::record_channel_dlq(
-                        &self.config.name,
-                        message_id,
-                        0, // delivery_count not tracked in schema, use 0 as placeholder
-                        "max_retries_exceeded",
-                        crate::observability::backend_name(self.config.provider),
-                    );
-                }
+                let reason = if current_delivery_count >= max_retries {
+                    "max_retries_exceeded"
+                } else {
+                    "rejected"
+                };
+                record_channel_dlq(
+                    &self.config.name,
+                    message_id,
+                    current_delivery_count + 1,
+                    reason,
+                    backend,
+                );
             } else {
-                // Mark as acked (drop message)
                 self.ack(message_id).await?;
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        channel = %self.config.name,
-                        message_id = %message_id,
-                        "SQLite message nacked (dropped, DLQ disabled)"
-                    );
-                }
+                tracing::debug!(
+                    channel = %self.config.name,
+                    message_id = %message_id,
+                    delivery_count = current_delivery_count,
+                    "Message nacked and dropped (DLQ disabled)"
+                );
             }
         }
 
         self.stats.messages_failed.fetch_add(1, Ordering::Relaxed);
+        record_channel_latency_from_start(&self.config.name, "nack", start, backend);
         Ok(())
     }
 
@@ -972,7 +955,6 @@ impl Channel for SqliteChannel {
 mod tests {
     use super::*;
     use plexspaces_proto::channel::v1::{channel_config, DeliveryGuarantee, OrderingGuarantee};
-    use tempfile::TempDir;
 
     fn create_test_config(database_path: String) -> ChannelConfig {
         ChannelConfig {
@@ -1116,7 +1098,7 @@ mod tests {
         assert_eq!(received.len(), 1);
 
         // Nack with requeue
-        channel.nack(&received[0].id, true).await.unwrap();
+        channel.nack(&received[0].id, true, None).await.unwrap();
 
         // Should be able to receive again
         let received_again = channel.receive(1).await.unwrap();
@@ -1155,7 +1137,7 @@ mod tests {
         let queued = channel.receive(10).await.unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].payload, b"original");
-        channel.nack(&queued[0].id, true).await.unwrap();
+        channel.nack(&queued[0].id, true, None).await.unwrap();
 
         // Send second message with same key, OVERWRITE — existing row updated in place
         let mut msg2 = create_test_message("msg2", "updated");
@@ -1181,7 +1163,7 @@ mod tests {
         channel.send(msg1).await.unwrap();
 
         let queued = channel.receive(10).await.unwrap();
-        channel.nack(&queued[0].id, true).await.unwrap();
+        channel.nack(&queued[0].id, true, None).await.unwrap();
 
         let mut msg2 = create_test_message("msg2", "second");
         msg2.idempotency_key = "key-keep".to_string();
@@ -1190,6 +1172,130 @@ mod tests {
         // Both rows exist — the channel layer does not deduplicate (mailbox layer does)
         let queued2 = channel.receive(10).await.unwrap();
         assert_eq!(queued2.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_nack_with_delay_hides_message() {
+        let config = create_test_config(":memory:".to_string());
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        let msg = create_test_message("deferred-1", "payload");
+        channel.send(msg).await.unwrap();
+
+        let received = channel.receive(1).await.unwrap();
+        assert_eq!(received.len(), 1);
+
+        channel
+            .nack(&received[0].id, true, Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+
+        let after_nack = channel.receive(10).await.unwrap();
+        assert_eq!(after_nack.len(), 0, "message with 1h delay must be invisible");
+    }
+
+    #[tokio::test]
+    async fn test_nack_without_delay_immediate_requeue() {
+        let config = create_test_config(":memory:".to_string());
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        let msg = create_test_message("immediate-1", "payload");
+        channel.send(msg).await.unwrap();
+
+        let received = channel.receive(1).await.unwrap();
+        assert_eq!(received.len(), 1);
+
+        channel.nack(&received[0].id, true, None).await.unwrap();
+
+        let after_nack = channel.receive(10).await.unwrap();
+        assert_eq!(after_nack.len(), 1, "nack with None delay must requeue immediately");
+        assert_eq!(after_nack[0].id, "immediate-1");
+    }
+
+    #[tokio::test]
+    async fn test_nack_with_zero_delay_immediate_requeue() {
+        let config = create_test_config(":memory:".to_string());
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        let msg = create_test_message("zero-delay-1", "payload");
+        channel.send(msg).await.unwrap();
+
+        let received = channel.receive(1).await.unwrap();
+        assert_eq!(received.len(), 1);
+
+        channel
+            .nack(&received[0].id, true, Some(Duration::ZERO))
+            .await
+            .unwrap();
+
+        let after_nack = channel.receive(10).await.unwrap();
+        assert_eq!(after_nack.len(), 1, "nack with zero delay must requeue immediately");
+    }
+
+    #[tokio::test]
+    async fn test_nack_increments_delivery_count() {
+        let config = create_test_config(":memory:".to_string());
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        let msg = create_test_message("retry-1", "payload");
+        channel.send(msg).await.unwrap();
+
+        for expected_count in 1..=3u32 {
+            let received = channel.receive(1).await.unwrap();
+            assert_eq!(received.len(), 1);
+            assert_eq!(
+                received[0].delivery_count, expected_count - 1,
+                "delivery_count before nack #{expected_count}"
+            );
+            channel.nack(&received[0].id, true, None).await.unwrap();
+        }
+
+        let final_recv = channel.receive(1).await.unwrap();
+        assert_eq!(final_recv[0].delivery_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_nack_dlq_hides_message() {
+        let mut config = create_test_config(":memory:".to_string());
+        config.dlq_enabled = true;
+        config.dead_letter_queue = "test-dlq".to_string();
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        let msg = create_test_message("dlq-1", "payload");
+        channel.send(msg).await.unwrap();
+
+        let received = channel.receive(1).await.unwrap();
+        assert_eq!(received.len(), 1);
+
+        channel.nack(&received[0].id, false, None).await.unwrap();
+
+        let after_dlq = channel.receive(10).await.unwrap();
+        assert_eq!(after_dlq.len(), 0, "dead-lettered message must not be returned");
+    }
+
+    #[tokio::test]
+    async fn test_delivery_count_survives_nack_cycle() {
+        let config = create_test_config(":memory:".to_string());
+        let channel = SqliteChannel::new(config).await.unwrap();
+
+        let msg = create_test_message("survive-1", "payload");
+        channel.send(msg).await.unwrap();
+
+        let r1 = channel.receive(1).await.unwrap();
+        assert_eq!(r1[0].delivery_count, 0);
+        channel.nack(&r1[0].id, true, None).await.unwrap();
+
+        let r2 = channel.receive(1).await.unwrap();
+        assert_eq!(r2[0].delivery_count, 1);
+        channel.nack(&r2[0].id, true, Some(Duration::from_secs(3600))).await.unwrap();
+
+        // Direct DB query to verify delivery_count persisted even when deferred
+        let row: (i32,) = sqlx::query_as("SELECT delivery_count FROM channel_messages WHERE id = ?")
+            .bind("survive-1")
+            .fetch_one(&channel.pool)
+            .await
+            .unwrap();
+        assert_eq!(row.0, 2, "delivery_count must be 2 after two nack cycles");
     }
 
     #[tokio::test]

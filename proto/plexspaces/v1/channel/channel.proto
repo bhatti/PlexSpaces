@@ -493,6 +493,12 @@ message NackRequest {
     max_len: 255
   }];
   bool requeue = 4;
+
+  // Delay before the message becomes eligible for re-delivery.
+  // When set, the backend stores send_at = now + delay and the dequeue
+  // query skips the message until that timestamp is reached.
+  // Ignored by backends that do not support delayed redelivery.
+  google.protobuf.Duration delay = 5;
 }
 
 // Nack response

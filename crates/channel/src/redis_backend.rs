@@ -521,7 +521,7 @@ impl Channel for RedisChannel {
         }
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, message_id: &str, requeue: bool, _delay: Option<std::time::Duration>) -> ChannelResult<()> {
         if self.consumer_group.is_empty() {
             return Ok(()); // No-op if not using consumer groups
         }

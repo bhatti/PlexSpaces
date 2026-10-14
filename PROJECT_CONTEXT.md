@@ -168,9 +168,13 @@ Layer 6 — Execution engines:
   wasm-runtime  — wasmtime Component Model execution engine
   workflow      — Durable workflow orchestration (built on actor + persistence + facet)
   elastic-pool  — Auto-scaling elastic worker pool
-  outbox        — Flow-controlled messaging: ConcurrencyLimiter (AIMD), OutboxRelay,
+  outbox        — Flow-controlled messaging: ConcurrencyLimiter (AIMD), OutboxRelay
+                  with real send_at backoff (deferred re-delivery via DB timestamp),
                   PartitionedOutboxRelay (N-partition hash-routed scale-out),
-                  AdmissionControlFacet (receiver-side), dispatch helpers
+                  AdmissionControlFacet (receiver-side), dispatch helpers.
+                  Channel nack() accepts optional delay → sets send_at = now + delay;
+                  dequeue query filters send_at <= now. delivery_count persisted in DB,
+                  survives relay restarts.
 
 Layer 7 — Application lifecycle:
   application   — Deploy/start/stop multi-actor applications; WASM component loading;
@@ -255,6 +259,10 @@ Facets are declared in `app-config.toml`, not in actor code.
 ### PendingAsks (ask/reply — no temporary actors)
 
 16-shard `DashMap<ULID, oneshot::Sender<Message>>`. When `ask()` is called: insert sender, send message with correlation_id, await receiver. On reply arrival: lookup correlation_id, send on oneshot. Background GC sweeps expired entries every 5 seconds for hard memory bound. Two heap allocations per ask, no mailbox pre-allocation.
+
+### Store-and-Forward: `tell_reliable()`
+
+`ActorRegistry::tell_reliable(ctx, actor_id, message, outbox_channel)` — tries direct `tell()` first, falls back to the provided outbox channel on any failure (mailbox full, actor not found, network error). Returns `Ok(true)` for direct delivery, `Ok(false)` for outbox fallback. SDK wrapper: `plexspaces_sdk::tell_reliable()`. Inspired by WhatsApp's store-and-forward pattern on Erlang/BEAM.
 
 ### Virtual Actors (Orleans grain pattern)
 
@@ -906,3 +914,31 @@ echo "$OUTPUT" | grep -q "assertion string 3" && PASS=$((PASS + 1))
 ### Adding a New Example to CI
 
 After creating the example, add its path to the `EXAMPLES` list in the `test-examples` Makefile target so it is built during CI.
+
+## 21. Flow Control Use Cases (job_queue examples)
+
+The `job_queue` examples (Rust embedded, Go/Python/TypeScript/Rust WASM) demonstrate five flow control use cases on top of the base outbox/relay/AIMD infrastructure:
+
+| UC | Name | Key Mechanisms | What It Shows |
+|----|------|---------------|---------------|
+| UC1 | Thundering Herd Protection | AdmissionControlFacet (max_concurrent=3), AIMD sawtooth | 50 workers, 200 simultaneous jobs — AIMD halves on rejection, recovers additively |
+| UC2 | Config Wave Deploy | Config server actors with AdmissionControlFacet (max_concurrent=2), wave-based dispatch | 3 config servers, 3 waves × 30 workers — bounded fan-out with backpressure |
+| UC3 | Heartbeat Coalescing (OVERWRITE) | `conflict_resolution=OVERWRITE`, `idempotency_key` | 50 rapid heartbeats with same key → only latest queued (LWW coalescing) |
+| UC4 | Telemetry Fast-Path with Outbox Fallback | tell() fast-path, OutboxRelay fallback on rejection | 100 events to collector (max_concurrent=3) — tell succeeds or falls back to outbox |
+| UC5 | Reliable Offline Delivery | SQLite-backed channel, send_at backoff, delivery_count, DLQ | 100 jobs via durable channel with retry + exponential backoff + dead-letter queue |
+
+### send_at Backoff (added in flow control improvements)
+
+The OutboxRelay now uses **real** exponential backoff via the `send_at` DB column:
+- On nack with delay: `UPDATE SET send_at = now + delay, delivery_count = delivery_count + 1`
+- On dequeue: `WHERE (send_at = 0 OR send_at <= now) ORDER BY send_at ASC, created_at ASC`
+- `delivery_count` is persisted in the DB and survives relay restarts (was previously in-memory only)
+- Channel trait: `nack(&self, message_id, requeue, delay: Option<Duration>)` — all 11 backends updated
+
+### Observability
+
+Flow control metrics emitted:
+- `plexspaces_channel_nack_delayed_total` — counter of nacks with send_at delay
+- `plexspaces_channel_nack_delay_seconds` — histogram of delay durations
+- `plexspaces_outbox_relay_backoff_seconds` — histogram of relay-computed backoff values
+- `plexspaces_channel_nack_total`, `plexspaces_channel_ack_total`, `plexspaces_channel_dlq_total` — existing counters

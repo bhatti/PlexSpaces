@@ -23,6 +23,8 @@ plexspaces-keyvalue = { path = "../keyvalue", features = ["sql-backend"] }
 plexspaces-locks = { path = "../locks" }
 plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-blob = { path = "../blob" }
+plexspaces-outbox = { path = "../outbox" }
+plexspaces-common = { path = "../common" }
 
 # WASM runtime (User Decision A1: wasmtime)
 wasmtime = { workspace = true }
@@ -50,6 +52,9 @@ tracing = { workspace = true }
 
 # Metrics/observability
 metrics = "0.23"
+
+# Randomness (for backoff jitter)
+rand = "0.8"
 
 # Crypto (for module hash verification)
 sha2 = "0.10"

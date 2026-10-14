@@ -591,7 +591,7 @@ Linda-style coordination for decoupled communication:
 
 **Backends**: SQLite with `:memory:` (testing), Redis (production), PostgreSQL (transactional)
 
-See [Detailed Design - TupleSpace](detailed-design.md#tuplespace) for comprehensive documentation. For ten real-world coordination patterns using TupleSpace (blackboard, voting, veto, task delegation, barrier, capability discovery), see the [multi_agent_coordination example](../examples/typescript/apps/multi_agent_coordination/README.md) and [companion blog](../archived_docs/blog-multi-agent-coordination.md).
+See [Detailed Design - TupleSpace](detailed-design.md#tuplespace) for comprehensive documentation. For ten real-world coordination patterns using TupleSpace (blackboard, voting, veto, task delegation, barrier, capability discovery), see the [multi_agent_coordination example](../examples/typescript/apps/multi_agent_coordination/README.md).
 
 ### Channels
 
@@ -720,11 +720,13 @@ For high-fan-out scenarios (notifications to millions of actors, bulk upgrades) 
 SenderActor
   └─ outbox.dispatch() → OutboxRelay (AIMD concurrency, DB-backed channel)
                            ├─ Channel (SQLite/Postgres, existing ChannelConfig)
+                           │    └─ send_at column: deferred messages skipped until send_at ≤ now
                            └─ drain loop → tell() → TargetActor
                                                       └─ AdmissionControlFacet
-                                                           ├─ Under limit → process
+                                                           ├─ Under limit → process → ack
                                                            └─ Over limit → RESOURCE_EXHAUSTED + retry_after_ms
-                                                                └─ Relay nacks → channel retries with backoff
+                                                                └─ Relay nacks with delay → send_at = now + backoff
+                                                                     └─ delivery_count persisted across restarts
 ```
 
 **Sender-side** — `OutboxRelay` stores messages in a DB-backed channel and drains at AIMD-controlled concurrency (additive increase on success, multiplicative decrease on rejection).
@@ -733,7 +735,10 @@ SenderActor
 
 **Concurrency control** — `ConcurrencyLimiter` implements TCP-style AIMD: limit increases by 1 on success, halves on `RESOURCE_EXHAUSTED`. Bounded by configurable min/max. Also supports fixed-limit mode.
 
+**Deferred delivery** — On nack with retry, the relay sets `send_at = now + computed_backoff` on the channel message. The dequeue query filters `WHERE send_at ≤ now`, making backoff enforceable at the storage layer. The `delivery_count` column persists across relay restarts, preventing retry-count resets.
+
 **Shared retry** — All retry/backoff computation uses the canonical `RetryPolicy` (common.proto) and `compute_backoff()` (crates/common). Exponential backoff with configurable jitter ratio.
+
 
 ## WebSocket Transport
 
@@ -1611,8 +1616,11 @@ All outbox components emit metrics via the `metrics` crate facade (same recorder
 | `plexspaces_outbox_relay_backpressure_total` | counter | RESOURCE_EXHAUSTED responses from targets |
 | `plexspaces_outbox_relay_retries_total` | counter | Messages requeued for retry |
 | `plexspaces_outbox_relay_dead_lettered_total` | counter | Messages moved to dead letter after exhausting retries |
+| `plexspaces_outbox_relay_backoff_seconds` | histogram | Computed backoff duration passed to nack delay |
 | `plexspaces_outbox_relay_delivery_seconds` | histogram | End-to-end delivery latency per message |
 | `plexspaces_outbox_relay_pending` | gauge | Batch size of last dequeue |
+| `plexspaces_channel_nack_delayed_total` | counter | Channel nacks with send_at delay (deferred redelivery) |
+| `plexspaces_channel_nack_delay_seconds` | histogram | Delay duration set on deferred nack |
 | `plexspaces_outbox_admission_admitted_total` | counter | Messages admitted by the facet |
 | `plexspaces_outbox_admission_rejected_total` | counter | Messages rejected (actor at capacity) |
 | `plexspaces_outbox_admission_in_flight` | gauge | Current in-flight messages on the receiver |

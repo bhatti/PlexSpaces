@@ -551,6 +551,13 @@ class NackRequest(betterproto.Message):
     channel: str = betterproto.string_field(2)
     message_id: str = betterproto.string_field(3)
     requeue: bool = betterproto.bool_field(4)
+    delay: timedelta = betterproto.message_field(5)
+    """
+    Delay before the message becomes eligible for re-delivery.
+     When set, the backend stores send_at = now + delay and the dequeue
+     query skips the message until that timestamp is reached.
+     Ignored by backends that do not support delayed redelivery.
+    """
 
 
 @dataclass(eq=False, repr=False)

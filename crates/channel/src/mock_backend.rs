@@ -46,6 +46,7 @@ use plexspaces_proto::common::v1::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Mock channel for testing
@@ -288,7 +289,7 @@ impl Channel for MockChannel {
         }
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, message_id: &str, requeue: bool, _delay: Option<Duration>) -> ChannelResult<()> {
         // Get retry/DLQ config
         let max_retries = crate::channel::max_retries_from_config(&self.config);
         let dlq_enabled = self.config.dlq_enabled;

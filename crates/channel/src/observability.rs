@@ -305,6 +305,48 @@ pub fn record_channel_stats(
     .set(messages_pending as f64);
 }
 
+/// Record a delayed nack (requeue with send_at backoff)
+///
+/// ## Arguments
+/// * `channel_name` - Name of the channel
+/// * `message_id` - ID of the message being delayed
+/// * `delay` - Duration before the message becomes eligible for re-delivery
+/// * `delivery_count` - Current delivery attempt count
+/// * `backend` - Backend type (for metrics tagging)
+pub fn record_channel_nack_delayed(
+    channel_name: &str,
+    message_id: &str,
+    delay: std::time::Duration,
+    delivery_count: u32,
+    backend: &str,
+) {
+    debug!(
+        channel = %channel_name,
+        message_id = %message_id,
+        delay_ms = delay.as_millis() as u64,
+        delivery_count = delivery_count,
+        backend = %backend,
+        operation = "nack_delayed",
+        "Channel NACK with delay: message deferred for {}ms (attempt {})",
+        delay.as_millis(),
+        delivery_count
+    );
+
+    metrics::counter!(
+        "plexspaces_channel_nack_delayed_total",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+    )
+    .increment(1);
+
+    metrics::histogram!(
+        "plexspaces_channel_nack_delay_seconds",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+    )
+    .record(delay.as_secs_f64());
+}
+
 /// Get backend name as string for observability
 ///
 /// ## Arguments

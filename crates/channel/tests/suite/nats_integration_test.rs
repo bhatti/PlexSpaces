@@ -376,7 +376,7 @@ async fn test_nats_ack_nack() {
 
     // NACK should succeed
     channel
-        .nack(msg_id, true)
+        .nack(msg_id, true, None)
         .await
         .expect("NACK should succeed");
 }

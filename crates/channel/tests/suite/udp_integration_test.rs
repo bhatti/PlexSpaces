@@ -225,7 +225,7 @@ mod tests {
         assert!(result.is_ok());
 
         // NACK should be a no-op
-        let result = channel.nack("test-message-id", true).await;
+        let result = channel.nack("test-message-id", true, None).await;
         assert!(result.is_ok());
     }
 

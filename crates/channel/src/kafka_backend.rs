@@ -390,7 +390,7 @@ impl Channel for KafkaChannel {
         Ok(())
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, message_id: &str, requeue: bool, _delay: Option<Duration>) -> ChannelResult<()> {
         // Get retry/DLQ config from channel config
         let _max_retries = crate::channel::max_retries_from_config(&self.config);
         let dlq_enabled = self.config.dlq_enabled;

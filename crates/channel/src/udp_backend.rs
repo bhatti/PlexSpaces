@@ -501,7 +501,7 @@ impl Channel for UdpChannel {
         Ok(())
     }
 
-    async fn nack(&self, _message_id: &str, _requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, _message_id: &str, _requeue: bool, _delay: Option<std::time::Duration>) -> ChannelResult<()> {
         // UDP is best-effort, no NACK support
         // This is a no-op for UDP channels
         Ok(())

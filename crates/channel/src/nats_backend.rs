@@ -350,7 +350,7 @@ impl Channel for NatsChannel {
         Ok(())
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, message_id: &str, requeue: bool, _delay: Option<std::time::Duration>) -> ChannelResult<()> {
         use crate::observability::{backend_name, record_channel_dlq, record_channel_nack};
 
         // Get retry/DLQ config from channel config

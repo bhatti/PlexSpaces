@@ -198,6 +198,121 @@ class JobQueueLeader:
 
         return {"scales": rows}
 
+    # ── UC1-UC5: Flow Control Use Cases ─────────────────────────────────────
+
+    @handler("thundering_herd_test", "call")
+    def thundering_herd_test(self, count: int = 0) -> dict:
+        """UC1: Dispatch to all workers simultaneously."""
+        if not self.worker_ids:
+            return {"error": "call init_workers first"}
+        targets = self.worker_ids[:count] if 0 < count < len(self.worker_ids) else self.worker_ids
+        ctx = {"tenant": "default", "namespace": "default"}
+        start = time.time()
+        accepted, rejected = host.outbox.dispatch(
+            ctx, DISPATCHER_ID, targets,
+            {"task": "thundering_herd", "priority": "high"}, "cast", "", ""
+        )
+        wall_ms = max(1, int((time.time() - start) * 1000))
+        return {
+            "targets": len(targets),
+            "accepted": accepted,
+            "rejected": rejected,
+            "wall_time_ms": wall_ms,
+        }
+
+    @handler("config_wave_deploy", "call")
+    def config_wave_deploy(self, wave_size: int = 20) -> dict:
+        """UC2: Wave-based dispatch with backpressure."""
+        if not self.worker_ids:
+            return {"error": "call init_workers first"}
+        ctx = {"tenant": "default", "namespace": "default"}
+        payload = {"task": "config_download", "version": "2.1.0"}
+        total_accepted, total_rejected, wave_count = 0, 0, 0
+        waves = []
+        for i in range(0, len(self.worker_ids), wave_size):
+            targets = self.worker_ids[i:i + wave_size]
+            start = time.time()
+            accepted, rejected = host.outbox.dispatch(
+                ctx, DISPATCHER_ID, targets, payload, "cast", "", ""
+            )
+            wall_ms = max(1, int((time.time() - start) * 1000))
+            total_accepted += accepted
+            total_rejected += rejected
+            wave_count += 1
+            waves.append({"wave": wave_count, "accepted": accepted, "rejected": rejected, "wall_time_ms": wall_ms})
+        return {
+            "wave_count": wave_count,
+            "total_accepted": total_accepted,
+            "total_rejected": total_rejected,
+            "waves": waves,
+        }
+
+    @handler("enhanced_heartbeat", "call")
+    def enhanced_heartbeat(self, count: int = 50) -> dict:
+        """UC3: Rapid heartbeats with OVERWRITE coalescing."""
+        workers = self.worker_ids or ["JobQueueWorker:worker-0"]
+        ctx = {"tenant": "default", "namespace": "default"}
+        total_accepted, total_rejected = 0, 0
+        for i in range(1, count + 1):
+            accepted, rejected = host.outbox.dispatch(
+                ctx, DISPATCHER_ID, workers,
+                {"type": "heartbeat", "seq": i, "cpu": 0.42}, "cast",
+                HEARTBEAT_IDEM_KEY, "overwrite"
+            )
+            total_accepted += accepted
+            total_rejected += rejected
+        self.heartbeat_count = count
+        return {
+            "heartbeats_sent": count,
+            "total_accepted": total_accepted,
+            "total_rejected": total_rejected,
+            "worker_count": len(workers),
+        }
+
+    @handler("telemetry_test", "call")
+    def telemetry_test(self, count: int = 50) -> dict:
+        """UC4: Fast-path Tell with outbox fallback."""
+        if not self.worker_ids:
+            return {"error": "call init_workers first"}
+        ctx = {"tenant": "default", "namespace": "default"}
+        fast_path, fallback = 0, 0
+        for i in range(count):
+            target = self.worker_ids[i % len(self.worker_ids)]
+            try:
+                host.ask(target, "process", {"type": "telemetry", "seq": i}, timeout_ms=2000)
+                fast_path += 1
+            except Exception:
+                host.outbox.dispatch(
+                    ctx, DISPATCHER_ID, [target],
+                    {"type": "telemetry", "seq": i}, "cast", "", ""
+                )
+                fallback += 1
+        return {
+            "total_sent": count,
+            "fast_path_success": fast_path,
+            "outbox_fallback": fallback,
+        }
+
+    @handler("reliable_delivery_test", "call")
+    def reliable_delivery_test(self, count: int = 50) -> dict:
+        """UC5: Outbox store-and-forward reliability."""
+        if not self.worker_ids:
+            return {"error": "call init_workers first"}
+        ctx = {"tenant": "default", "namespace": "default"}
+        targets = [self.worker_ids[i % len(self.worker_ids)] for i in range(count)]
+        start = time.time()
+        accepted, rejected = host.outbox.dispatch(
+            ctx, DISPATCHER_ID, targets,
+            {"task": "reliable_delivery_item"}, "cast", "", ""
+        )
+        wall_ms = max(1, int((time.time() - start) * 1000))
+        return {
+            "dispatched": count,
+            "accepted": accepted,
+            "rejected": rejected,
+            "wall_time_ms": wall_ms,
+        }
+
     @handler("get_metrics", "call")
     def get_metrics(self) -> dict:
         """Return all tracked metrics."""

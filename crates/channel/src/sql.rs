@@ -573,7 +573,7 @@ mod postgres_impl {
             Ok(())
         }
 
-        async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+        async fn nack(&self, message_id: &str, requeue: bool, _delay: Option<std::time::Duration>) -> ChannelResult<()> {
             if requeue {
                 let result = sqlx::query(&format!(
                     "UPDATE {TABLE} SET acked = 0 \

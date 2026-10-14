@@ -360,11 +360,7 @@ impl Channel for InMemoryChannel {
         Ok(())
     }
 
-    async fn nack(&self, message_id: &str, _requeue: bool) -> ChannelResult<()> {
-        // In-memory channels don't track individual messages for ack/nack
-        // Messages are fire-and-forget - once delivered, they're gone
-        // Return Ok(()) as a no-op since there's nothing to nack/requeue
-        // This avoids error handling complexity in callers for expected behavior
+    async fn nack(&self, message_id: &str, _requeue: bool, _delay: Option<Duration>) -> ChannelResult<()> {
         tracing::trace!(
             channel = %self.config.name,
             message_id = %message_id,

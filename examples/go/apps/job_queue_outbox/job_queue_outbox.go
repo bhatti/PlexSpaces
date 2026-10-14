@@ -63,6 +63,14 @@ type JobQueueLeader struct {
 	AskRttSum   int `json:"ask_rtt_sum_ms"`
 	AskRttCount int `json:"ask_rtt_count"`
 
+	// UC1 thundering herd tracking
+	ThunderingHerdDelivered int `json:"thundering_herd_delivered"`
+	ThunderingHerdRejected  int `json:"thundering_herd_rejected"`
+
+	// UC4 telemetry tracking
+	TelemetryFastPath int `json:"telemetry_fast_path"`
+	TelemetryFallback int `json:"telemetry_fallback"`
+
 	// Worker shard group
 	ShardGroupID string   `json:"shard_group_id"`
 	WorkerIDs    []string `json:"worker_ids"`
@@ -95,6 +103,16 @@ func (j *JobQueueLeader) Handle(fromActor, msgType, payloadJSON string) string {
 		return j.handleGetMetrics()
 	case "scaling_benchmark":
 		return j.handleScalingBenchmark(payloadJSON)
+	case "thundering_herd_test":
+		return j.handleThunderingHerdTest(payloadJSON)
+	case "config_wave_deploy":
+		return j.handleConfigWaveDeploy(payloadJSON)
+	case "enhanced_heartbeat":
+		return j.handleEnhancedHeartbeat(payloadJSON)
+	case "telemetry_test":
+		return j.handleTelemetryTest(payloadJSON)
+	case "reliable_delivery_test":
+		return j.handleReliableDeliveryTest(payloadJSON)
 	// Backward-compat handlers for existing test.sh
 	case "dispatch":
 		return j.handleDispatch(payloadJSON)
@@ -416,6 +434,250 @@ func (j *JobQueueLeader) handleScalingBenchmark(payloadJSON string) string {
 	return marshal(map[string]any{"success": true, "scales": scaleResults})
 }
 
+// ============================================================================
+// UC1-UC5: Flow Control Use Cases
+// ============================================================================
+
+// handleThunderingHerdTest dispatches to ALL workers at once, demonstrating
+// admission control rejection and AIMD adaptation under sudden load.
+func (j *JobQueueLeader) handleThunderingHerdTest(payloadJSON string) string {
+	if len(j.WorkerIDs) == 0 {
+		return marshal(map[string]any{"error": "call init_workers first"})
+	}
+
+	count := plexspaces.WasmJSONExtractInt(payloadJSON, "count")
+	if count <= 0 {
+		count = len(j.WorkerIDs)
+	}
+	targets := j.WorkerIDs
+	if count < len(targets) {
+		targets = targets[:count]
+	}
+
+	ctx := `{"tenant":"default","namespace":"default"}`
+	herdPayload := `{"task":"thundering_herd","priority":"high"}`
+
+	t0 := host.NowMs()
+	result, err := host.Outbox().DispatchWithTargets(ctx, dispatcherID, targets, herdPayload, "cast", "", "")
+	wallMs := int(host.NowMs() - t0)
+
+	accepted, rejected := 0, 0
+	if err == nil && result != nil {
+		accepted = int(result.Accepted)
+		rejected = int(result.Rejected)
+	}
+
+	j.ThunderingHerdDelivered += accepted
+	j.ThunderingHerdRejected += rejected
+
+	host.Info("thundering_herd: targets=" + strconv.Itoa(len(targets)) +
+		" accepted=" + strconv.Itoa(accepted) + " rejected=" + strconv.Itoa(rejected))
+
+	return marshal(map[string]any{
+		"success":      true,
+		"targets":      len(targets),
+		"accepted":     accepted,
+		"rejected":     rejected,
+		"wall_time_ms": wallMs,
+		"total_delivered": j.ThunderingHerdDelivered,
+		"total_rejected": j.ThunderingHerdRejected,
+	})
+}
+
+// handleConfigWaveDeploy dispatches config-download commands in waves,
+// demonstrating wave-based deployment with backpressure.
+func (j *JobQueueLeader) handleConfigWaveDeploy(payloadJSON string) string {
+	if len(j.WorkerIDs) == 0 {
+		return marshal(map[string]any{"error": "call init_workers first"})
+	}
+
+	waveSize := plexspaces.WasmJSONExtractInt(payloadJSON, "wave_size")
+	if waveSize <= 0 {
+		waveSize = 20
+	}
+
+	ctx := `{"tenant":"default","namespace":"default"}`
+	configPayload := `{"task":"config_download","version":"2.1.0"}`
+
+	totalAccepted, totalRejected := 0, 0
+	waveCount := 0
+	type waveResult struct {
+		wave     int
+		accepted int
+		rejected int
+		wallMs   int
+	}
+	var waves []waveResult
+
+	for start := 0; start < len(j.WorkerIDs); start += waveSize {
+		end := start + waveSize
+		if end > len(j.WorkerIDs) {
+			end = len(j.WorkerIDs)
+		}
+		targets := j.WorkerIDs[start:end]
+
+		t0 := host.NowMs()
+		result, err := host.Outbox().DispatchWithTargets(ctx, dispatcherID, targets, configPayload, "cast", "", "")
+		wallMs := int(host.NowMs() - t0)
+
+		accepted, rejected := 0, 0
+		if err == nil && result != nil {
+			accepted = int(result.Accepted)
+			rejected = int(result.Rejected)
+		}
+		totalAccepted += accepted
+		totalRejected += rejected
+		waveCount++
+		waves = append(waves, waveResult{wave: waveCount, accepted: accepted, rejected: rejected, wallMs: wallMs})
+	}
+
+	waveResults := make([]any, 0, len(waves))
+	for _, w := range waves {
+		waveResults = append(waveResults, map[string]any{
+			"wave":        w.wave,
+			"accepted":    w.accepted,
+			"rejected":    w.rejected,
+			"wall_time_ms": w.wallMs,
+		})
+	}
+
+	return marshal(map[string]any{
+		"success":        true,
+		"wave_count":     waveCount,
+		"total_accepted": totalAccepted,
+		"total_rejected": totalRejected,
+		"waves":          waveResults,
+	})
+}
+
+// handleEnhancedHeartbeat sends N rapid heartbeats with the same idempotency
+// key and OVERWRITE conflict resolution, demonstrating LWW coalescing.
+func (j *JobQueueLeader) handleEnhancedHeartbeat(payloadJSON string) string {
+	count := plexspaces.WasmJSONExtractInt(payloadJSON, "count")
+	if count <= 0 {
+		count = 50
+	}
+
+	workers := j.WorkerIDs
+	if len(workers) == 0 {
+		workers = []string{
+			"JobQueueWorker:worker-0",
+			"JobQueueWorker:worker-1",
+			"JobQueueWorker:worker-2",
+			"JobQueueWorker:worker-3",
+		}
+	}
+
+	ctx := `{"tenant":"default","namespace":"default"}`
+	totalAccepted, totalRejected := 0, 0
+
+	for i := 1; i <= count; i++ {
+		hbPayload := `{"type":"heartbeat","seq":` + strconv.Itoa(i) + `,"cpu":0.42}`
+		result, err := host.Outbox().DispatchWithTargets(
+			ctx, dispatcherID, workers, hbPayload, "cast", heartbeatIdemKey, "overwrite")
+
+		if err == nil && result != nil {
+			totalAccepted += int(result.Accepted)
+			totalRejected += int(result.Rejected)
+		}
+	}
+
+	j.HeartbeatCount = count
+
+	host.Info("enhanced_heartbeat: sent=" + strconv.Itoa(count) +
+		" accepted=" + strconv.Itoa(totalAccepted))
+
+	return marshal(map[string]any{
+		"success":        true,
+		"heartbeats_sent": count,
+		"total_accepted": totalAccepted,
+		"total_rejected": totalRejected,
+		"worker_count":   len(workers),
+	})
+}
+
+// handleTelemetryTest demonstrates fast-path Tell() with outbox fallback.
+// Sends telemetry to a worker; if Tell fails, falls back to outbox dispatch.
+func (j *JobQueueLeader) handleTelemetryTest(payloadJSON string) string {
+	count := plexspaces.WasmJSONExtractInt(payloadJSON, "count")
+	if count <= 0 {
+		count = 50
+	}
+
+	workers := j.WorkerIDs
+	if len(workers) == 0 {
+		return marshal(map[string]any{"error": "call init_workers first"})
+	}
+
+	ctx := `{"tenant":"default","namespace":"default"}`
+	fastPathOK, fallbackOK := 0, 0
+
+	for i := 0; i < count; i++ {
+		targetID := workers[i%len(workers)]
+		telPayload := `{"type":"telemetry","cpu":0.5,"mem":0.8,"seq":` + strconv.Itoa(i) + `}`
+
+		_, err := host.Ask(targetID, "process", map[string]any{"type": "telemetry", "seq": i}, 2000)
+		if err == nil {
+			fastPathOK++
+		} else {
+			_, dispErr := host.Outbox().DispatchWithTargets(
+				ctx, dispatcherID, []string{targetID}, telPayload, "cast", "", "")
+			if dispErr == nil {
+				fallbackOK++
+			}
+		}
+	}
+
+	j.TelemetryFastPath += fastPathOK
+	j.TelemetryFallback += fallbackOK
+
+	return marshal(map[string]any{
+		"success":           true,
+		"total_sent":        count,
+		"fast_path_success": fastPathOK,
+		"outbox_fallback":   fallbackOK,
+	})
+}
+
+// handleReliableDeliveryTest dispatches via outbox and verifies delivery by
+// asking workers for their stats. Demonstrates durable store-and-forward.
+func (j *JobQueueLeader) handleReliableDeliveryTest(payloadJSON string) string {
+	if len(j.WorkerIDs) == 0 {
+		return marshal(map[string]any{"error": "call init_workers first"})
+	}
+
+	count := plexspaces.WasmJSONExtractInt(payloadJSON, "count")
+	if count <= 0 {
+		count = 50
+	}
+
+	ctx := `{"tenant":"default","namespace":"default"}`
+	deliveryPayload := `{"task":"reliable_delivery_item"}`
+
+	targets := make([]string, count)
+	for i := 0; i < count; i++ {
+		targets[i] = j.WorkerIDs[i%len(j.WorkerIDs)]
+	}
+
+	t0 := host.NowMs()
+	result, err := host.Outbox().DispatchWithTargets(ctx, dispatcherID, targets, deliveryPayload, "cast", "", "")
+	wallMs := int(host.NowMs() - t0)
+
+	accepted, rejected := 0, 0
+	if err == nil && result != nil {
+		accepted = int(result.Accepted)
+		rejected = int(result.Rejected)
+	}
+
+	return marshal(map[string]any{
+		"success":      true,
+		"dispatched":   count,
+		"accepted":     accepted,
+		"rejected":     rejected,
+		"wall_time_ms": wallMs,
+	})
+}
+
 // handleDispatch is the backward-compat handler for existing test.sh.
 func (j *JobQueueLeader) handleDispatch(payloadJSON string) string {
 	targets := extractStringArray(payloadJSON, "targets")
@@ -515,18 +777,22 @@ func (j *JobQueueLeader) doDispatch(targets []string, payloadJSON, messageType s
 // MarshalStateWASM persists leader state across WASM re-instantiation.
 func (j *JobQueueLeader) MarshalStateWASM() string {
 	return marshal(map[string]any{
-		"total_dispatched": j.TotalDispatched,
-		"total_accepted":   j.TotalAccepted,
-		"total_rejected":   j.TotalRejected,
-		"dispatch_count":   j.DispatchCount,
-		"wall_time_ms":     j.WallTimeMs,
-		"heartbeat_count":  j.HeartbeatCount,
-		"ask_rtt_min_ms":   j.AskRttMin,
-		"ask_rtt_max_ms":   j.AskRttMax,
-		"ask_rtt_sum_ms":   j.AskRttSum,
-		"ask_rtt_count":    j.AskRttCount,
-		"shard_group_id":   j.ShardGroupID,
-		"worker_ids":       j.WorkerIDs,
+		"total_dispatched":          j.TotalDispatched,
+		"total_accepted":            j.TotalAccepted,
+		"total_rejected":            j.TotalRejected,
+		"dispatch_count":            j.DispatchCount,
+		"wall_time_ms":              j.WallTimeMs,
+		"heartbeat_count":           j.HeartbeatCount,
+		"ask_rtt_min_ms":            j.AskRttMin,
+		"ask_rtt_max_ms":            j.AskRttMax,
+		"ask_rtt_sum_ms":            j.AskRttSum,
+		"ask_rtt_count":             j.AskRttCount,
+		"shard_group_id":            j.ShardGroupID,
+		"worker_ids":                j.WorkerIDs,
+		"thundering_herd_delivered": j.ThunderingHerdDelivered,
+		"thundering_herd_rejected":  j.ThunderingHerdRejected,
+		"telemetry_fast_path":       j.TelemetryFastPath,
+		"telemetry_fallback":        j.TelemetryFallback,
 	})
 }
 
@@ -544,6 +810,10 @@ func (j *JobQueueLeader) UnmarshalStateWASM(stateJSON string) bool {
 	j.AskRttCount = plexspaces.WasmJSONExtractInt(stateJSON, "ask_rtt_count")
 	j.ShardGroupID = plexspaces.WasmJSONExtractStr(stateJSON, "shard_group_id")
 	j.WorkerIDs = extractStringArray(stateJSON, "worker_ids")
+	j.ThunderingHerdDelivered = plexspaces.WasmJSONExtractInt(stateJSON, "thundering_herd_delivered")
+	j.ThunderingHerdRejected = plexspaces.WasmJSONExtractInt(stateJSON, "thundering_herd_rejected")
+	j.TelemetryFastPath = plexspaces.WasmJSONExtractInt(stateJSON, "telemetry_fast_path")
+	j.TelemetryFallback = plexspaces.WasmJSONExtractInt(stateJSON, "telemetry_fallback")
 	return true
 }
 

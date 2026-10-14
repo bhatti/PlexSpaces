@@ -86,7 +86,6 @@ Production AI agent systems with stateful, fault-tolerant, and multi-tenant exec
 - [llm_workflow_orchestrator](../examples/typescript/apps/llm_workflow_orchestrator/README.md) — prompt chaining, routing, reflection, LLM-as-Judge (TypeScript)
 - [multi_agent_coordination](../examples/typescript/apps/multi_agent_coordination/README.md) — ten coordination patterns (blackboard, scatter-gather, generator-verifier, pipeline, pub-sub, voting, task delegation, veto, barrier, capability discovery) inspired by METR/HuggingFace incident (TypeScript + [Python](../examples/python/apps/multi_agent_coordination/README.md))
 
-See also: [AI Agents at Scale: 20 Production Patterns with PlexSpaces](../blog/ai-agents-at-scale-with-plexspaces.md), [When 700 AI Agents Self-Organized: Coordination Patterns for Multi-Agent Systems](../archived_docs/blog-multi-agent-coordination.md)
 
 ## Agent Harness and Eval Infrastructure
 
@@ -112,7 +111,6 @@ PlexSpaces provides the full infrastructure layer for production agent harness a
 **Examples**:
 - [minipi](../examples/python/apps/minipi/README.md) — full harness + eval pipeline (Python)
 
-See also: [Agent Harness & Eval with PlexSpaces](../archived_docs/agent-harness-eval-with-plexspaces.md)
 
 ## Event Processing
 
@@ -164,6 +162,36 @@ Deploy actors to edge locations with automatic synchronization:
 - Low latency
 
 **Example**: See [Edge Computing](../examples/advanced/edge_computing/) example.
+
+## Flow Control and Backpressure
+
+Production flow control without shared infrastructure (no Kafka, no load balancer):
+
+- **Thundering Herd Protection**: Admission control + AIMD concurrency prevents mass reconnection storms from overwhelming leader actors
+- **Wave-Based Deployment**: Rolling config/firmware updates with per-wave backpressure — config servers reject excess requests, outbox relay backs off and retries
+- **Heartbeat Coalescing**: OVERWRITE conflict resolution with idempotency keys — only the latest heartbeat survives in the queue, eliminating stale data
+- **Telemetry Fast-Path**: Fire-and-forget `tell()` for happy path, automatic outbox fallback when receivers are at capacity
+- **Reliable Offline Delivery**: SQLite-backed outbox channel with `send_at` deferred redelivery, `delivery_count` persistence across restarts, and dead letter queue for poison messages
+
+**Key Features**:
+- `AdmissionControlFacet` — atomic in-flight counter, rejects with `RESOURCE_EXHAUSTED` + `retry_after_ms` hint
+- `ConcurrencyLimiter` — AIMD algorithm (TCP-style congestion control for actors)
+- `OutboxRelay` — DB-backed store-and-forward with real exponential backoff via `send_at` timestamps
+- `PartitionedOutboxRelay` — hash-routed scale-out for million-target scenarios
+- OVERWRITE conflict resolution — last-write-wins for transient data (heartbeats, status updates)
+- Dead letter queue — poison message quarantine after max retry attempts
+- `tell_reliable()` — store-and-forward: tries direct `tell()` first, falls back to outbox channel on failure (SDK: `plexspaces_sdk::tell_reliable()`)
+- `outbox_limiter()` / `default_outbox_limiter()` — SDK helpers for custom AIMD concurrency configs
+
+**Examples**:
+- [job_queue](../examples/rust/embedded/job_queue/README.md) — all 5 flow control use cases in Rust embedded (UC1-UC5)
+- [job_queue_outbox (Go)](../examples/go/apps/job_queue_outbox/README.md) — AIMD-controlled outbox dispatch with UC1-UC5
+- [job_queue_outbox (Python)](../examples/python/apps/job_queue_outbox/README.md) — same patterns in Python WASM
+- [job_queue_outbox (TypeScript)](../examples/typescript/apps/job_queue_outbox/README.md) — same patterns in TypeScript WASM
+
+**Documentation**:
+- [Architecture: Outbox & Flow Control](architecture.md#outbox--flow-control) — system design
+- [Detailed Design: Flow Control](detailed-design.md#outbox--flow-control) — implementation details
 
 ## FaaS Platforms
 

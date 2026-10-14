@@ -8,6 +8,7 @@ plexspaces/host.py
 plexspaces/leader_worker.py
 plexspaces/proto_wire.py
 plexspaces/runtime.py
+plexspaces/shard_types.py
 plexspaces/workflow.py
 plexspaces/ws_thin_client.py
 plexspaces.egg-info/PKG-INFO
@@ -28,6 +29,8 @@ plexspaces/generated/grpc/gateway/protoc_gen_openapiv2/options/__init__.py
 plexspaces/generated/plexspaces/__init__.py
 plexspaces/generated/plexspaces/actor/__init__.py
 plexspaces/generated/plexspaces/actor/v1/__init__.py
+plexspaces/generated/plexspaces/admin/__init__.py
+plexspaces/generated/plexspaces/admin/v1/__init__.py
 plexspaces/generated/plexspaces/application/__init__.py
 plexspaces/generated/plexspaces/application/v1/__init__.py
 plexspaces/generated/plexspaces/behaviors/__init__.py
@@ -62,6 +65,8 @@ plexspaces/generated/plexspaces/node/__init__.py
 plexspaces/generated/plexspaces/node/v1/__init__.py
 plexspaces/generated/plexspaces/object_registry/__init__.py
 plexspaces/generated/plexspaces/object_registry/v1/__init__.py
+plexspaces/generated/plexspaces/outbox/__init__.py
+plexspaces/generated/plexspaces/outbox/v1/__init__.py
 plexspaces/generated/plexspaces/persistence/__init__.py
 plexspaces/generated/plexspaces/persistence/prv/__init__.py
 plexspaces/generated/plexspaces/pool/__init__.py

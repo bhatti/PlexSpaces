@@ -167,6 +167,7 @@ All message routing logic is centralized in `ActorRegistry` (`crates/actor/src/a
 - **`ActorRegistry::tell(ctx, actor_id, message)`**: Routes fire-and-forget; local or remote via ActorService gRPC
 - **`ActorRegistry::ask(ctx, actor_id, message, timeout)`**: Request-reply with temp sender + ReplyWaiter
 - **`ActorRegistry::ask_with_sender(ctx, actor_id, message, timeout, temp_sender_id, correlation_id)`**: Ask with caller-supplied temp sender for fanout
+- **`ActorRegistry::tell_reliable(ctx, actor_id, message, outbox_channel)`**: Store-and-forward tell — tries direct delivery first, falls back to an outbox channel on failure. Returns `Ok(true)` for direct delivery, `Ok(false)` for outbox fallback. SDK wrapper: `plexspaces_sdk::tell_reliable()`
 
 **Design Principles**:
 
@@ -1875,7 +1876,7 @@ See `scripts/BLOB_TESTING_GUIDE.md` for detailed testing instructions.
 
 PlexSpaces TupleSpace is inspired by Linda memory model. WASM actors using the actor-world WIT call **`ts-write`** / **`ts-read`** / **`ts-take`** / **`ts-read-all`** with protobuf wire bytes using the shared `plexspaces.tuplespace.v1.WriteRequest` and `ReadRequest` models. The runtime decodes those bytes once at the host boundary and delegates to the same TupleSpace backend used by native code. See [WASM Deployment: TupleSpace (ts_write)](wasm-deployment.md#tuplespace-ts_write-for-wasm).
 
-For a comprehensive showcase of TupleSpace as a multi-agent coordination backbone (blackboard, task delegation, voting, veto protocol, barrier, and capability discovery), see the [multi_agent_coordination examples](../examples/typescript/apps/multi_agent_coordination/README.md) (TypeScript and Python) and companion blog post [When 700 AI Agents Self-Organized](../archived_docs/blog-multi-agent-coordination.md).
+For a comprehensive showcase of TupleSpace as a multi-agent coordination backbone (blackboard, task delegation, voting, veto protocol, barrier, and capability discovery), see the [multi_agent_coordination examples](../examples/typescript/apps/multi_agent_coordination/README.md) (TypeScript and Python).
 
 ### Linda Operations
 
@@ -2839,9 +2840,10 @@ Async drain loop that bridges a durable channel to actor delivery at AIMD-contro
 - Dequeues message batches from the channel (batch size bounded by available permits)
 - Acquires concurrency permits before each delivery
 - On success: `limiter.on_success()`, channel `ack()`, increment delivered counter
-- On RESOURCE_EXHAUSTED: `limiter.on_rejection()`, channel `nack(requeue=true)` with exponential backoff
+- On RESOURCE_EXHAUSTED: `limiter.on_rejection()`, channel `nack(requeue=true, delay=backoff)` with exponential backoff written to `send_at`
 - On other errors: evaluate `should_retry()` from `crates/common/src/retry.rs`; nack with requeue if retryable, otherwise nack to DLQ
 - Uses the shared `compute_backoff()` utility with full jitter (configurable `jitter_ratio`)
+- **Delayed redelivery**: `nack(requeue=true, delay=Some(duration))` sets `send_at = now + delay` in the DB; the message is invisible to `receive()` until that timestamp elapses. `delivery_count` is incremented on each nack, enabling per-message retry budgets.
 - **Implementation**: `crates/outbox/src/outbox_relay.rs`
 
 ### AdmissionControlFacet (Receiver-Side)
@@ -2888,6 +2890,31 @@ All outbox metrics use the `plexspaces_outbox_` prefix and are registered in `un
 | `plexspaces_outbox_admission_admitted_total` | counter | Messages admitted |
 | `plexspaces_outbox_admission_rejected_total` | counter | Messages rejected at capacity |
 | `plexspaces_outbox_admission_in_flight` | gauge | Current in-flight messages in admission control |
+
+### End-to-End AIMD Feedback Loop
+
+The outbox flow control system forms a closed feedback loop between sender and receiver:
+
+```
+OutboxRelay.dequeue() → acquire permit → deliver(msg) →
+  → AdmissionControlFacet.before_method() →
+    IF in_flight < max_concurrent → process → after_method() → Success
+      → limiter.on_success() [limit += 1] → channel.ack()
+    ELSE → RESOURCE_EXHAUSTED + retry_after_ms
+      → limiter.on_rejection() [limit /= 2]
+      → channel.nack(msg_id, requeue=true, delay=compute_backoff())
+      → DB: SET send_at = now + delay, delivery_count += 1
+      → message invisible until send_at expires
+      → relay re-dequeues after delay → retry cycle
+```
+
+**Tuning guidance**:
+- `max_concurrent` (AdmissionControlFacet): Set to the actor's actual processing capacity. Too low = wasted throughput. Too high = defeats the purpose.
+- `initial_limit` (ConcurrencyLimiter): Start at 2× the expected sustainable concurrency. AIMD will find the right value.
+- `min_limit` / `max_limit`: Floor and ceiling for AIMD adaptation. `min_limit=1` ensures at least one message in flight.
+- `retry_after_ms` (AdmissionControlFacet): Hint to callers. Doesn't affect the AIMD loop directly.
+- `RetryPolicy.max_attempts`: After this many nack cycles, the message goes to DLQ. Set based on acceptable delivery latency.
+- `RetryPolicy.initial_interval_ms` / `backoff_rate`: Control exponential backoff curve. Full jitter is applied automatically.
 
 ### PartitionedOutboxRelay (Scalable Fan-Out)
 
@@ -3038,6 +3065,81 @@ The `BackpressureStrategy` enum is defined once in `proto/plexspaces/v1/common.p
 | `DROP_NEWEST` | 3 | Drop the incoming message (silently accept but discard). |
 
 This replaced the prior duplicate definitions in `mailbox.proto` and `channel.proto`. The old `BLOCK` strategy (sender waits for space) was removed to eliminate deadlock scenarios in actor-to-actor messaging.
+
+### End-to-End AIMD Feedback Loop
+
+PlexSpaces flow control forms a closed feedback loop between the receiver-side admission gate and the sender-side concurrency limiter. The loop runs continuously without operator intervention:
+
+1. **Receiver rejects** — `AdmissionControlFacet` tracks in-flight messages with an atomic counter. When the counter reaches `max_concurrent`, the facet returns `RESOURCE_EXHAUSTED` before the message reaches the actor's handler.
+2. **Limiter halves** — The `OutboxRelay` receives the `RESOURCE_EXHAUSTED` response and calls `ConcurrencyLimiter::on_rejection()`, which halves the concurrency limit (multiplicative decrease).
+3. **Backoff applied** — The relay computes exponential backoff via `compute_backoff(policy, delivery_count)` and calls `channel.nack(msg_id, requeue=true, delay=Some(backoff))`. The channel backend stores `send_at = now + backoff` on the message row.
+4. **Message deferred** — The dequeue query filters `WHERE (send_at = 0 OR send_at <= now())`, so the nacked message is invisible until the backoff expires.
+5. **Retry succeeds** — When the message becomes eligible and is delivered successfully, the relay calls `ConcurrencyLimiter::on_success()`, which increments the limit by 1 (additive increase).
+
+This AIMD (Additive Increase / Multiplicative Decrease) sawtooth converges to the receiver's true capacity without coordination between sender and receiver — the rejection signal is the only communication channel.
+
+```
+Concurrency
+Limit
+  50 ┤
+     │    ╱╲        ╱╲
+  25 ┤   ╱  ╲      ╱  ╲
+     │  ╱    ╲    ╱    ╲      ← AIMD sawtooth
+  12 ┤ ╱      ╲  ╱      ╲
+     │╱        ╲╱        ╲
+   1 ┤──────────────────────→ time
+     reject   reject   reject
+```
+
+### `send_at` Deferred Delivery
+
+The `send_at` column (`INTEGER NOT NULL DEFAULT 0`, Unix epoch milliseconds) on the `channel_messages` table controls when a message becomes eligible for re-delivery after a nack with backoff.
+
+**Storage layer** (SQLite and Postgres):
+- On `nack(id, requeue=true, delay=Some(d))`: `UPDATE SET acked=0, delivery_count=delivery_count+1, send_at=now_ms+delay_ms`
+- On `nack(id, requeue=true, delay=None)`: `UPDATE SET acked=0, delivery_count=delivery_count+1, send_at=0` (immediate requeue)
+- On `receive(max)`: `WHERE acked=0 AND dead_lettered=0 AND (send_at=0 OR send_at <= now_ms) ORDER BY send_at ASC, created_at ASC`
+
+**Why `send_at` is 0 (not NULL) for immediate delivery**: An integer comparison (`send_at = 0 OR send_at <= ?`) is faster than `IS NULL OR <= ?` on SQLite, and avoids NULL semantics in index lookups. The `idx_channel_unacked` index covers `(tenant_id, namespace, channel_name, send_at, created_at)`.
+
+### `delivery_count` Persistence
+
+The `delivery_count` column (`INTEGER NOT NULL DEFAULT 0`) tracks how many times a message has been delivered. Unlike the in-memory retry counter in the relay (which resets on restart), `delivery_count` survives relay restarts and process crashes.
+
+The relay reads `delivery_count` from the message on each `receive()` and uses it as the `attempt` parameter to `compute_backoff()`. This means backoff is durable: if a relay crashes after 3 failed deliveries, the replacement relay continues from attempt 4, not attempt 1.
+
+When `delivery_count >= max_retries` (from `RetryPolicy`), the relay calls `nack(id, requeue=false, delay=None)` to dead-letter the message.
+
+### Flow Control Tuning Guide
+
+| Parameter | Location | Default | Effect of increasing | Effect of decreasing |
+|-----------|----------|---------|---------------------|---------------------|
+| `max_concurrent` | `AdmissionControlConfig` | 5 | More concurrent requests per actor; higher throughput but more memory | Stricter admission; lower latency variance but more rejections |
+| `initial_limit` | `ConcurrencyConfig` | 10 | Relay starts with more parallelism; faster ramp-up but may overshoot | Conservative start; slower ramp-up but fewer initial rejections |
+| `min_limit` | `ConcurrencyConfig` | 1 | Floor for AIMD decrease; higher floor prevents starvation | Lower floor allows deeper backoff under sustained overload |
+| `max_limit` | `ConcurrencyConfig` | 50 | Ceiling for AIMD increase; higher ceiling for high-capacity receivers | Lower ceiling caps throughput even when receiver has headroom |
+| `default_retry_after_ms` | `AdmissionControlConfig` | 100 | Longer suggested retry delay; more breathing room for receiver | Shorter delay; faster retry but risk of repeated rejection |
+| `relay_interval_ms` | `OutboxConfig` | 50 | Longer poll interval; lower CPU but higher delivery latency | Shorter interval; lower latency but more polling overhead |
+| `relay_batch_size` | `OutboxConfig` | 20 | Larger batches; fewer DB round-trips but higher per-batch latency | Smaller batches; more round-trips but smoother delivery |
+| `jitter_ratio` | `RetryPolicy` | 0.3 | More randomness in backoff; better thundering-herd prevention | Less randomness; more predictable but correlated retries |
+
+**Rule of thumb**: Set `max_concurrent` to the number of concurrent requests the actor can handle without degrading latency. Set `initial_limit` to roughly `max_concurrent × number_of_target_actors`. Set `max_limit` to 2-5× `initial_limit`.
+
+### When to Use What: `tell()` vs `OutboxRelay` vs `PartitionedOutboxRelay`
+
+| Pattern | Use when | Durability | Backpressure | Ordering |
+|---------|----------|------------|-------------|----------|
+| `actor_ref.tell(ctx, msg)` | Low-latency fire-and-forget to a single known actor. Acceptable to lose messages on crash. | None (in-memory) | Bounded mailbox + admission control | Per-actor FIFO |
+| `OutboxRelay` | Reliable delivery to one or more actors. Messages must survive crashes. Need retry + DLQ. | Channel-backed (SQLite/Postgres) | AIMD concurrency limiter + `send_at` backoff | Channel FIFO (send_at ordering) |
+| `PartitionedOutboxRelay` | High-throughput fan-out to many actors. Need per-recipient ordering + fault isolation between partitions. | In-memory (transient) | Per-partition AIMD limiter | Per-partition FIFO (hash-routed) |
+
+**Decision flow**:
+1. Is message loss acceptable? → `tell()`
+2. Need durability or retry? → `OutboxRelay` with SQLite/Postgres channel
+3. Need fan-out to many targets with ordering? → `PartitionedOutboxRelay`
+4. Need durable fan-out? → Manual composition: N `OutboxRelay` instances with a `HashRouter` and DB-backed channels (see "Durable Partitioned Dispatch" above)
+
+**Telemetry fast-path pattern**: Try `tell()` first for lowest latency. If it fails (receiver at capacity), fall back to `OutboxRelay` for reliable delivery. This gives you the best of both: fast-path when the receiver is healthy, guaranteed delivery when it's overloaded.
 
 ## Observability
 
@@ -3348,9 +3450,9 @@ PlexSpaces supports multiple channel backends, each optimized for different use 
 - **Use Case**: Single-node persistence, testing
 - **Durability**: Durable (file-based)
 - **Performance**: Moderate (disk I/O)
-- **ACK/NACK**: Supported
+- **ACK/NACK**: Supported with delayed redelivery (`send_at`, `delivery_count`)
 - **Graceful Shutdown**: Stops accepting new, completes in-progress
-- **Features**: Message recovery, WAL mode, file-based persistence
+- **Features**: Message recovery, WAL mode, file-based persistence, delayed redelivery via `send_at` column, per-message retry tracking via `delivery_count`
 
 #### NATS Channel
 - **Use Case**: Lightweight pub/sub

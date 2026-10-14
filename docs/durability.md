@@ -357,7 +357,7 @@ record_channel_nack("my-channel", &message_id, true, 2, "redis");
 record_channel_dlq("my-channel", &message_id, 3, "max_retries_exceeded", "redis");
 ```
 
-See [Channel Observability Helpers](../archived_docs/CHANNEL_OBSERVABILITY_HELPERS.md) for details.
+See the `record_channel_*` functions in `crates/channel/src/observability.rs` for details.
 
 ### Example: Channel-Based Mailbox
 

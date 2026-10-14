@@ -840,7 +840,7 @@ impl Channel for SQSChannel {
         }
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, message_id: &str, requeue: bool, _delay: Option<std::time::Duration>) -> ChannelResult<()> {
         let start_time = std::time::Instant::now();
 
         // Get receipt handle from stored map

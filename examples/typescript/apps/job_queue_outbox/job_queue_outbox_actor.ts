@@ -234,6 +234,86 @@ class JobQueueLeaderActor extends PlexSpacesActor<LeaderState> {
     };
   }
 
+  // ── UC1-UC5: Flow Control Use Cases ──────────────────────────────────────
+
+  protected onThundering_herd_test(payload: Record<string, unknown>): Record<string, unknown> {
+    const workers = this.state.worker_ids;
+    if (workers.length === 0) return { error: "call init_workers first" };
+    const count = typeof payload.count === "number" && payload.count > 0
+      ? Math.min(payload.count, workers.length) : workers.length;
+    const targets = workers.slice(0, count);
+    const { accepted, rejected, wall_time_ms } = this.doDispatch(targets, { task: "thundering_herd", priority: "high" });
+    return { targets: targets.length, accepted, rejected, wall_time_ms };
+  }
+
+  protected onConfig_wave_deploy(payload: Record<string, unknown>): Record<string, unknown> {
+    const workers = this.state.worker_ids;
+    if (workers.length === 0) return { error: "call init_workers first" };
+    const waveSize = typeof payload.wave_size === "number" ? payload.wave_size : 20;
+    const innerPayload = { task: "config_download", version: "2.1.0" };
+    let totalAccepted = 0, totalRejected = 0, waveCount = 0;
+    const waves: Record<string, unknown>[] = [];
+    for (let i = 0; i < workers.length; i += waveSize) {
+      const targets = workers.slice(i, i + waveSize);
+      const { accepted, rejected, wall_time_ms } = this.doDispatch(targets, innerPayload);
+      totalAccepted += accepted;
+      totalRejected += rejected;
+      waveCount++;
+      waves.push({ wave: waveCount, accepted, rejected, wall_time_ms });
+    }
+    return { wave_count: waveCount, total_accepted: totalAccepted, total_rejected: totalRejected, waves };
+  }
+
+  protected onEnhanced_heartbeat(payload: Record<string, unknown>): Record<string, unknown> {
+    const count = typeof payload.count === "number" ? payload.count : 50;
+    const workers = this.state.worker_ids.length > 0
+      ? this.state.worker_ids : ["JobQueueWorker:worker-0"];
+    const ctx = JSON.stringify({ tenant: "default", namespace: "default" });
+    let totalAccepted = 0, totalRejected = 0;
+    for (let i = 1; i <= count; i++) {
+      const payloadBytes = new TextEncoder().encode(JSON.stringify({ type: "heartbeat", seq: i, cpu: 0.42 }));
+      try {
+        const result = host.outbox.dispatch(ctx, DISPATCHER_ID, workers, payloadBytes, "cast", HEARTBEAT_IDEM_KEY, "overwrite");
+        totalAccepted += result[0];
+        totalRejected += result[1];
+      } catch { totalRejected += workers.length; }
+    }
+    this.state.heartbeat_count = count;
+    return { heartbeats_sent: count, total_accepted: totalAccepted, total_rejected: totalRejected, worker_count: workers.length };
+  }
+
+  protected onTelemetry_test(payload: Record<string, unknown>): Record<string, unknown> {
+    const workers = this.state.worker_ids;
+    if (workers.length === 0) return { error: "call init_workers first" };
+    const count = typeof payload.count === "number" ? payload.count : 50;
+    let fastPath = 0, fallback = 0;
+    const ctx = JSON.stringify({ tenant: "default", namespace: "default" });
+    for (let i = 0; i < count; i++) {
+      const target = workers[i % workers.length];
+      try {
+        host.ask(target, "process", { type: "telemetry", seq: i }, 2000);
+        fastPath++;
+      } catch {
+        const payloadBytes = new TextEncoder().encode(JSON.stringify({ type: "telemetry", seq: i }));
+        try {
+          host.outbox.dispatch(ctx, DISPATCHER_ID, [target], payloadBytes, "cast", "", "");
+        } catch { /* best-effort fallback */ }
+        fallback++;
+      }
+    }
+    return { total_sent: count, fast_path_success: fastPath, outbox_fallback: fallback };
+  }
+
+  protected onReliable_delivery_test(payload: Record<string, unknown>): Record<string, unknown> {
+    const workers = this.state.worker_ids;
+    if (workers.length === 0) return { error: "call init_workers first" };
+    const count = typeof payload.count === "number" ? payload.count : 50;
+    const targets: string[] = [];
+    for (let i = 0; i < count; i++) targets.push(workers[i % workers.length]);
+    const { accepted, rejected, wall_time_ms } = this.doDispatch(targets, { task: "reliable_delivery_item" });
+    return { dispatched: count, accepted, rejected, wall_time_ms };
+  }
+
   // Backward-compat handlers kept for existing test.sh compatibility
   protected onDispatch(payload: Record<string, unknown>): Record<string, unknown> {
     const targets = (payload.targets as string[]) ?? [];

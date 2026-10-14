@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
+use std::time::Duration;
 use thiserror::Error;
 
 /// Errors that can occur during channel operations
@@ -228,7 +229,11 @@ pub trait Channel: Send + Sync {
     /// ## Arguments
     /// * `message_id` - ID of message to nack
     /// * `requeue` - Whether to requeue message (true) or send to DLQ (false)
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()>;
+    /// * `delay` - Optional delay before the message becomes eligible for re-delivery.
+    ///   When set, the backend stores `send_at = now + delay` and the dequeue query
+    ///   skips the message until that timestamp is reached. Backends that do not
+    ///   support delayed redelivery (Kafka, SQS, NATS, etc.) ignore this parameter.
+    async fn nack(&self, message_id: &str, requeue: bool, delay: Option<Duration>) -> ChannelResult<()>;
 
     /// Get channel statistics
     ///

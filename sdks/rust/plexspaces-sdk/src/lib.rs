@@ -899,6 +899,65 @@ pub use plexspaces_outbox::{HashRouter, PartitionedOutboxRelay};
 #[cfg(feature = "native")]
 pub use plexspaces_outbox::RESOURCE_EXHAUSTED;
 
+/// Create a `ConcurrencyLimiter` with custom AIMD settings.
+///
+/// Use this when you need a non-default concurrency profile for your outbox relay
+/// or WASM dispatch. For most cases, `default_outbox_limiter()` is sufficient.
+#[cfg(feature = "native")]
+pub fn outbox_limiter(config: &plexspaces_proto::outbox::v1::ConcurrencyConfig) -> std::sync::Arc<ConcurrencyLimiter> {
+    std::sync::Arc::new(ConcurrencyLimiter::new(config))
+}
+
+/// Create a `ConcurrencyLimiter` with default AIMD settings (10/1/100).
+#[cfg(feature = "native")]
+pub fn default_outbox_limiter() -> std::sync::Arc<ConcurrencyLimiter> {
+    outbox_limiter(&plexspaces_proto::outbox::v1::ConcurrencyConfig {
+        initial_limit: 10,
+        min_limit: 1,
+        max_limit: 100,
+        strategy: plexspaces_proto::outbox::v1::ConcurrencyStrategy::ConcurrencyStrategyAimd as i32,
+    })
+}
+
+/// Store-and-forward tell: delivers directly when possible, falls back to outbox.
+///
+/// Tries `tell()` first (fast path). On any failure — mailbox full, actor not found,
+/// network error — enqueues the message to `outbox_channel` for asynchronous retry
+/// by an `OutboxRelay`.
+///
+/// Returns `Ok(true)` if delivered directly, `Ok(false)` if stored in outbox.
+/// Returns `Err` only if both paths fail.
+///
+/// # Example
+/// ```rust,ignore
+/// use plexspaces_sdk::{tell_reliable, call_message, json};
+///
+/// let channel = /* your outbox channel */;
+/// let msg = cast_message(json!({ "event": "firmware_update" }));
+/// let direct = tell_reliable(&ctx, &service_locator, &actor_id, msg, &*channel).await?;
+/// if !direct {
+///     println!("Stored in outbox for async delivery");
+/// }
+/// ```
+#[cfg(feature = "native")]
+pub async fn tell_reliable(
+    ctx: &plexspaces_actor::RequestContext,
+    service_locator: &dyn plexspaces_actor::service_locator_trait::ServiceLocator,
+    actor_id: &plexspaces_actor::ActorId,
+    message: plexspaces_proto::common::v1::Message,
+    outbox_channel: &dyn plexspaces_channel::Channel,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let registry = service_locator
+        .actor_registry()
+        .await
+        .ok_or_else(|| "ActorRegistry not available in ServiceLocator")?;
+
+    registry
+        .tell_reliable(ctx, actor_id, message, outbox_channel)
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+}
+
 #[cfg(feature = "native")]
 fn parse_admission_control_facet(config: &serde_json::Value) -> plexspaces_outbox::AdmissionControlFacet {
     let proto_cfg = plexspaces_proto::outbox::v1::AdmissionControlConfig {

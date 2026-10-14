@@ -10,8 +10,13 @@
 #   4. Send 5 heartbeats with OVERWRITE (LWW idempotency)
 #   5. Upgrade simulation — Ask 10 workers
 #   6. Scaling benchmark (10, 50, 100 workers)
-#   7. Full metrics
-#   8. Prometheus /metrics endpoint
+#   7. Thundering herd test (UC1)
+#   8. Config wave deploy (UC2)
+#   9. Enhanced heartbeat with OVERWRITE coalescing (UC3)
+#  10. Telemetry fast-path with outbox fallback (UC4)
+#  11. Reliable delivery via outbox store-and-forward (UC5)
+#  12. Full metrics
+#  13. Prometheus /metrics endpoint
 #
 # Usage: ./test.sh [port]
 # Prerequisites: Start PlexSpaces node first.
@@ -257,8 +262,85 @@ PY
 echo -e "  ${GREEN}PASS: scaling benchmark completed${NC}"
 echo ""
 
-# ── Step 7: Full metrics ──────────────────────────────────────────────────────
-echo "Step 7: Full metrics"
+# ── Step 7: Thundering Herd Test (UC1) ────────────────────────────────────────
+echo "Step 7: Thundering herd test — dispatch to all workers simultaneously"
+R=$(send_op "$LEADER_ACTOR" '{"op":"thundering_herd_test"}' 60)
+assert_ok "thundering_herd_test" "$R"
+TH_ACCEPTED=$(extract "$R" accepted)
+TH_REJECTED=$(extract "$R" rejected)
+TH_TARGETS=$(extract "$R" targets)
+echo "  targets=$TH_TARGETS accepted=$TH_ACCEPTED rejected=$TH_REJECTED"
+if [ -n "$TH_ACCEPTED" ] && [ "$TH_ACCEPTED" != "0" ]; then
+  echo -e "  ${GREEN}PASS: thundering herd accepted=$TH_ACCEPTED${NC}"
+else
+  echo -e "${RED}FAIL: thundering_herd accepted=$TH_ACCEPTED (expected > 0)${NC}"
+  exit 1
+fi
+echo ""
+
+# ── Step 8: Config Wave Deploy (UC2) ─────────────────────────────────────────
+echo "Step 8: Config wave deploy — wave-based dispatch with backpressure"
+R=$(send_op "$LEADER_ACTOR" '{"op":"config_wave_deploy","wave_size":20}' 60)
+assert_ok "config_wave_deploy" "$R"
+CW_WAVES=$(extract "$R" wave_count)
+CW_ACCEPTED=$(extract "$R" total_accepted)
+echo "  waves=$CW_WAVES total_accepted=$CW_ACCEPTED"
+if [ -n "$CW_WAVES" ] && [ "$CW_WAVES" != "0" ]; then
+  echo -e "  ${GREEN}PASS: config wave deploy waves=$CW_WAVES accepted=$CW_ACCEPTED${NC}"
+else
+  echo -e "${RED}FAIL: config_wave_deploy waves=$CW_WAVES (expected > 0)${NC}"
+  exit 1
+fi
+echo ""
+
+# ── Step 9: Enhanced Heartbeat (UC3) ─────────────────────────────────────────
+echo "Step 9: Enhanced heartbeat — 50 rapid heartbeats with OVERWRITE coalescing"
+R=$(send_op "$LEADER_ACTOR" '{"op":"enhanced_heartbeat","count":50}' 60)
+assert_ok "enhanced_heartbeat" "$R"
+EH_SENT=$(extract "$R" heartbeats_sent)
+EH_ACCEPTED=$(extract "$R" total_accepted)
+echo "  heartbeats_sent=$EH_SENT total_accepted=$EH_ACCEPTED"
+if [ "$EH_SENT" = "50" ]; then
+  echo -e "  ${GREEN}PASS: enhanced heartbeat sent=$EH_SENT with OVERWRITE coalescing${NC}"
+else
+  echo -e "${RED}FAIL: enhanced_heartbeat sent=$EH_SENT (expected 50)${NC}"
+  exit 1
+fi
+echo ""
+
+# ── Step 10: Telemetry Fast-Path Test (UC4) ──────────────────────────────────
+echo "Step 10: Telemetry fast-path with outbox fallback"
+R=$(send_op "$LEADER_ACTOR" '{"op":"telemetry_test","count":50}' 60)
+assert_ok "telemetry_test" "$R"
+TEL_FAST=$(extract "$R" fast_path_success)
+TEL_FALLBACK=$(extract "$R" outbox_fallback)
+TEL_TOTAL=$(extract "$R" total_sent)
+echo "  total=$TEL_TOTAL fast_path=$TEL_FAST outbox_fallback=$TEL_FALLBACK"
+if [ -n "$TEL_TOTAL" ] && [ "$TEL_TOTAL" != "0" ]; then
+  echo -e "  ${GREEN}PASS: telemetry test total=$TEL_TOTAL fast=$TEL_FAST fallback=$TEL_FALLBACK${NC}"
+else
+  echo -e "${RED}FAIL: telemetry_test total=$TEL_TOTAL (expected > 0)${NC}"
+  exit 1
+fi
+echo ""
+
+# ── Step 11: Reliable Delivery Test (UC5) ────────────────────────────────────
+echo "Step 11: Reliable delivery — outbox store-and-forward"
+R=$(send_op "$LEADER_ACTOR" '{"op":"reliable_delivery_test","count":50}' 60)
+assert_ok "reliable_delivery_test" "$R"
+RD_DISPATCHED=$(extract "$R" dispatched)
+RD_ACCEPTED=$(extract "$R" accepted)
+echo "  dispatched=$RD_DISPATCHED accepted=$RD_ACCEPTED"
+if [ -n "$RD_ACCEPTED" ] && [ "$RD_ACCEPTED" != "0" ]; then
+  echo -e "  ${GREEN}PASS: reliable delivery dispatched=$RD_DISPATCHED accepted=$RD_ACCEPTED${NC}"
+else
+  echo -e "${RED}FAIL: reliable_delivery accepted=$RD_ACCEPTED (expected > 0)${NC}"
+  exit 1
+fi
+echo ""
+
+# ── Step 12: Full metrics ─────────────────────────────────────────────────────
+echo "Step 12: Full metrics"
 R=$(send_op "$LEADER_ACTOR" '{"op":"get_metrics"}')
 assert_ok "get_metrics" "$R"
 DISPATCHED=$(extract "$R" total_dispatched)
@@ -279,8 +361,8 @@ else
 fi
 echo ""
 
-# ── Step 8: Prometheus metrics ────────────────────────────────────────────────
-echo "Step 8: Prometheus /metrics endpoint"
+# ── Step 13: Prometheus metrics ───────────────────────────────────────────────
+echo "Step 13: Prometheus /metrics endpoint"
 METRICS=$(curl -s --max-time 10 \
   "http://$HTTP_HOST:$HTTP_PORT/metrics" \
   ${AUTH_HEADER:+-H "$AUTH_HEADER"} 2>/dev/null || echo '')
@@ -304,5 +386,9 @@ echo -e "  ${GREEN}*${NC} Outbox dispatch with AIMD flow control"
 echo -e "  ${GREEN}*${NC} Upgrade simulation via Ask round-trip (RTT tracked)"
 echo -e "  ${GREEN}*${NC} LWW heartbeat dedup via OVERWRITE conflict resolution"
 echo -e "  ${GREEN}*${NC} Scaling benchmark (10/50/100 workers)"
-echo -e "  ${GREEN}*${NC} Wall-time and throughput metrics"
+echo -e "  ${GREEN}*${NC} Thundering herd protection (UC1)"
+echo -e "  ${GREEN}*${NC} Wave-based config deployment (UC2)"
+echo -e "  ${GREEN}*${NC} Enhanced heartbeat with OVERWRITE coalescing (UC3)"
+echo -e "  ${GREEN}*${NC} Telemetry fast-path with outbox fallback (UC4)"
+echo -e "  ${GREEN}*${NC} Reliable offline delivery (UC5)"
 echo ""

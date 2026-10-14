@@ -362,8 +362,9 @@ Facets add dynamic capabilities to actors:
 - **DurabilityFacet**: Automatic persistence and recovery
 - **TimerFacet**: Scheduled tasks and periodic operations
 - **ReminderFacet**: Persistent scheduled reminders
+- **AdmissionControlFacet**: Receiver-side flow control with atomic in-flight counter
 
-**Learn More**: See the [Concepts Guide](concepts.md) for comprehensive explanations of all core concepts.
+**Learn More**: See the [Concepts Guide](concepts.md) for comprehensive explanations of all core concepts. For flow control patterns, see [Use Cases: Flow Control](use-cases.md#flow-control-and-backpressure).
 
 ## Next Steps
 

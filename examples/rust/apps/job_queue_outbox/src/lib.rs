@@ -389,6 +389,130 @@ fn leader_scaling_benchmark(state: &mut LeaderState) -> Vec<u8> {
     }))
 }
 
+// ── UC1-UC5: Flow Control Use Cases ──────────────────────────────────────
+
+fn leader_thundering_herd_test(state: &mut LeaderState, v: &Value) -> Vec<u8> {
+    if state.worker_ids.is_empty() {
+        return json_err("call init_workers first");
+    }
+    let count = v.get("count").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+    let targets = if count > 0 && count < state.worker_ids.len() {
+        &state.worker_ids[..count]
+    } else {
+        &state.worker_ids[..]
+    };
+    let ctx = r#"{"tenant":"default","namespace":"default"}"#;
+    let payload_bytes = br#"{"task":"thundering_herd","priority":"high"}"#.to_vec();
+    let t0 = now_ms();
+    let (accepted, rejected) = match outbox_dispatch(ctx, DISPATCHER_ID, targets, &payload_bytes, "cast", "", "") {
+        Ok(r) => parse_dispatch_result(&r),
+        Err(_) => (0, targets.len() as u64),
+    };
+    let wall_ms = now_ms().saturating_sub(t0);
+    state.total_dispatched += targets.len() as u64;
+    state.total_accepted += accepted;
+    state.total_rejected += rejected;
+    state.dispatch_count += 1;
+    json_bytes(json!({ "success": true, "targets": targets.len(), "accepted": accepted, "rejected": rejected, "wall_time_ms": wall_ms }))
+}
+
+fn leader_config_wave_deploy(state: &mut LeaderState, v: &Value) -> Vec<u8> {
+    if state.worker_ids.is_empty() {
+        return json_err("call init_workers first");
+    }
+    let wave_size = v.get("wave_size").and_then(|x| x.as_u64()).unwrap_or(20) as usize;
+    let ctx = r#"{"tenant":"default","namespace":"default"}"#;
+    let payload_bytes = br#"{"task":"config_download","version":"2.1.0"}"#.to_vec();
+    let mut total_accepted = 0u64;
+    let mut total_rejected = 0u64;
+    let mut wave_count = 0u64;
+    let mut waves: Vec<Value> = Vec::new();
+    let workers = state.worker_ids.clone();
+    for chunk in workers.chunks(wave_size) {
+        let t0 = now_ms();
+        let (accepted, rejected) = match outbox_dispatch(ctx, DISPATCHER_ID, chunk, &payload_bytes, "cast", "", "") {
+            Ok(r) => parse_dispatch_result(&r),
+            Err(_) => (0, chunk.len() as u64),
+        };
+        let wall_ms = now_ms().saturating_sub(t0);
+        total_accepted += accepted;
+        total_rejected += rejected;
+        wave_count += 1;
+        waves.push(json!({ "wave": wave_count, "accepted": accepted, "rejected": rejected, "wall_time_ms": wall_ms }));
+    }
+    state.total_dispatched += workers.len() as u64;
+    state.total_accepted += total_accepted;
+    state.total_rejected += total_rejected;
+    state.dispatch_count += wave_count;
+    json_bytes(json!({ "success": true, "wave_count": wave_count, "total_accepted": total_accepted, "total_rejected": total_rejected, "waves": waves }))
+}
+
+fn leader_enhanced_heartbeat(state: &mut LeaderState, v: &Value) -> Vec<u8> {
+    let count = v.get("count").and_then(|x| x.as_u64()).unwrap_or(50);
+    let workers = if state.worker_ids.is_empty() {
+        vec!["JobQueueWorker:worker-0".to_string()]
+    } else {
+        state.worker_ids.clone()
+    };
+    let ctx = r#"{"tenant":"default","namespace":"default"}"#;
+    let mut total_accepted = 0u64;
+    let mut total_rejected = 0u64;
+    for i in 1..=count {
+        let hb = json!({"type": "heartbeat", "seq": i, "cpu": 0.42}).to_string();
+        let hb_bytes: Vec<u8> = hb.as_bytes().to_vec();
+        match outbox_dispatch(ctx, DISPATCHER_ID, &workers, &hb_bytes, "cast", HEARTBEAT_IDEM_KEY, "overwrite") {
+            Ok(r) => { let (a, r2) = parse_dispatch_result(&r); total_accepted += a; total_rejected += r2; }
+            Err(_) => { total_rejected += workers.len() as u64; }
+        }
+    }
+    state.heartbeat_count = count;
+    json_bytes(json!({ "success": true, "heartbeats_sent": count, "total_accepted": total_accepted, "total_rejected": total_rejected, "worker_count": workers.len() }))
+}
+
+fn leader_telemetry_test(state: &mut LeaderState, v: &Value) -> Vec<u8> {
+    if state.worker_ids.is_empty() {
+        return json_err("call init_workers first");
+    }
+    let count = v.get("count").and_then(|x| x.as_u64()).unwrap_or(50) as usize;
+    let ctx = r#"{"tenant":"default","namespace":"default"}"#;
+    let mut fast_path = 0u64;
+    let mut fallback = 0u64;
+    for i in 0..count {
+        let target = &state.worker_ids[i % state.worker_ids.len()];
+        let tel = json!({"type": "telemetry", "seq": i}).to_string();
+        let tel_bytes: Vec<u8> = tel.as_bytes().to_vec();
+        match ask(target, "process", &tel_bytes, 2000) {
+            Ok(_) => { fast_path += 1; }
+            Err(_) => {
+                let _ = outbox_dispatch(ctx, DISPATCHER_ID, &[target.clone()], &tel_bytes, "cast", "", "");
+                fallback += 1;
+            }
+        }
+    }
+    json_bytes(json!({ "success": true, "total_sent": count, "fast_path_success": fast_path, "outbox_fallback": fallback }))
+}
+
+fn leader_reliable_delivery_test(state: &mut LeaderState, v: &Value) -> Vec<u8> {
+    if state.worker_ids.is_empty() {
+        return json_err("call init_workers first");
+    }
+    let count = v.get("count").and_then(|x| x.as_u64()).unwrap_or(50) as usize;
+    let targets: Vec<String> = (0..count).map(|i| state.worker_ids[i % state.worker_ids.len()].clone()).collect();
+    let ctx = r#"{"tenant":"default","namespace":"default"}"#;
+    let payload_bytes = br#"{"task":"reliable_delivery_item"}"#.to_vec();
+    let t0 = now_ms();
+    let (accepted, rejected) = match outbox_dispatch(ctx, DISPATCHER_ID, &targets, &payload_bytes, "cast", "", "") {
+        Ok(r) => parse_dispatch_result(&r),
+        Err(_) => (0, targets.len() as u64),
+    };
+    let wall_ms = now_ms().saturating_sub(t0);
+    state.total_dispatched += count as u64;
+    state.total_accepted += accepted;
+    state.total_rejected += rejected;
+    state.dispatch_count += 1;
+    json_bytes(json!({ "success": true, "dispatched": count, "accepted": accepted, "rejected": rejected, "wall_time_ms": wall_ms }))
+}
+
 fn leader_get_metrics(state: &LeaderState) -> Vec<u8> {
     let throughput = if state.wall_time_ms > 0 {
         state.total_accepted * 1000 / state.wall_time_ms
@@ -515,6 +639,11 @@ impl Guest for JobQueueOutboxActor {
                 "upgrade_workers" => leader_upgrade_workers(state, &v),
                 "send_heartbeat" => leader_send_heartbeat(state, &v),
                 "scaling_benchmark" => leader_scaling_benchmark(state),
+                "thundering_herd_test" => leader_thundering_herd_test(state, &v),
+                "config_wave_deploy" => leader_config_wave_deploy(state, &v),
+                "enhanced_heartbeat" => leader_enhanced_heartbeat(state, &v),
+                "telemetry_test" => leader_telemetry_test(state, &v),
+                "reliable_delivery_test" => leader_reliable_delivery_test(state, &v),
                 "get_metrics" => leader_get_metrics(state),
                 // Legacy ops kept for backward compat
                 "dispatch" => {

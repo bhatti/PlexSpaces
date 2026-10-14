@@ -1187,7 +1187,7 @@ impl Mailbox {
         error: Option<&str>,
     ) -> Result<(), MailboxError> {
         if let Some(ref ch) = self.channel {
-            ch.nack(&message.id, true).await
+            ch.nack(&message.id, true, None).await
                 .map_err(|e| MailboxError::StorageError(format!("Failed to nack message: {}", e)))?;
         }
         self.total_dropped.fetch_add(1, AtomicOrdering::Relaxed);

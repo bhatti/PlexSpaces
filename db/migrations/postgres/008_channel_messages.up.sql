@@ -14,12 +14,15 @@ CREATE TABLE IF NOT EXISTS channel_messages (
     timestamp           TIMESTAMPTZ NOT NULL,
     acked               BOOLEAN     NOT NULL DEFAULT FALSE,
     dead_lettered       BOOLEAN     NOT NULL DEFAULT FALSE,
+    delivery_count      INTEGER     NOT NULL DEFAULT 0,
+    send_at             BIGINT      NOT NULL DEFAULT 0,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Hot path: tenant+namespace-scoped poll of pending unacked messages, ordered by arrival
+-- Hot path: tenant+namespace-scoped poll of pending unacked messages eligible for delivery.
+-- send_at in leading position so the relay query (send_at <= ? OR send_at = 0) uses the index.
 CREATE INDEX IF NOT EXISTS idx_channel_unacked
-    ON channel_messages(tenant_id, namespace, channel_name, created_at)
+    ON channel_messages(tenant_id, namespace, channel_name, send_at, created_at)
     WHERE acked = FALSE AND dead_lettered = FALSE;
 
 -- Idempotency OVERWRITE: find+delete existing queued key in O(log n), tenant-scoped

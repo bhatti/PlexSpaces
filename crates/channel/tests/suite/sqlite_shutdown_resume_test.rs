@@ -199,7 +199,7 @@ mod tests {
                     // NACK with requeue=true should work
                     // Note: SQLite backend may not support delivery_count tracking
                     // So we just verify NACK doesn't error
-                    let nack_result = channel1.nack(&msg.id, true).await;
+                    let nack_result = channel1.nack(&msg.id, true, None).await;
                     // NACK may succeed or fail depending on SQLite backend implementation
                     // The important thing is that the test doesn't panic
                     if nack_result.is_err() {

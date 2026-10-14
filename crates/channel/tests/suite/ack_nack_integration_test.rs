@@ -138,7 +138,7 @@ async fn test_mock_channel_nack_requeue() {
     let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1);
 
-    let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
+    let _: () = Channel::nack(&channel, "msg-1", true, None).await.unwrap();
 
     // Verify message is requeued (delivery count incremented)
     let delivery_count = channel.get_delivery_count("msg-1").await;
@@ -175,7 +175,7 @@ async fn test_mock_channel_poisonous_message_dlq() {
     assert_eq!(received[0].id, "poison-1");
 
     // NACK with requeue - but since it's poisonous, it should go to DLQ immediately (not requeued)
-    let _: () = Channel::nack(&channel, "poison-1", true).await.unwrap();
+    let _: () = Channel::nack(&channel, "poison-1", true, None).await.unwrap();
 
     // Poisonous message should be in DLQ immediately (not requeued)
     let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
@@ -207,7 +207,7 @@ async fn test_mock_channel_max_retries_dlq() {
     // First failure: delivery_count = 1, requeue (1 < 2)
     let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1, "Should receive message on first attempt");
-    let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
+    let _: () = Channel::nack(&channel, "msg-1", true, None).await.unwrap();
 
     // Second failure: delivery_count = 2, requeue (2 < 2 is false, but we check < max_retries)
     // Actually, delivery_count starts at 0, increments to 1 on first receive, so:
@@ -219,7 +219,7 @@ async fn test_mock_channel_max_retries_dlq() {
         1,
         "Should receive message on second attempt"
     );
-    let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
+    let _: () = Channel::nack(&channel, "msg-1", true, None).await.unwrap();
 
     // After second nack, delivery_count = 2, which equals max_retries (2), so should go to DLQ
     // But we need to check if it was actually requeued or sent to DLQ
@@ -239,7 +239,7 @@ async fn test_mock_channel_max_retries_dlq() {
             1,
             "Should receive message on third attempt if requeued"
         );
-        let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
+        let _: () = Channel::nack(&channel, "msg-1", true, None).await.unwrap();
 
         // Now it should definitely be in DLQ
         let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
@@ -450,7 +450,7 @@ mod redis_tests {
         assert_eq!(received.len(), 1);
         let message_id = received[0].id.clone();
 
-        let _: () = Channel::nack(&channel, &message_id, true).await.unwrap();
+        let _: () = Channel::nack(&channel, &message_id, true, None).await.unwrap();
 
         // Message should be available again (via XCLAIM)
         // Note: In real scenario, would need to wait for claim_timeout
@@ -500,7 +500,7 @@ async fn test_poisonous_message_scenario() {
     let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received[0].id, "poison-1");
     // Nack with requeue=true, but since it's poisonous, it should go to DLQ
-    let _: () = Channel::nack(&channel, "poison-1", true).await.unwrap();
+    let _: () = Channel::nack(&channel, "poison-1", true, None).await.unwrap();
 
     // Verify poisonous message in DLQ (poisonous messages skip retries)
     let dlq: Vec<Message> = channel.get_dlq_messages().await;
@@ -653,7 +653,7 @@ async fn test_nack_message_not_found_never_received() {
     let channel: MockChannel = MockChannel::new(config);
 
     // Try to NACK a message that was never sent/received
-    let result: ChannelResult<()> = Channel::nack(&channel, "non-existent-message-id", true).await;
+    let result: ChannelResult<()> = Channel::nack(&channel, "non-existent-message-id", true, None).await;
     assert!(result.is_err(), "NACK should fail for non-existent message");
     assert!(matches!(
         result.unwrap_err(),
@@ -683,7 +683,7 @@ async fn test_nack_message_already_acked() {
     let _: () = Channel::ack(&channel, "msg-1").await.unwrap();
 
     // NACK after ACK (should fail - message not found)
-    let result: ChannelResult<()> = Channel::nack(&channel, "msg-1", true).await;
+    let result: ChannelResult<()> = Channel::nack(&channel, "msg-1", true, None).await;
     assert!(
         result.is_err(),
         "NACK should fail for already-acked message"
@@ -785,7 +785,7 @@ async fn test_ack_after_nack() {
     assert_eq!(received.len(), 1);
 
     // NACK with requeue
-    let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
+    let _: () = Channel::nack(&channel, "msg-1", true, None).await.unwrap();
 
     // After NACK with requeue, message should be requeued, so ACK should fail
     // (message is no longer in pending_acks, it's back in the queue)

@@ -47,7 +47,7 @@ PlexSpaces exposes remote functionality through gRPC services, with optional RES
 - **Security**: mTLS support with configurable authentication
 - **Thin Controllers**: gRPC/HTTP layers orchestrate request handling and delegate business behavior to the framework crates and ServiceLocator-registered services
 
-**Application deploy** validates `ApplicationSpec.required_service_links` against the node `RuntimeConfig.service_links` catalog. Optional `publish_to_registry` registers link metadata as `ObjectTypeService` for discovery. Internal engineering notes (binding lifecycle, WIT phases, tradeoffs) live in [archived_docs/component-services-design.md](../archived_docs/component-services-design.md); the **implementation roadmap** is [archived_docs/component-services-roadmap.md](../archived_docs/component-services-roadmap.md). Full configuration, examples, and the unified model with facets are covered in [Built-in and custom components (facets)](#built-in-and-custom-components-facets), [Service links and outbound HTTP](#service-links-and-outbound-http), and [Unified discovery with ObjectRegistry](#unified-discovery-with-objectregistry) below.
+**Application deploy** validates `ApplicationSpec.required_service_links` against the node `RuntimeConfig.service_links` catalog. Optional `publish_to_registry` registers link metadata as `ObjectTypeService` for discovery. Full configuration, examples, and the unified model with facets are covered in [Built-in and custom components (facets)](#built-in-and-custom-components-facets), [Service links and outbound HTTP](#service-links-and-outbound-http), and [Unified discovery with ObjectRegistry](#unified-discovery-with-objectregistry) below.
 
 ### Service Architecture
 

@@ -88,6 +88,10 @@ pub struct SimpleHostImpl {
     pub lock_manager: Option<Arc<dyn LockManager + Send + Sync>>,
     /// Blob service for object storage
     pub blob_service: Option<Arc<BlobService>>,
+    /// AIMD concurrency limiter for outbox dispatch
+    pub outbox_limiter: Arc<plexspaces_outbox::concurrency_limiter::ConcurrencyLimiter>,
+    /// Retry policy for outbox dispatch
+    pub outbox_retry_policy: plexspaces_proto::common::v1::RetryPolicy,
 }
 
 #[cfg(feature = "component-model")]
@@ -107,6 +111,8 @@ impl SimpleHostImpl {
             tuplespace_provider,
             lock_manager,
             blob_service,
+            outbox_limiter: crate::outbox_host::default_wasm_limiter(),
+            outbox_retry_policy: plexspaces_common::retry::default_retry_policy(),
         }
     }
 
@@ -125,6 +131,8 @@ impl SimpleHostImpl {
             tuplespace_provider,
             lock_manager,
             blob_service,
+            outbox_limiter: crate::outbox_host::default_wasm_limiter(),
+            outbox_retry_policy: plexspaces_common::retry::default_retry_policy(),
         }
     }
 
@@ -1861,6 +1869,8 @@ impl plexspaces::actor::outbox::Host for SimpleHostImpl {
         let actor_id = self.actor_id.to_string();
         crate::outbox_host::outbox_dispatch_impl(
             self.host_functions.as_ref(),
+            &self.outbox_limiter,
+            &self.outbox_retry_policy,
             &actor_id,
             &target_actor_ids,
             &payload,
@@ -1876,7 +1886,7 @@ impl plexspaces::actor::outbox::Host for SimpleHostImpl {
         _ctx: String,
         dispatcher_id: String,
     ) -> Result<String, plexspaces::actor::types::ActorError> {
-        Ok(crate::outbox_host::outbox_status_impl(&dispatcher_id))
+        Ok(crate::outbox_host::outbox_status_impl(&dispatcher_id, &self.outbox_limiter))
     }
 }
 

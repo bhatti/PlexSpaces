@@ -5435,6 +5435,8 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
 pub struct OutboxImpl {
     actor_id: ActorId,
     host_functions: Arc<HostFunctions>,
+    limiter: std::sync::Arc<plexspaces_outbox::concurrency_limiter::ConcurrencyLimiter>,
+    retry_policy: plexspaces_proto::common::v1::RetryPolicy,
 }
 
 #[cfg(feature = "component-model")]
@@ -5443,6 +5445,8 @@ impl OutboxImpl {
         Self {
             actor_id,
             host_functions,
+            limiter: crate::outbox_host::default_wasm_limiter(),
+            retry_policy: plexspaces_common::retry::default_retry_policy(),
         }
     }
 }
@@ -5463,6 +5467,8 @@ impl plexspaces::actor::outbox::Host for OutboxImpl {
         let actor_id = self.actor_id.to_string();
         crate::outbox_host::outbox_dispatch_impl(
             self.host_functions.as_ref(),
+            &self.limiter,
+            &self.retry_policy,
             &actor_id,
             &target_actor_ids,
             &payload,
@@ -5478,6 +5484,6 @@ impl plexspaces::actor::outbox::Host for OutboxImpl {
         _ctx: String,
         dispatcher_id: String,
     ) -> Result<String, plexspaces::actor::types::ActorError> {
-        Ok(crate::outbox_host::outbox_status_impl(&dispatcher_id))
+        Ok(crate::outbox_host::outbox_status_impl(&dispatcher_id, &self.limiter))
     }
 }

@@ -44,6 +44,8 @@
 //!     timestamp           BIGINT      NOT NULL,  -- Unix ms
 //!     acked               BOOLEAN     NOT NULL DEFAULT FALSE,
 //!     dead_lettered       BOOLEAN     NOT NULL DEFAULT FALSE,
+//!     delivery_count      INTEGER     NOT NULL DEFAULT 0,
+//!     send_at             BIGINT      NOT NULL DEFAULT 0, -- Unix ms, 0 = immediate
 //!     created_at          BIGINT      NOT NULL   -- Unix ms
 //! );
 //! ```
@@ -150,6 +152,8 @@ impl PostgresChannel {
                 timestamp           BIGINT   NOT NULL,
                 acked               BOOLEAN  NOT NULL DEFAULT FALSE,
                 dead_lettered       BOOLEAN  NOT NULL DEFAULT FALSE,
+                delivery_count      INTEGER  NOT NULL DEFAULT 0,
+                send_at             BIGINT   NOT NULL DEFAULT 0,
                 created_at          BIGINT   NOT NULL
             )"#,
             tbl = table_name
@@ -160,7 +164,7 @@ impl PostgresChannel {
             .map_err(|e| ChannelError::BackendError(e.to_string()))?;
 
         sqlx::query(&format!(
-            "CREATE INDEX IF NOT EXISTS idx_{tbl}_unacked ON {tbl}(tenant_id, namespace, channel_name, created_at) \
+            "CREATE INDEX IF NOT EXISTS idx_{tbl}_unacked ON {tbl}(tenant_id, namespace, channel_name, send_at, created_at) \
              WHERE NOT acked AND NOT dead_lettered",
             tbl = table_name
         ))
@@ -203,9 +207,12 @@ impl PostgresChannel {
 
     async fn recover_unacked_messages(&self) -> ChannelResult<()> {
         let query_sql = format!(
-            "SELECT id, payload, headers_json::text, timestamp, idempotency_key, conflict_resolution \
+            "SELECT id, payload, headers_json::text, timestamp, \
+                    idempotency_key, conflict_resolution, delivery_count \
              FROM {} WHERE tenant_id = $1 AND namespace = $2 AND channel_name = $3 \
-             AND NOT acked AND NOT dead_lettered ORDER BY created_at ASC",
+             AND NOT acked AND NOT dead_lettered \
+             AND (send_at = 0 OR send_at <= $4) \
+             ORDER BY send_at ASC, created_at ASC",
             self.table_name
         );
 
@@ -213,6 +220,7 @@ impl PostgresChannel {
             .bind(&self.tenant_id)
             .bind(&self.namespace)
             .bind(&self.config.name)
+            .bind(Self::system_time_to_unix_ms(SystemTime::now()))
             .fetch_all(&self.pool)
             .await
             .map_err(|e| ChannelError::BackendError(format!("Failed to recover messages: {}", e)))?;
@@ -229,6 +237,7 @@ impl PostgresChannel {
                 serde_json::from_str(&headers_json).unwrap_or_default();
             let idempotency_key: String = row.try_get(4).unwrap_or_default();
             let conflict_resolution: i16 = row.try_get(5).unwrap_or(0);
+            let delivery_count: i32 = row.try_get(6).unwrap_or(0);
 
             let message = Message {
                 id: id.clone(),
@@ -241,6 +250,7 @@ impl PostgresChannel {
                 headers,
                 idempotency_key,
                 conflict_resolution: conflict_resolution as i32,
+                delivery_count: delivery_count as u32,
                 ..Default::default()
             };
 
@@ -307,8 +317,9 @@ impl Channel for PostgresChannel {
 
         let insert_sql = format!(
             "INSERT INTO {} (id, tenant_id, namespace, channel_name, payload, headers_json, \
-             idempotency_key, conflict_resolution, timestamp, acked, dead_lettered, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, FALSE, FALSE, $10)",
+             idempotency_key, conflict_resolution, timestamp, acked, dead_lettered, \
+             delivery_count, send_at, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, FALSE, FALSE, 0, 0, $10)",
             self.table_name
         );
 
@@ -334,10 +345,14 @@ impl Channel for PostgresChannel {
     }
 
     async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
+        let now_ms = Self::system_time_to_unix_ms(SystemTime::now());
         let query_sql = format!(
-            "SELECT id, payload, headers_json::text, timestamp, idempotency_key, conflict_resolution \
+            "SELECT id, payload, headers_json::text, timestamp, \
+                    idempotency_key, conflict_resolution, delivery_count \
              FROM {} WHERE tenant_id = $1 AND namespace = $2 AND channel_name = $3 \
-             AND NOT acked AND NOT dead_lettered ORDER BY created_at ASC LIMIT $4",
+             AND NOT acked AND NOT dead_lettered \
+             AND (send_at = 0 OR send_at <= $4) \
+             ORDER BY send_at ASC, created_at ASC LIMIT $5",
             self.table_name
         );
 
@@ -345,6 +360,7 @@ impl Channel for PostgresChannel {
             .bind(&self.tenant_id)
             .bind(&self.namespace)
             .bind(&self.config.name)
+            .bind(now_ms)
             .bind(max_messages as i64)
             .fetch_all(&self.pool)
             .await
@@ -361,6 +377,7 @@ impl Channel for PostgresChannel {
                 serde_json::from_str(&headers_json).unwrap_or_default();
             let idempotency_key: String = row.try_get(4).unwrap_or_default();
             let conflict_resolution: i16 = row.try_get(5).unwrap_or(0);
+            let delivery_count: i32 = row.try_get(6).unwrap_or(0);
 
             let message = Message {
                 id: id.clone(),
@@ -373,6 +390,7 @@ impl Channel for PostgresChannel {
                 headers,
                 idempotency_key,
                 conflict_resolution: conflict_resolution as i32,
+                delivery_count: delivery_count as u32,
                 ..Default::default()
             };
 
@@ -456,15 +474,111 @@ impl Channel for PostgresChannel {
         Ok(())
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
-        if requeue {
-            // Already "unacked" in DB — nothing to do for a fresh message.
-            // For a message in pending_acks (received but not yet acked), remove from cache
-            // so it can be dequeued again.
+    async fn nack(&self, message_id: &str, requeue: bool, delay: Option<std::time::Duration>) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_dlq, record_channel_nack, record_channel_nack_delayed};
+
+        let max_retries = crate::channel::max_retries_from_config(&self.config);
+        let dlq_enabled = self.config.dlq_enabled;
+        let backend = backend_name(self.config.provider);
+
+        let check_sql = format!(
+            "SELECT delivery_count FROM {} WHERE id = $1 AND tenant_id = $2 AND namespace = $3 AND channel_name = $4",
+            self.table_name
+        );
+        let delivery_count: Option<i32> = sqlx::query_scalar(&check_sql)
+            .bind(message_id)
+            .bind(&self.tenant_id)
+            .bind(&self.namespace)
+            .bind(&self.config.name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| ChannelError::BackendError(format!("Failed to read delivery_count: {}", e)))?;
+
+        let current_delivery_count = match delivery_count {
+            Some(c) => c as u32,
+            None => return Err(ChannelError::MessageNotFound(message_id.to_string())),
+        };
+
+        if requeue && current_delivery_count < max_retries {
+            let send_at_ms = delay
+                .map(|d| Self::system_time_to_unix_ms(SystemTime::now()) + d.as_millis() as i64)
+                .unwrap_or(0i64);
+
+            let update_sql = format!(
+                "UPDATE {} SET acked = FALSE, delivery_count = delivery_count + 1, send_at = $1 \
+                 WHERE id = $2 AND tenant_id = $3 AND namespace = $4 AND channel_name = $5",
+                self.table_name
+            );
+            sqlx::query(&update_sql)
+                .bind(send_at_ms)
+                .bind(message_id)
+                .bind(&self.tenant_id)
+                .bind(&self.namespace)
+                .bind(&self.config.name)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| ChannelError::BackendError(format!("Failed to nack/requeue: {}", e)))?;
+
             let mut pending_acks = self.pending_acks.write().await;
             pending_acks.remove(message_id);
+
+            if let Some(d) = delay {
+                record_channel_nack_delayed(
+                    &self.config.name,
+                    message_id,
+                    d,
+                    current_delivery_count + 1,
+                    backend,
+                );
+            }
+
+            record_channel_nack(
+                &self.config.name,
+                message_id,
+                true,
+                current_delivery_count + 1,
+                backend,
+            );
         } else {
-            self.ack(message_id).await?;
+            if dlq_enabled {
+                let update_sql = format!(
+                    "UPDATE {} SET dead_lettered = TRUE, delivery_count = delivery_count + 1 \
+                     WHERE id = $1 AND tenant_id = $2 AND namespace = $3 AND channel_name = $4",
+                    self.table_name
+                );
+                sqlx::query(&update_sql)
+                    .bind(message_id)
+                    .bind(&self.tenant_id)
+                    .bind(&self.namespace)
+                    .bind(&self.config.name)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(|e| ChannelError::BackendError(format!("Failed to DLQ message: {}", e)))?;
+
+                let reason = if current_delivery_count >= max_retries {
+                    "max_retries_exceeded"
+                } else {
+                    "rejected"
+                };
+                record_channel_dlq(
+                    &self.config.name,
+                    message_id,
+                    current_delivery_count + 1,
+                    reason,
+                    backend,
+                );
+            } else {
+                record_channel_nack(
+                    &self.config.name,
+                    message_id,
+                    false,
+                    current_delivery_count,
+                    backend,
+                );
+            }
+
+            let mut pending_acks = self.pending_acks.write().await;
+            pending_acks.remove(message_id);
         }
 
         self.stats.messages_failed.fetch_add(1, Ordering::Relaxed);
@@ -686,7 +800,7 @@ mod repository {
 
             // Nack to keep acked = false
             let queued = ch.receive(10).await.unwrap();
-            ch.nack(&queued[0].id, true).await.unwrap();
+            ch.nack(&queued[0].id, true, None).await.unwrap();
 
             let mut msg2 = Message {
                 id: "pg-ow-msg2".to_string(),

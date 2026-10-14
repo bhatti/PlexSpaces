@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(received.len(), 1);
 
         // NACK with requeue
-        channel.nack(&received[0].id, true).await.unwrap();
+        channel.nack(&received[0].id, true, None).await.unwrap();
 
         // Message should be redelivered after visibility timeout (5s + 2s buffer)
         sleep(Duration::from_secs(7)).await;
@@ -243,7 +243,7 @@ mod tests {
         for _ in 0..3 {
             let received = channel.receive(1).await.unwrap();
             assert_eq!(received.len(), 1);
-            channel.nack(&received[0].id, false).await.unwrap();
+            channel.nack(&received[0].id, false, None).await.unwrap();
             sleep(Duration::from_secs(7)).await; // Wait for visibility timeout (5s + 2s buffer)
         }
 

@@ -346,7 +346,7 @@ impl Channel for ProcessGroupChannel {
         }
     }
 
-    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, message_id: &str, requeue: bool, _delay: Option<std::time::Duration>) -> ChannelResult<()> {
         let mut pending = self.pending_messages.write().await;
         if let Some(msg) = pending.get(message_id).cloned() {
             if requeue {

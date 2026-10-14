@@ -172,7 +172,7 @@ impl OutboxRelay {
         let permit = match self.limiter.try_acquire() {
             Some(p) => p,
             None => {
-                if let Err(e) = self.channel.nack(&msg_id, true).await {
+                if let Err(e) = self.channel.nack(&msg_id, true, None).await {
                     tracing::warn!(msg_id = %msg_id, error = %e, "nack/requeue failed on permit exhaustion");
                 }
                 return;
@@ -205,26 +205,28 @@ impl OutboxRelay {
 
                 let attempt = msg.delivery_count + 1;
                 if should_retry(&self.retry_policy, attempt, &err) {
-                    metrics::counter!("plexspaces_outbox_relay_retries_total").increment(1);
                     let backoff = {
                         let mut rng = rand::thread_rng();
                         compute_backoff(&self.retry_policy, attempt, &mut rng)
                     };
+                    metrics::counter!("plexspaces_outbox_relay_retries_total").increment(1);
+                    metrics::histogram!("plexspaces_outbox_relay_backoff_seconds")
+                        .record(backoff.as_secs_f64());
                     tracing::debug!(
                         msg_id = %msg_id,
                         attempt = attempt,
                         backoff_ms = backoff.as_millis() as u64,
-                        "retrying after backoff"
+                        "nack with send_at delay"
                     );
-                    if let Err(e) = self.channel.nack(&msg_id, true).await {
+                    if let Err(e) = self.channel.nack(&msg_id, true, Some(backoff)).await {
                         tracing::warn!(msg_id = %msg_id, error = %e, "nack/requeue failed");
                     }
                 } else {
                     metrics::counter!("plexspaces_outbox_relay_dead_lettered_total").increment(1);
                     self.stats.failed.fetch_add(1, Ordering::Relaxed);
-                    if let Err(e) = self.channel.nack(&msg_id, false).await {
+                    self.stats.dead_lettered.fetch_add(1, Ordering::Relaxed);
+                    if let Err(e) = self.channel.nack(&msg_id, false, None).await {
                         tracing::warn!(msg_id = %msg_id, error = %e, "nack/dlq failed");
-                        self.stats.dead_lettered.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }
@@ -284,7 +286,7 @@ mod tests {
             self.acked.lock().unwrap().push(msg_id.to_string());
             Ok(())
         }
-        async fn nack(&self, msg_id: &str, requeue: bool) -> ChannelResult<()> {
+        async fn nack(&self, msg_id: &str, requeue: bool, _delay: Option<Duration>) -> ChannelResult<()> {
             self.nacked
                 .lock()
                 .unwrap()

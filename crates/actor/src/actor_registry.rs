@@ -1140,6 +1140,66 @@ impl ActorRegistry {
         result
     }
 
+    /// Store-and-forward tell: tries direct delivery first, falls back to
+    /// an outbox channel on failure.
+    ///
+    /// Fast path: `tell()` delivers directly to the actor's mailbox (local or remote).
+    /// Fallback: on any error (mailbox full, actor not found, network failure),
+    /// the message is enqueued to the provided `outbox_channel` for asynchronous
+    /// retry by an `OutboxRelay`.
+    ///
+    /// Returns `Ok(true)` if delivered directly, `Ok(false)` if stored in outbox.
+    /// Returns `Err` only if both paths fail.
+    pub async fn tell_reliable(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+        message: Message,
+        outbox_channel: &dyn plexspaces_channel::Channel,
+    ) -> Result<bool, ActorRegistryError> {
+        let start = std::time::Instant::now();
+
+        match self.tell(ctx, actor_id, message.clone()).await {
+            Ok(()) => {
+                metrics::counter!("plexspaces_tell_reliable_total", "path" => "direct")
+                    .increment(1);
+                metrics::histogram!("plexspaces_tell_reliable_duration_seconds")
+                    .record(start.elapsed().as_secs_f64());
+                Ok(true)
+            }
+            Err(tell_err) => {
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    error = %tell_err,
+                    "tell_reliable: direct delivery failed, falling back to outbox"
+                );
+
+                let mut outbox_msg = message;
+                if outbox_msg.receiver_id.is_empty() {
+                    outbox_msg.receiver_id = actor_id.to_string();
+                }
+
+                match outbox_channel.send(outbox_msg).await {
+                    Ok(_msg_id) => {
+                        metrics::counter!("plexspaces_tell_reliable_total", "path" => "outbox")
+                            .increment(1);
+                        metrics::histogram!("plexspaces_tell_reliable_duration_seconds")
+                            .record(start.elapsed().as_secs_f64());
+                        Ok(false)
+                    }
+                    Err(channel_err) => {
+                        metrics::counter!("plexspaces_tell_reliable_total", "path" => "failed")
+                            .increment(1);
+                        Err(ActorRegistryError::SendFailed(format!(
+                            "tell_reliable: direct delivery failed ({}), outbox fallback also failed ({})",
+                            tell_err, channel_err
+                        )))
+                    }
+                }
+            }
+        }
+    }
+
     /// Sends a local request and waits for a reply.
     ///
     /// Uses a oneshot channel keyed by correlation_id in `PendingAsks`.
@@ -2471,5 +2531,76 @@ fn box_err_to_registry(e: Box<dyn std::error::Error + Send + Sync>) -> ActorRegi
     match e.downcast::<crate::actor_ref::ActorRefError>() {
         Ok(ref_err) => ActorRegistryError::from(*ref_err),
         Err(other) => ActorRegistryError::SendFailed(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tell_reliable_tests {
+    use super::*;
+    use plexspaces_channel::{Channel, InMemoryChannel};
+    use plexspaces_proto::channel::v1::ChannelConfig;
+
+    fn test_registry() -> ActorRegistry {
+        ActorRegistry::new("test-node".to_string())
+    }
+
+    fn test_ctx() -> RequestContext {
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-ns".to_string())
+    }
+
+    fn test_message() -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            message_type: "cast".to_string(),
+            payload: b"test-payload".to_vec(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn tell_reliable_falls_back_to_outbox_when_actor_not_found() {
+        let registry = test_registry();
+        let ctx = test_ctx();
+        let actor_id = ActorId::new("nonexistent", "GenServer", "test-ns", "test-node").unwrap();
+        let channel = InMemoryChannel::new(ChannelConfig {
+            name: "test-outbox".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let msg = test_message();
+
+        let result = registry
+            .tell_reliable(&ctx, &actor_id, msg, &channel)
+            .await;
+
+        assert!(result.is_ok());
+        assert!(!result.unwrap(), "should return false (outbox path)");
+
+        let stats = channel.get_stats().await.unwrap();
+        assert_eq!(stats.messages_sent, 1, "message should be in outbox channel");
+    }
+
+    #[tokio::test]
+    async fn tell_reliable_sets_receiver_id_on_fallback() {
+        let registry = test_registry();
+        let ctx = test_ctx();
+        let actor_id = ActorId::new("target-actor", "GenServer", "test-ns", "test-node").unwrap();
+        let channel = InMemoryChannel::new(ChannelConfig {
+            name: "test-outbox".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let msg = test_message();
+
+        let result = registry
+            .tell_reliable(&ctx, &actor_id, msg, &channel)
+            .await;
+        assert!(result.is_ok());
+
+        let received = channel.try_receive(1).await.unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].receiver_id, actor_id.to_string());
     }
 }

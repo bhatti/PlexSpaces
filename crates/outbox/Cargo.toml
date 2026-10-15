@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Flow-controlled messaging: AIMD concurrency limiter, outbox relay, admission control facet, and dispatcher actor"
+description = "Flow-controlled messaging: AIMD concurrency limiter, outbox relay, and dispatcher actor"
 
 [dependencies]
 plexspaces-proto = { path = "../proto" }
@@ -17,6 +17,7 @@ plexspaces-channel = { path = "../channel" }
 
 async-trait = { workspace = true }
 futures = { workspace = true }
+thiserror = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }

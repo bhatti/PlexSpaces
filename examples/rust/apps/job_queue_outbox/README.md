@@ -7,7 +7,7 @@ flow-controlled message delivery from a coordinator to worker actors.
 
 - **Outbox Dispatch** — Send messages to multiple targets via `outbox_dispatch` WIT call
 - **AIMD Flow Control** — Adaptive concurrency: additive increase on success, multiplicative decrease on RESOURCE_EXHAUSTED
-- **AdmissionControlFacet** — Receiver-side flow control on workers
+- **Bounded mailbox** — Receiver-side backpressure gate; `MailboxFull` → `DeliveryError::Capacity` → AIMD decrease
 - **Dispatcher Status** — Monitor pending/delivered/failed counts via `outbox_status` WIT call
 - **Batch Dispatch** — Generate target IDs and dispatch in bulk
 - **State Persistence** — get-state/set-state via serde_json across re-instantiation
@@ -23,7 +23,7 @@ Coordinator → outbox_dispatch(targets, payload)
           ┌───────┼───────┐───────┐
           ▼       ▼       ▼       ▼
       worker-0  worker-1  worker-2  worker-3
-      (AdmissionControlFacet on each)
+      (bounded mailbox — MailboxFull → AIMD decrease)
 ```
 
 ## Running
@@ -41,7 +41,7 @@ HTTP_PORT=8091 ./test.sh
 1. **Outbox dispatch** — `outbox_dispatch(ctx, dispatcher_id, targets, payload, msg_type, key)`
 2. **Batch dispatch** — Generate N target IDs and dispatch in one call
 3. **Status monitoring** — `outbox_status(ctx, dispatcher_id)` for delivery metrics
-4. **Flow control** — AdmissionControlFacet on workers limits concurrent processing
+4. **Flow control** — Bounded mailbox on workers; `MailboxFull` → `DeliveryError::Capacity` → AIMD decrease
 
 ## WIT API
 
@@ -81,7 +81,7 @@ let targets = vec!["worker-0".to_string()];
 
 See `app-config.toml` for the supervisor tree:
 - 1 coordinator (`JobQueueOutboxCoordinator`)
-- 4 workers (`OutboxWorker`, each with `admission_control` facet)
+- 4 workers (`OutboxWorker`, bounded mailbox for backpressure)
 
 ## References
 

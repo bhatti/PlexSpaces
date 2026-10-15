@@ -17,20 +17,6 @@ pub struct ConcurrencyConfig {
     #[prost(enumeration="ConcurrencyStrategy", tag="4")]
     pub strategy: i32,
 }
-/// Configuration for the AdmissionControlFacet (receiver-side protection).
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AdmissionControlConfig {
-    /// Maximum concurrent messages being processed (default 100).
-    #[prost(uint32, tag="1")]
-    pub max_concurrent: u32,
-    /// Strategy for admission decisions.
-    #[prost(enumeration="AdmissionStrategy", tag="2")]
-    pub strategy: i32,
-    /// Hint returned to rejected senders (default 100ms).
-    #[prost(uint64, tag="3")]
-    pub default_retry_after_ms: u64,
-}
 /// Request to dispatch messages to one or more target actors.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -177,35 +163,6 @@ impl ConcurrencyStrategy {
         }
     }
 }
-/// Admission control strategy for receiver-side flow control.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum AdmissionStrategy {
-    /// Static max_concurrent limit.
-    AdmissionStrategyFixedLimit = 0,
-    /// Dynamically adjusts limit based on processing latency (EWMA).
-    AdmissionStrategyLatencyAdaptive = 1,
-}
-impl AdmissionStrategy {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            AdmissionStrategy::AdmissionStrategyFixedLimit => "ADMISSION_STRATEGY_FIXED_LIMIT",
-            AdmissionStrategy::AdmissionStrategyLatencyAdaptive => "ADMISSION_STRATEGY_LATENCY_ADAPTIVE",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "ADMISSION_STRATEGY_FIXED_LIMIT" => Some(Self::AdmissionStrategyFixedLimit),
-            "ADMISSION_STRATEGY_LATENCY_ADAPTIVE" => Some(Self::AdmissionStrategyLatencyAdaptive),
-            _ => None,
-        }
-    }
-}
 /// Status of an outbox entry in the dispatch pipeline.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -238,6 +195,36 @@ impl OutboxEntryStatus {
             "OUTBOX_ENTRY_STATUS_DELIVERED" => Some(Self::OutboxEntryStatusDelivered),
             "OUTBOX_ENTRY_STATUS_FAILED" => Some(Self::OutboxEntryStatusFailed),
             "OUTBOX_ENTRY_STATUS_DEAD_LETTER" => Some(Self::OutboxEntryStatusDeadLetter),
+            _ => None,
+        }
+    }
+}
+/// Classification of a delivery failure for AIMD concurrency feedback.
+/// Capacity errors halve the concurrency limit; transient errors do not.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum DeliveryErrorKind {
+    /// Network failure, actor not found, timeout — preserve AIMD limit.
+    DeliveryErrorKindTransient = 0,
+    /// Receiver at capacity (mailbox full) — halve AIMD limit + backoff.
+    DeliveryErrorKindCapacity = 1,
+}
+impl DeliveryErrorKind {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            DeliveryErrorKind::DeliveryErrorKindTransient => "DELIVERY_ERROR_KIND_TRANSIENT",
+            DeliveryErrorKind::DeliveryErrorKindCapacity => "DELIVERY_ERROR_KIND_CAPACITY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "DELIVERY_ERROR_KIND_TRANSIENT" => Some(Self::DeliveryErrorKindTransient),
+            "DELIVERY_ERROR_KIND_CAPACITY" => Some(Self::DeliveryErrorKindCapacity),
             _ => None,
         }
     }

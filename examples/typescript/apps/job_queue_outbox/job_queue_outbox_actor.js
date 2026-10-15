@@ -3,7 +3,7 @@
 //
 // Job Queue Outbox Actor — TypeScript WASM
 //
-// Demonstrates high-scale outbox dispatch with admission control:
+// Demonstrates high-scale outbox dispatch with AIMD flow control:
 //   - Leader creates 100 virtual workers via host.createShardGroup()
 //   - Leader dispatches jobs to all workers via host.outbox.dispatch()
 //   - Upgrade simulation: leader host.ask()s workers for upgrade status

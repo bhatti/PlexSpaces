@@ -40,13 +40,25 @@ use tokio::time::{sleep, Duration};
 const DEFAULT_RELAY_INTERVAL_MS: u64 = 50;
 const DEFAULT_RELAY_BATCH_SIZE: u64 = 100;
 
+/// Typed delivery error for AIMD feedback.
+#[derive(Debug, thiserror::Error)]
+pub enum DeliveryError {
+    /// Receiver at capacity (mailbox full). Triggers AIMD multiplicative decrease.
+    #[error("RESOURCE_EXHAUSTED: {message} (retry_after_ms={retry_after_ms})")]
+    Capacity { message: String, retry_after_ms: u64 },
+    /// Transient failure. AIMD limit unchanged — not a congestion signal.
+    #[error("{0}")]
+    Transient(String),
+}
+
 /// Callback trait for delivering messages to target actors.
 /// Abstracts away the ActorRef/messaging layer for testability.
 #[async_trait::async_trait]
 pub trait MessageDelivery: Send + Sync {
-    /// Deliver a message to its target. Returns Ok on success,
-    /// Err with error string on failure. "RESOURCE_EXHAUSTED" triggers backoff.
-    async fn deliver(&self, message: &Message) -> Result<(), String>;
+    /// Deliver a message to its target. Returns `Ok(())` on success,
+    /// `Err(DeliveryError::Capacity)` on mailbox-full (drives AIMD decrease),
+    /// `Err(DeliveryError::Transient)` for other failures (AIMD unchanged).
+    async fn deliver(&self, message: &Message) -> Result<(), DeliveryError>;
 }
 
 /// Runtime statistics for the relay.
@@ -194,17 +206,20 @@ impl OutboxRelay {
             Err(err) => {
                 let elapsed = t0.elapsed().as_secs_f64();
                 metrics::histogram!("plexspaces_outbox_relay_delivery_seconds").record(elapsed);
-                let is_exhausted = err.contains(crate::RESOURCE_EXHAUSTED);
-                if is_exhausted {
-                    metrics::counter!("plexspaces_outbox_relay_backpressure_total").increment(1);
-                    self.limiter.on_rejection(permit);
-                } else {
-                    metrics::counter!("plexspaces_outbox_relay_errors_total").increment(1);
-                    self.limiter.on_success(permit);
+                match &err {
+                    DeliveryError::Capacity { .. } => {
+                        metrics::counter!("plexspaces_outbox_relay_backpressure_total").increment(1);
+                        self.limiter.on_rejection(permit);
+                    }
+                    DeliveryError::Transient(_) => {
+                        metrics::counter!("plexspaces_outbox_relay_errors_total").increment(1);
+                        self.limiter.on_success(permit);
+                    }
                 }
 
+                let err_str = err.to_string();
                 let attempt = msg.delivery_count + 1;
-                if should_retry(&self.retry_policy, attempt, &err) {
+                if should_retry(&self.retry_policy, attempt, &err_str) {
                     let backoff = {
                         let mut rng = rand::thread_rng();
                         compute_backoff(&self.retry_policy, attempt, &mut rng)
@@ -311,7 +326,7 @@ mod tests {
     struct SuccessDelivery;
     #[async_trait::async_trait]
     impl MessageDelivery for SuccessDelivery {
-        async fn deliver(&self, _msg: &Message) -> Result<(), String> {
+        async fn deliver(&self, _msg: &Message) -> Result<(), DeliveryError> {
             Ok(())
         }
     }
@@ -321,8 +336,15 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl MessageDelivery for FailDelivery {
-        async fn deliver(&self, _msg: &Message) -> Result<(), String> {
-            Err(self.error.clone())
+        async fn deliver(&self, _msg: &Message) -> Result<(), DeliveryError> {
+            if self.error.contains(crate::RESOURCE_EXHAUSTED) {
+                Err(DeliveryError::Capacity {
+                    message: self.error.clone(),
+                    retry_after_ms: 100,
+                })
+            } else {
+                Err(DeliveryError::Transient(self.error.clone()))
+            }
         }
     }
 
@@ -333,7 +355,7 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl MessageDelivery for CountingDelivery {
-        async fn deliver(&self, _msg: &Message) -> Result<(), String> {
+        async fn deliver(&self, _msg: &Message) -> Result<(), DeliveryError> {
             let n = self.count.fetch_add(1, Ordering::SeqCst) + 1;
             if n >= self.target {
                 self.notify.notify_one();
@@ -405,9 +427,16 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl MessageDelivery for NotifyOnFail {
-        async fn deliver(&self, _msg: &Message) -> Result<(), String> {
+        async fn deliver(&self, _msg: &Message) -> Result<(), DeliveryError> {
             self.notify.notify_one();
-            Err(self.error.clone())
+            if self.error.contains(crate::RESOURCE_EXHAUSTED) {
+                Err(DeliveryError::Capacity {
+                    message: self.error.clone(),
+                    retry_after_ms: 100,
+                })
+            } else {
+                Err(DeliveryError::Transient(self.error.clone()))
+            }
         }
     }
 
@@ -571,5 +600,63 @@ mod tests {
         assert_eq!(delivery.count.load(Ordering::SeqCst), 3);
         let nacked = channel.nacked.lock().unwrap();
         assert!(nacked.iter().all(|(_, requeue)| *requeue));
+    }
+
+    #[tokio::test]
+    async fn test_delivery_error_capacity_decreases_aimd_limit() {
+        let msgs = vec![test_message("cap1")];
+        let channel = Arc::new(MockChannel::new(msgs));
+        let config = test_config();
+        let limiter = Arc::new(ConcurrencyLimiter::new(config.concurrency.as_ref().unwrap()));
+        let initial_limit = limiter.current_limit();
+        let delivery = Arc::new(NotifyOnFail {
+            error: "RESOURCE_EXHAUSTED: mailbox full".to_string(),
+            notify: Notify::new(),
+        });
+
+        let relay = OutboxRelay::new(&config, channel.clone(), limiter.clone(), delivery.clone());
+
+        tokio::select! {
+            _ = relay.run() => {},
+            _ = delivery.notify.notified() => {
+                tokio::task::yield_now().await;
+                relay.stop();
+            },
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                relay.stop();
+                panic!("timeout");
+            }
+        }
+
+        assert!(limiter.current_limit() < initial_limit, "AIMD limit should decrease on Capacity error");
+    }
+
+    #[tokio::test]
+    async fn test_delivery_error_transient_preserves_aimd_limit() {
+        let msgs = vec![test_message("tr1")];
+        let channel = Arc::new(MockChannel::new(msgs));
+        let config = test_config();
+        let limiter = Arc::new(ConcurrencyLimiter::new(config.concurrency.as_ref().unwrap()));
+        let initial_limit = limiter.current_limit();
+        let delivery = Arc::new(NotifyOnFail {
+            error: "INTERNAL_ERROR: transient failure".to_string(),
+            notify: Notify::new(),
+        });
+
+        let relay = OutboxRelay::new(&config, channel.clone(), limiter.clone(), delivery.clone());
+
+        tokio::select! {
+            _ = relay.run() => {},
+            _ = delivery.notify.notified() => {
+                tokio::task::yield_now().await;
+                relay.stop();
+            },
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                relay.stop();
+                panic!("timeout");
+            }
+        }
+
+        assert!(limiter.current_limit() >= initial_limit, "AIMD limit should NOT decrease on Transient error (got {}, expected >= {})", limiter.current_limit(), initial_limit);
     }
 }

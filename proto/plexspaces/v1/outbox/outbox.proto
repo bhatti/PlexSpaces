@@ -21,14 +21,14 @@
 // ## Purpose
 // Provides flow-controlled, durable message dispatch for high-fan-out scenarios.
 // Protects both senders (bounded memory via DB-backed outbox) and receivers
-// (admission control facet) when sending messages to millions of actors.
+// (bounded mailbox backpressure) when sending messages to millions of actors.
 //
 // ## Architecture Context
 // The outbox pattern uses existing PlexSpaces primitives:
 // - DB-backed channels (SQLite/Postgres) for durable message storage
 // - AIMD concurrency control for adaptive throughput
 // - IdempotencyStore for exactly-once delivery
-// - Facets for receiver-side admission control
+// - Bounded mailbox for receiver-side backpressure
 //
 // ## Use Cases
 // - Bulk upgrade: send upgrade command to millions of nodes at controlled rate
@@ -79,37 +79,6 @@ message ConcurrencyConfig {
   ConcurrencyStrategy strategy = 4;
 }
 
-// Admission control strategy for receiver-side flow control.
-enum AdmissionStrategy {
-  // Static max_concurrent limit.
-  ADMISSION_STRATEGY_FIXED_LIMIT = 0;
-
-  // Dynamically adjusts limit based on processing latency (EWMA).
-  ADMISSION_STRATEGY_LATENCY_ADAPTIVE = 1;
-}
-
-// Configuration for the AdmissionControlFacet (receiver-side protection).
-message AdmissionControlConfig {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Admission Control Config"
-      description: "Receiver-side flow control — limits concurrent message processing."
-    }
-  };
-
-  // Maximum concurrent messages being processed (default 100).
-  uint32 max_concurrent = 1 [(buf.validate.field).uint32 = {
-    gte: 1
-    lte: 100000
-  }];
-
-  // Strategy for admission decisions.
-  AdmissionStrategy strategy = 2;
-
-  // Hint returned to rejected senders (default 100ms).
-  uint64 default_retry_after_ms = 3 [(buf.validate.field).uint64 = {lte: 60000}];
-}
-
 // Status of an outbox entry in the dispatch pipeline.
 enum OutboxEntryStatus {
   OUTBOX_ENTRY_STATUS_PENDING = 0;
@@ -117,6 +86,15 @@ enum OutboxEntryStatus {
   OUTBOX_ENTRY_STATUS_DELIVERED = 2;
   OUTBOX_ENTRY_STATUS_FAILED = 3;
   OUTBOX_ENTRY_STATUS_DEAD_LETTER = 4;
+}
+
+// Classification of a delivery failure for AIMD concurrency feedback.
+// Capacity errors halve the concurrency limit; transient errors do not.
+enum DeliveryErrorKind {
+  // Network failure, actor not found, timeout — preserve AIMD limit.
+  DELIVERY_ERROR_KIND_TRANSIENT = 0;
+  // Receiver at capacity (mailbox full) — halve AIMD limit + backoff.
+  DELIVERY_ERROR_KIND_CAPACITY = 1;
 }
 
 // Request to dispatch messages to one or more target actors.

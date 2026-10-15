@@ -665,7 +665,6 @@ fn actor_type_from_behavior(behavior_type: &plexspaces_actor::BehaviorType) -> S
 /// ## Supported facet names
 /// - `"timer"` - TimerFacet (requires plexspaces-journaling)
 /// - `"durability"` - DurabilityFacet (requires plexspaces-journaling + storage config)
-/// - `"admission_control"` - AdmissionControlFacet (receiver-side flow control)
 /// - `"logging"` - LoggingFacet
 /// - `"caching"` - CachingFacet
 ///
@@ -722,11 +721,6 @@ pub fn create_facets(
                 // DurabilityFacet requires storage backend
                 // Users must provide storage via config or create manually
                 // Skip here - use create_facets_with_storage() instead
-            }
-            "admission_control" => {
-                let ac_config =
-                    plexspaces_actor::facet_helpers::facet_config_value(config, "admission_control");
-                facets.push(Box::new(parse_admission_control_facet(&ac_config)));
             }
             _ => {
                 // Unknown facet - ignore silently or warn
@@ -817,11 +811,6 @@ pub fn create_facets_with_storage(
                     facets.push(Box::new(reminder_facet));
                 }
             }
-            "admission_control" => {
-                let ac_config =
-                    plexspaces_actor::facet_helpers::facet_config_value(config, "admission_control");
-                facets.push(Box::new(parse_admission_control_facet(&ac_config)));
-            }
             _ => {
                 // Unknown facet - ignore silently
             }
@@ -871,21 +860,13 @@ pub use plexspaces_facet::Facet;
 // Outbox / Flow-Control re-exports
 // ============================================================================
 
-/// Receiver-side admission control facet (limits concurrent in-flight messages).
-#[cfg(feature = "native")]
-pub use plexspaces_outbox::AdmissionControlFacet;
-
-/// Factory for creating `AdmissionControlFacet` from JSON config via `FacetRegistry`.
-#[cfg(feature = "native")]
-pub use plexspaces_outbox::AdmissionControlFacetFactory;
-
 /// AIMD-based concurrency limiter (sender-side flow control).
 #[cfg(feature = "native")]
 pub use plexspaces_outbox::{ConcurrencyLimiter, Permit};
 
 /// Outbox relay: DB-backed channel + controlled-rate delivery.
 #[cfg(feature = "native")]
-pub use plexspaces_outbox::{MessageDelivery, OutboxRelay, RelayStats};
+pub use plexspaces_outbox::{DeliveryError, MessageDelivery, OutboxRelay, RelayStats};
 
 /// Dispatcher helpers for building outbox dispatch request/response protos.
 #[cfg(feature = "native")]
@@ -956,25 +937,6 @@ pub async fn tell_reliable(
         .tell_reliable(ctx, actor_id, message, outbox_channel)
         .await
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-}
-
-#[cfg(feature = "native")]
-fn parse_admission_control_facet(config: &serde_json::Value) -> plexspaces_outbox::AdmissionControlFacet {
-    let proto_cfg = plexspaces_proto::outbox::v1::AdmissionControlConfig {
-        max_concurrent: config
-            .get("max_concurrent")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(100) as u32,
-        strategy: config
-            .get("strategy")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as i32,
-        default_retry_after_ms: config
-            .get("default_retry_after_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(100),
-    };
-    plexspaces_outbox::AdmissionControlFacet::new(&proto_cfg)
 }
 
 // ============================================================================

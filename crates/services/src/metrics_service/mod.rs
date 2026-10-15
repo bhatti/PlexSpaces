@@ -767,27 +767,6 @@ fn legacy_node_metric_definitions() -> Vec<MetricDefinition> {
             labels: vec![],
             buckets: vec![],
         },
-        MetricDefinition {
-            name: "plexspaces_outbox_admission_admitted_total".to_string(),
-            r#type: MetricType::MetricTypeCounter as i32,
-            help: "Messages admitted by admission control".to_string(),
-            labels: vec![],
-            buckets: vec![],
-        },
-        MetricDefinition {
-            name: "plexspaces_outbox_admission_rejected_total".to_string(),
-            r#type: MetricType::MetricTypeCounter as i32,
-            help: "Messages rejected by admission control at capacity".to_string(),
-            labels: vec![],
-            buckets: vec![],
-        },
-        MetricDefinition {
-            name: "plexspaces_outbox_admission_in_flight".to_string(),
-            r#type: MetricType::MetricTypeGauge as i32,
-            help: "Current in-flight messages in admission control".to_string(),
-            labels: vec![],
-            buckets: vec![],
-        },
     ]
 }
 

@@ -3,7 +3,7 @@
 //
 // Job Queue Outbox (Rust WASM)
 //
-// Demonstrates high-scale outbox dispatch with admission control:
+// Demonstrates high-scale outbox dispatch with AIMD flow control:
 //   - Leader creates 1000 virtual workers via create_shard_group WIT call
 //   - Leader dispatches jobs to all workers via outbox_dispatch WIT call
 //   - Upgrade simulation: Ask workers for upgrade status (ask WIT call)

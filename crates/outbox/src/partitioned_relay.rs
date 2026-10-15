@@ -181,7 +181,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl MessageDelivery for TestDelivery {
-        async fn deliver(&self, _msg: &Message) -> Result<(), String> {
+        async fn deliver(&self, _msg: &Message) -> Result<(), crate::outbox_relay::DeliveryError> {
             let n = self.delivered.fetch_add(1, Ordering::SeqCst) + 1;
             if n >= self.target {
                 self.notify.notify_one();
@@ -357,10 +357,13 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageDelivery for PartialFailDelivery {
-            async fn deliver(&self, msg: &Message) -> Result<(), String> {
+            async fn deliver(&self, msg: &Message) -> Result<(), crate::outbox_relay::DeliveryError> {
                 if self.fail_flag.load(Ordering::SeqCst) && msg.id.contains("fail") {
                     self.failed.fetch_add(1, Ordering::SeqCst);
-                    return Err("RESOURCE_EXHAUSTED".to_string());
+                    return Err(crate::outbox_relay::DeliveryError::Capacity {
+                        message: "mailbox full".to_string(),
+                        retry_after_ms: 100,
+                    });
                 }
                 let n = self.delivered.fetch_add(1, Ordering::SeqCst) + 1;
                 if n >= self.target {

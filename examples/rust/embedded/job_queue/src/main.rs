@@ -6,10 +6,9 @@
 // Demonstrates the outbox pattern with AIMD concurrency control:
 //
 // 1. ConcurrencyLimiter: AIMD-style adaptive concurrency
-// 2. AdmissionControlFacet: Receiver-side flow control
-// 3. OutboxRelay: Drain loop delivering messages from a channel
+// 2. OutboxRelay: Drain loop delivering messages from a channel
 // 4. Scaling benchmark: vary worker counts, measure throughput and AIMD adaptation
-// 5. Thundering herd protection (UC1): AIMD + admission control under burst load
+// 5. Thundering herd protection (UC1): AIMD + bounded mailbox backpressure under burst load
 // 6. Config wave deploy (UC2): wave-based dispatch with bounded config servers
 // 7. Heartbeat coalescing (UC3): OVERWRITE conflict resolution for transient data
 // 8. Telemetry fast-path with outbox fallback (UC4): dual-path delivery
@@ -19,7 +18,7 @@ use plexspaces_channel::{Channel, InMemoryChannel, SqliteChannel};
 use plexspaces_common::retry::default_retry_policy;
 use plexspaces_node::NodeBuilder;
 use plexspaces_outbox::{
-    AdmissionControlFacet, ConcurrencyLimiter, MessageDelivery, OutboxRelay,
+    ConcurrencyLimiter, DeliveryError, MessageDelivery, OutboxRelay,
     PartitionedOutboxRelay, build_dispatcher_status, validate_config,
 };
 use plexspaces_proto::channel::v1::{
@@ -27,7 +26,7 @@ use plexspaces_proto::channel::v1::{
     SqliteConfig,
 };
 use plexspaces_proto::outbox::v1::{
-    AdmissionControlConfig, AdmissionStrategy, ConcurrencyConfig, ConcurrencyStrategy,
+    ConcurrencyConfig, ConcurrencyStrategy,
     OutboxConfig, PartitionedOutboxConfig,
 };
 use plexspaces_sdk::{
@@ -41,7 +40,7 @@ use tokio::sync::Notify;
 use tracing::Level;
 
 // =============================================================================
-// Worker Actor — processes jobs with admission control
+// Worker Actor — processes jobs with bounded mailbox backpressure
 // =============================================================================
 
 #[gen_server_actor]
@@ -73,7 +72,7 @@ impl Worker {
 }
 
 // =============================================================================
-// Config Server Actor — serves config with admission control (UC2)
+// Config Server Actor — serves config with bounded mailbox backpressure (UC2)
 // =============================================================================
 
 #[gen_server_actor]
@@ -105,7 +104,7 @@ impl ConfigServer {
 }
 
 // =============================================================================
-// Telemetry Collector Actor — collects telemetry with admission control (UC4)
+// Telemetry Collector Actor — collects telemetry with bounded mailbox backpressure (UC4)
 // =============================================================================
 
 #[gen_server_actor]
@@ -147,7 +146,7 @@ struct CountingDelivery {
 
 #[async_trait::async_trait]
 impl MessageDelivery for CountingDelivery {
-    async fn deliver(&self, _msg: &plexspaces_proto::common::v1::Message) -> Result<(), String> {
+    async fn deliver(&self, _msg: &plexspaces_proto::common::v1::Message) -> Result<(), DeliveryError> {
         let n = self.delivered.fetch_add(1, Ordering::SeqCst) + 1;
         if n >= self.target_count {
             self.notify.notify_one();
@@ -185,25 +184,18 @@ async fn run_single(
     let service_locator = node.service_locator();
     let ctx = RequestContext::new_without_auth("tenant-bench".into(), "job-queue".into());
 
-    let admission_config = AdmissionControlConfig {
-        max_concurrent: 5,
-        strategy: AdmissionStrategy::AdmissionStrategyFixedLimit as i32,
-        default_retry_after_ms: 100,
-    };
-
     for i in 0..num_workers {
         let worker = Worker {
             processed: 0,
             name: format!("worker-{}", i),
         };
-        let admission_facet = AdmissionControlFacet::new(&admission_config);
         let _ref = spawn_with_facets(
             &ctx,
             service_locator.clone(),
             format!("worker-{}", i),
             "job-queue",
             worker,
-            vec![Box::new(admission_facet)],
+            vec![],
         )
         .await
         .map_err(|e| anyhow::anyhow!("spawn worker-{}: {}", i, e))?;
@@ -333,24 +325,18 @@ async fn main() -> anyhow::Result<()> {
     let ctx = RequestContext::new_without_auth("tenant-1".into(), "job-queue".into());
 
     let t_spawn = Instant::now();
-    let admission_config = AdmissionControlConfig {
-        max_concurrent: 5,
-        strategy: AdmissionStrategy::AdmissionStrategyFixedLimit as i32,
-        default_retry_after_ms: 100,
-    };
     for i in 0..3 {
         let worker = Worker {
             processed: 0,
             name: format!("worker-{}", i),
         };
-        let admission_facet = AdmissionControlFacet::new(&admission_config);
         let _ref = spawn_with_facets(
             &ctx,
             service_locator.clone(),
             format!("worker-{}", i),
             "job-queue",
             worker,
-            vec![Box::new(admission_facet)],
+            vec![],
         )
         .await
         .map_err(|e| anyhow::anyhow!("spawn worker-{}: {}", i, e))?;
@@ -609,18 +595,12 @@ async fn main() -> anyhow::Result<()> {
         let herd_sl = herd_node.service_locator();
         let herd_ctx = RequestContext::new_without_auth("tenant-herd".into(), "herd".into());
 
-        let herd_admission = AdmissionControlConfig {
-            max_concurrent: 3,
-            strategy: AdmissionStrategy::AdmissionStrategyFixedLimit as i32,
-            default_retry_after_ms: 50,
-        };
         let num_herd_workers = 50;
         for i in 0..num_herd_workers {
             let w = Worker { processed: 0, name: format!("herd-w-{}", i) };
-            let facet = AdmissionControlFacet::new(&herd_admission);
             spawn_with_facets(
                 &herd_ctx, herd_sl.clone(), format!("herd-w-{}", i),
-                "herd", w, vec![Box::new(facet)],
+                "herd", w, vec![],
             ).await.map_err(|e| anyhow::anyhow!("spawn herd worker: {}", e))?;
         }
 
@@ -711,18 +691,12 @@ async fn main() -> anyhow::Result<()> {
         let wave_sl = wave_node.service_locator();
         let wave_ctx = RequestContext::new_without_auth("tenant-wave".into(), "wave".into());
 
-        let server_admission = AdmissionControlConfig {
-            max_concurrent: 2,
-            strategy: AdmissionStrategy::AdmissionStrategyFixedLimit as i32,
-            default_retry_after_ms: 50,
-        };
         let num_servers = 3;
         for i in 0..num_servers {
             let server = ConfigServer { served: 0, name: format!("cfg-server-{}", i) };
-            let facet = AdmissionControlFacet::new(&server_admission);
             spawn_with_facets(
                 &wave_ctx, wave_sl.clone(), format!("cfg-server-{}", i),
-                "wave", server, vec![Box::new(facet)],
+                "wave", server, vec![],
             ).await.map_err(|e| anyhow::anyhow!("spawn config server: {}", e))?;
         }
 
@@ -916,16 +890,10 @@ async fn main() -> anyhow::Result<()> {
         let tel_sl = tel_node.service_locator();
         let tel_ctx = RequestContext::new_without_auth("tenant-tel".into(), "telemetry".into());
 
-        let tel_admission = AdmissionControlConfig {
-            max_concurrent: 3,
-            strategy: AdmissionStrategy::AdmissionStrategyFixedLimit as i32,
-            default_retry_after_ms: 50,
-        };
         let collector = TelemetryCollector { received: 0 };
-        let facet = AdmissionControlFacet::new(&tel_admission);
         let collector_ref = spawn_with_facets(
             &tel_ctx, tel_sl.clone(), "tel-collector".to_string(),
-            "telemetry", collector, vec![Box::new(facet)],
+            "telemetry", collector, vec![],
         ).await.map_err(|e| anyhow::anyhow!("spawn collector: {}", e))?;
 
         let tel_events = 100u64;
@@ -1119,7 +1087,7 @@ async fn main() -> anyhow::Result<()> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("  Key patterns demonstrated:");
     println!("    ConcurrencyLimiter (AIMD)  — additive increase, multiplicative decrease on rejection");
-    println!("    AdmissionControlFacet      — receiver-side flow control, RESOURCE_EXHAUSTED on overload");
+    println!("    Bounded mailbox            — backpressure gate: MailboxFull → DeliveryError::Capacity → AIMD decrease");
     println!("    OutboxRelay                — async drain loop bridging channel to actor delivery");
     println!("    PartitionedOutboxRelay     — N independent partitions with hash routing for scale");
     println!("    InMemoryChannel            — in-process outbox storage with ack/nack/DLQ");

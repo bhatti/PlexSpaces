@@ -573,8 +573,8 @@ Composable capabilities that extend actor behavior at runtime:
 **Event Facets**:
 - **EventEmitterFacet**: Event-driven communication
 
-**Flow Control Facets**:
-- **AdmissionControlFacet**: Receiver-side concurrency limiter. Tracks in-flight messages via atomic counter; rejects with `RESOURCE_EXHAUSTED` and `retry_after_ms` hint when the actor is at capacity. Complements sender-side AIMD concurrency in the outbox relay.
+**Flow Control**:
+- **Bounded Mailbox**: Admission control at enqueue time. `tell()` returns `MailboxFull` when a sequential actor's mailbox is full — mapped to `DeliveryError::Capacity` which triggers AIMD multiplicative decrease in the relay. Use `ConcurrencyLimiter` directly for custom outbound throttling.
 
 See [Detailed Design - Facets](detailed-design.md#facets) for comprehensive documentation.
 
@@ -721,17 +721,16 @@ SenderActor
   └─ outbox.dispatch() → OutboxRelay (AIMD concurrency, DB-backed channel)
                            ├─ Channel (SQLite/Postgres, existing ChannelConfig)
                            │    └─ send_at column: deferred messages skipped until send_at ≤ now
-                           └─ drain loop → tell() → TargetActor
-                                                      └─ AdmissionControlFacet
-                                                           ├─ Under limit → process → ack
-                                                           └─ Over limit → RESOURCE_EXHAUSTED + retry_after_ms
-                                                                └─ Relay nacks with delay → send_at = now + backoff
-                                                                     └─ delivery_count persisted across restarts
+                           └─ drain loop → tell() → TargetActor (bounded mailbox)
+                                                      MailboxFull → DeliveryError::Capacity
+                                                        └─ AIMD on_rejection() → limit halves
+                                                             └─ Relay nacks with delay → send_at = now + backoff
+                                                                  └─ delivery_count persisted across restarts
 ```
 
 **Sender-side** — `OutboxRelay` stores messages in a DB-backed channel and drains at AIMD-controlled concurrency (additive increase on success, multiplicative decrease on rejection).
 
-**Receiver-side** — `AdmissionControlFacet` (priority 950) tracks in-flight messages via atomic counter. Rejects with `RESOURCE_EXHAUSTED` when at capacity, signaling the relay to back off.
+**Admission control** — The bounded mailbox is the real gate. `tell()` returns `MailboxFull` at enqueue time when a sequential actor can't keep up. This maps to `DeliveryError::Capacity` which triggers AIMD multiplicative decrease. `ConcurrencyLimiter` is available as a standalone utility for any outbound throttling scenario.
 
 **Concurrency control** — `ConcurrencyLimiter` implements TCP-style AIMD: limit increases by 1 on success, halves on `RESOURCE_EXHAUSTED`. Bounded by configurable min/max. Also supports fixed-limit mode.
 
@@ -1597,7 +1596,6 @@ PlexSpaces provides sender-side and receiver-side flow control for high-fan-out 
 | `OutboxRelay` | Async drain loop: dequeues from channel, delivers via permits | Sender-side |
 | `PartitionedOutboxRelay` | N independent partitions with hash routing for million-target scale | Sender-side |
 | `HashRouter` | FNV-1a hash routing: same target always maps to same partition | Sender-side |
-| `AdmissionControlFacet` | Receiver-side back-pressure facet; rejects with RESOURCE_EXHAUSTED | Receiver-side |
 | Dispatch helpers | `parse_dispatch_request`, `build_dispatch_response`, `validate_config` utilities | Shared |
 
 ### Metrics

@@ -7,7 +7,7 @@ flow-controlled message delivery from a coordinator to worker actors.
 
 - **Outbox Dispatch** — Send messages to multiple targets via `host.outbox.dispatch()`
 - **AIMD Flow Control** — Adaptive concurrency: additive increase on success, multiplicative decrease on RESOURCE_EXHAUSTED
-- **AdmissionControlFacet** — Receiver-side flow control on workers
+- **Bounded mailbox** — Receiver-side backpressure gate; `MailboxFull` → `DeliveryError::Capacity` → AIMD decrease
 - **Dispatcher Status** — Monitor pending/delivered/failed counts via `host.outbox.status()`
 - **Batch Dispatch** — Generate target IDs and dispatch in bulk
 
@@ -22,7 +22,7 @@ Coordinator → host.outbox.dispatch(targets, payload)
           ┌───────┼───────┐───────┐
           ▼       ▼       ▼       ▼
       worker-0  worker-1  worker-2  worker-3
-      (AdmissionControlFacet on each)
+      (bounded mailbox — MailboxFull → AIMD decrease)
 ```
 
 ## Running
@@ -40,7 +40,7 @@ Coordinator → host.outbox.dispatch(targets, payload)
 1. **Outbox dispatch** — `host.outbox.dispatch(ctx, dispatcher_id, targets, payload, msg_type, key)`
 2. **Batch dispatch** — Generate N target IDs and dispatch in one call
 3. **Status monitoring** — `host.outbox.status(ctx, dispatcher_id)` for delivery metrics
-4. **Flow control** — AdmissionControlFacet on workers limits concurrent processing
+4. **Flow control** — Bounded mailbox on workers; `MailboxFull` → `DeliveryError::Capacity` → AIMD decrease
 
 ## SDK API
 
@@ -64,7 +64,7 @@ status = host.outbox.status(ctx, "dispatcher-1")
 
 See `app-config.toml` for the supervisor tree:
 - 1 coordinator (dispatches via outbox)
-- 4 workers (each with `admission_control` facet for backpressure)
+- 4 workers (bounded mailbox for backpressure)
 
 ## References
 

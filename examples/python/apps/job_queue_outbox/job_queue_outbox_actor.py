@@ -3,7 +3,7 @@
 """
 Job Queue Outbox Actor — Python WASM
 
-Demonstrates high-scale outbox dispatch with admission control:
+Demonstrates high-scale outbox dispatch with AIMD flow control:
   - Leader creates 100 virtual workers via host.create_shard_group()
   - Leader dispatches jobs to all workers via host.outbox.dispatch()
   - Upgrade simulation: Ask workers for upgrade status via host.ask()

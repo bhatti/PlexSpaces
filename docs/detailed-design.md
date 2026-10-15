@@ -486,7 +486,6 @@ graph LR
 | **StreamingFacet** | `streaming` | Messaging | (streaming facet) |
 | **TransactionFacet** | `transaction` | Persistence | (transaction facet) |
 | **StatelessWorkerFacet** | `stateless_worker` | Scaling | (stateless worker facet) |
-| **AdmissionControlFacet** | `admission_control` | Flow Control | `crates/outbox/src/admission_control_facet.rs` |
 
 ### Facet Categories
 
@@ -538,8 +537,8 @@ This is a deliberate design choice - the name itself communicates durability sem
 - `LoggingFacet`: Structured logging
 - `MetricsFacet`: Metrics collection and export
 
-**Flow Control Facets** - Backpressure and admission control:
-- `AdmissionControlFacet`: Receiver-side concurrency limiting. Tracks in-flight messages via atomic counter; rejects with `RESOURCE_EXHAUSTED` and `retry_after_ms` hint when at capacity. Priority 950 (runs before most other facets). Configurable via `AdmissionControlConfig` proto (max concurrent, strategy, retry-after hint). Complements the sender-side `ConcurrencyLimiter` in the outbox relay.
+**Flow Control** - Backpressure:
+- **Bounded mailbox**: The real admission gate for sequential actors. `tell()` returns `MailboxFull` at enqueue time when the actor can't keep up — mapped to `DeliveryError::Capacity` which drives AIMD multiplicative decrease in `OutboxRelay`. Use `ConcurrencyLimiter` directly as a standalone AIMD utility for custom outbound throttling.
 
 ### Using Facets with SDK Annotations
 
@@ -2816,10 +2815,9 @@ PlexSpaces provides sender-side and receiver-side flow control for high-fan-out 
 SenderActor
   └─ outbox.dispatch() → OutboxRelay (AIMD concurrency, DB-backed channel)
                            ├─ Channel (SQLite/Postgres, durable storage)
-                           └─ drain loop → tell() → TargetActor
-                                                      └─ AdmissionControlFacet
-                                                           ├─ Under limit → process
-                                                           └─ Over limit → RESOURCE_EXHAUSTED + retry_after_ms
+                           └─ drain loop → tell() → TargetActor (bounded mailbox)
+                                                      MailboxFull → DeliveryError::Capacity
+                                                        → AIMD on_rejection() → limit halves
 ```
 
 ### ConcurrencyLimiter (AIMD)
@@ -2840,23 +2838,11 @@ Async drain loop that bridges a durable channel to actor delivery at AIMD-contro
 - Dequeues message batches from the channel (batch size bounded by available permits)
 - Acquires concurrency permits before each delivery
 - On success: `limiter.on_success()`, channel `ack()`, increment delivered counter
-- On RESOURCE_EXHAUSTED: `limiter.on_rejection()`, channel `nack(requeue=true, delay=backoff)` with exponential backoff written to `send_at`
+- On `DeliveryError::Capacity` (mailbox full): `limiter.on_rejection()`, channel `nack(requeue=true, delay=backoff)` with exponential backoff written to `send_at`
 - On other errors: evaluate `should_retry()` from `crates/common/src/retry.rs`; nack with requeue if retryable, otherwise nack to DLQ
 - Uses the shared `compute_backoff()` utility with full jitter (configurable `jitter_ratio`)
 - **Delayed redelivery**: `nack(requeue=true, delay=Some(duration))` sets `send_at = now + delay` in the DB; the message is invisible to `receive()` until that timestamp elapses. `delivery_count` is incremented on each nack, enabling per-message retry budgets.
 - **Implementation**: `crates/outbox/src/outbox_relay.rs`
-
-### AdmissionControlFacet (Receiver-Side)
-
-Facet that limits concurrent message processing on an actor. Attached to actors that need receiver-side flow control.
-
-- **Priority**: 950 (runs before most other facets, after security/auth)
-- **`before_method`**: Atomic CAS to increment in-flight count; rejects with `RESOURCE_EXHAUSTED` JSON containing `retry_after_ms` hint when at capacity
-- **`after_method`**: Decrements in-flight (success path)
-- **`on_error`**: Decrements in-flight (error path) — mutually exclusive with `after_method`
-- **Strategies**: `FIXED_LIMIT` (static max concurrent) or `LATENCY_ADAPTIVE` (future: EWMA-based)
-- **Configuration**: `AdmissionControlConfig` proto — `max_concurrent`, `strategy`, `default_retry_after_ms`
-- **Implementation**: `crates/outbox/src/admission_control_facet.rs`
 
 ### Dispatch Helpers
 
@@ -2887,9 +2873,6 @@ All outbox metrics use the `plexspaces_outbox_` prefix and are registered in `un
 | `plexspaces_outbox_limiter_success_total` | counter | Permits completed successfully |
 | `plexspaces_outbox_limiter_rejection_total` | counter | RESOURCE_EXHAUSTED rejections (triggers MD) |
 | `plexspaces_outbox_limiter_acquire_rejected_total` | counter | Permit acquisition failures at capacity |
-| `plexspaces_outbox_admission_admitted_total` | counter | Messages admitted |
-| `plexspaces_outbox_admission_rejected_total` | counter | Messages rejected at capacity |
-| `plexspaces_outbox_admission_in_flight` | gauge | Current in-flight messages in admission control |
 
 ### End-to-End AIMD Feedback Loop
 
@@ -2897,10 +2880,10 @@ The outbox flow control system forms a closed feedback loop between sender and r
 
 ```
 OutboxRelay.dequeue() → acquire permit → deliver(msg) →
-  → AdmissionControlFacet.before_method() →
-    IF in_flight < max_concurrent → process → after_method() → Success
+  TargetActor mailbox enqueue:
+    IF mailbox has capacity → process → Success
       → limiter.on_success() [limit += 1] → channel.ack()
-    ELSE → RESOURCE_EXHAUSTED + retry_after_ms
+    ELSE → MailboxFull → DeliveryError::Capacity
       → limiter.on_rejection() [limit /= 2]
       → channel.nack(msg_id, requeue=true, delay=compute_backoff())
       → DB: SET send_at = now + delay, delivery_count += 1
@@ -2909,10 +2892,9 @@ OutboxRelay.dequeue() → acquire permit → deliver(msg) →
 ```
 
 **Tuning guidance**:
-- `max_concurrent` (AdmissionControlFacet): Set to the actor's actual processing capacity. Too low = wasted throughput. Too high = defeats the purpose.
+- `mailbox_capacity` (actor config): The real admission gate. Size to the actor's sustainable burst capacity.
 - `initial_limit` (ConcurrencyLimiter): Start at 2× the expected sustainable concurrency. AIMD will find the right value.
 - `min_limit` / `max_limit`: Floor and ceiling for AIMD adaptation. `min_limit=1` ensures at least one message in flight.
-- `retry_after_ms` (AdmissionControlFacet): Hint to callers. Doesn't affect the AIMD loop directly.
 - `RetryPolicy.max_attempts`: After this many nack cycles, the message goes to DLQ. Set based on acceptable delivery latency.
 - `RetryPolicy.initial_interval_ms` / `backoff_rate`: Control exponential backoff curve. Full jitter is applied automatically.
 
@@ -3070,7 +3052,7 @@ This replaced the prior duplicate definitions in `mailbox.proto` and `channel.pr
 
 PlexSpaces flow control forms a closed feedback loop between the receiver-side admission gate and the sender-side concurrency limiter. The loop runs continuously without operator intervention:
 
-1. **Receiver rejects** — `AdmissionControlFacet` tracks in-flight messages with an atomic counter. When the counter reaches `max_concurrent`, the facet returns `RESOURCE_EXHAUSTED` before the message reaches the actor's handler.
+1. **Receiver rejects** — The bounded mailbox tracks pending messages. When the mailbox is full, `tell()` returns `MailboxFull` immediately at enqueue time, before the message reaches the actor's event loop.
 2. **Limiter halves** — The `OutboxRelay` receives the `RESOURCE_EXHAUSTED` response and calls `ConcurrencyLimiter::on_rejection()`, which halves the concurrency limit (multiplicative decrease).
 3. **Backoff applied** — The relay computes exponential backoff via `compute_backoff(policy, delivery_count)` and calls `channel.nack(msg_id, requeue=true, delay=Some(backoff))`. The channel backend stores `send_at = now + backoff` on the message row.
 4. **Message deferred** — The dequeue query filters `WHERE (send_at = 0 OR send_at <= now())`, so the nacked message is invisible until the backoff expires.
@@ -3114,22 +3096,21 @@ When `delivery_count >= max_retries` (from `RetryPolicy`), the relay calls `nack
 
 | Parameter | Location | Default | Effect of increasing | Effect of decreasing |
 |-----------|----------|---------|---------------------|---------------------|
-| `max_concurrent` | `AdmissionControlConfig` | 5 | More concurrent requests per actor; higher throughput but more memory | Stricter admission; lower latency variance but more rejections |
+| `mailbox_capacity` | actor config | 1000 | More buffer before backpressure; smooths bursts | Tighter admission; earlier `MailboxFull` → faster AIMD decrease |
 | `initial_limit` | `ConcurrencyConfig` | 10 | Relay starts with more parallelism; faster ramp-up but may overshoot | Conservative start; slower ramp-up but fewer initial rejections |
 | `min_limit` | `ConcurrencyConfig` | 1 | Floor for AIMD decrease; higher floor prevents starvation | Lower floor allows deeper backoff under sustained overload |
 | `max_limit` | `ConcurrencyConfig` | 50 | Ceiling for AIMD increase; higher ceiling for high-capacity receivers | Lower ceiling caps throughput even when receiver has headroom |
-| `default_retry_after_ms` | `AdmissionControlConfig` | 100 | Longer suggested retry delay; more breathing room for receiver | Shorter delay; faster retry but risk of repeated rejection |
 | `relay_interval_ms` | `OutboxConfig` | 50 | Longer poll interval; lower CPU but higher delivery latency | Shorter interval; lower latency but more polling overhead |
 | `relay_batch_size` | `OutboxConfig` | 20 | Larger batches; fewer DB round-trips but higher per-batch latency | Smaller batches; more round-trips but smoother delivery |
 | `jitter_ratio` | `RetryPolicy` | 0.3 | More randomness in backoff; better thundering-herd prevention | Less randomness; more predictable but correlated retries |
 
-**Rule of thumb**: Set `max_concurrent` to the number of concurrent requests the actor can handle without degrading latency. Set `initial_limit` to roughly `max_concurrent × number_of_target_actors`. Set `max_limit` to 2-5× `initial_limit`.
+**Rule of thumb**: Set `mailbox_capacity` to the sustainable burst size the actor can process without latency degradation. Set `initial_limit` to roughly `mailbox_capacity × 0.5`. Set `max_limit` to 2-5× `initial_limit`.
 
 ### When to Use What: `tell()` vs `OutboxRelay` vs `PartitionedOutboxRelay`
 
 | Pattern | Use when | Durability | Backpressure | Ordering |
 |---------|----------|------------|-------------|----------|
-| `actor_ref.tell(ctx, msg)` | Low-latency fire-and-forget to a single known actor. Acceptable to lose messages on crash. | None (in-memory) | Bounded mailbox + admission control | Per-actor FIFO |
+| `actor_ref.tell(ctx, msg)` | Low-latency fire-and-forget to a single known actor. Acceptable to lose messages on crash. | None (in-memory) | Bounded mailbox (`MailboxFull` → `DeliveryError::Capacity`) | Per-actor FIFO |
 | `OutboxRelay` | Reliable delivery to one or more actors. Messages must survive crashes. Need retry + DLQ. | Channel-backed (SQLite/Postgres) | AIMD concurrency limiter + `send_at` backoff | Channel FIFO (send_at ordering) |
 | `PartitionedOutboxRelay` | High-throughput fan-out to many actors. Need per-recipient ordering + fault isolation between partitions. | In-memory (transient) | Per-partition AIMD limiter | Per-partition FIFO (hash-routed) |
 
@@ -3777,7 +3758,7 @@ All SDKs also expose the **outbox** (flow-controlled messaging) sub-API:
 | Python | `host.outbox` | `host.outbox.dispatch(ctx, dispatcher_id, targets, payload, msg_type, key)` | `host.outbox.status(ctx, dispatcher_id)` |
 | TypeScript | `host.outbox` | `host.outbox.dispatch(ctx, id, targets, payload, type, key)` | `host.outbox.status(ctx, id)` |
 | Go | `host.Outbox()` | `host.Outbox().Dispatch(ctx, id, targets, payload, type, key)` | `host.Outbox().Status(ctx, id)` |
-| Rust (native) | `plexspaces_sdk::OutboxRelay` | Direct API — `OutboxRelay`, `ConcurrencyLimiter`, `AdmissionControlFacet` | `RelayStats` |
+| Rust (native) | `plexspaces_sdk::OutboxRelay` | Direct API — `OutboxRelay`, `ConcurrencyLimiter`, `DeliveryError` | `RelayStats` |
 
 See [SDK documentation](sdk.md) and [WASM deployment guide](wasm-deployment.md) for details.
 

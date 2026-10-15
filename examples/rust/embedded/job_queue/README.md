@@ -7,7 +7,7 @@ for million-target scale-out.
 ## Features
 
 - **ConcurrencyLimiter (AIMD)** — Adaptive concurrency: additive increase on success, multiplicative decrease on RESOURCE_EXHAUSTED
-- **AdmissionControlFacet** — Receiver-side flow control that rejects messages when workers are at capacity
+- **Bounded mailbox** — Receiver-side backpressure gate; `MailboxFull` → `DeliveryError::Capacity` → AIMD multiplicative decrease
 - **OutboxRelay** — Async drain loop that reads from a channel and delivers at controlled rate
 - **PartitionedOutboxRelay** — N independent partitions with hash routing for scalable fan-out
 - **Scaling benchmark** — Sweeps over 1/3/6/12 workers measuring throughput, AIMD adaptation, and efficiency
@@ -16,8 +16,8 @@ for million-target scale-out.
 
 ```
 Single relay:
-  Producer → InMemoryChannel → OutboxRelay (AIMD) → Worker Actors
-                                                      └─ AdmissionControlFacet
+  Producer → InMemoryChannel → OutboxRelay (AIMD) → Worker Actors (bounded mailbox)
+                                                      MailboxFull → DeliveryError::Capacity → AIMD decrease
 
 Partitioned relay (N=4):
   Producer → send(target, msg) → HashRouter → Partition K
@@ -38,7 +38,7 @@ cargo run
 ## What it demonstrates
 
 1. **Config validation** — `validate_config()` checks AIMD limits and batch size before use
-2. **Single relay** — 3 workers with AdmissionControlFacet, 50 jobs, AIMD adaptation, dispatcher status
+2. **Single relay** — 3 workers with bounded mailbox, 50 jobs, AIMD adaptation, dispatcher status
 3. **Scaling benchmark** — 1/3/6/12 workers × 100 jobs, throughput table with speedup/efficiency
 4. **Partitioned relay** — 4 partitions × 200 jobs to 50 target actors, per-partition status breakdown
 

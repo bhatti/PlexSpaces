@@ -26,8 +26,7 @@ restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
 facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
-  { type = "admission_control", priority = 80, config = { max_concurrent = 100 } }
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
 ]
 
 # Worker prototype — registers JobQueueWorker with BehaviorRegistry for CreateShardGroup.

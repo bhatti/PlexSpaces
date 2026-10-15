@@ -174,8 +174,8 @@ Production flow control without shared infrastructure (no Kafka, no load balance
 - **Reliable Offline Delivery**: SQLite-backed outbox channel with `send_at` deferred redelivery, `delivery_count` persistence across restarts, and dead letter queue for poison messages
 
 **Key Features**:
-- `AdmissionControlFacet` — atomic in-flight counter, rejects with `RESOURCE_EXHAUSTED` + `retry_after_ms` hint
-- `ConcurrencyLimiter` — AIMD algorithm (TCP-style congestion control for actors)
+- **Bounded mailbox** — backpressure at enqueue: `tell()` returns `MailboxFull` when receiver can't keep up → mapped to `DeliveryError::Capacity` → AIMD multiplicative decrease
+- `ConcurrencyLimiter` — standalone AIMD algorithm (TCP-style congestion control); use directly for custom outbound throttling scenarios
 - `OutboxRelay` — DB-backed store-and-forward with real exponential backoff via `send_at` timestamps
 - `PartitionedOutboxRelay` — hash-routed scale-out for million-target scenarios
 - OVERWRITE conflict resolution — last-write-wins for transient data (heartbeats, status updates)

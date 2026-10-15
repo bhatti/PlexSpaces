@@ -17,6 +17,7 @@
 //! IDs. The WASM host bridge passes IDs through unchanged.
 
 use async_trait::async_trait;
+use plexspaces_actor::ActorRegistryError;
 use plexspaces_actor::ActorService;
 use plexspaces_common::dialable_node_address;
 use plexspaces_proto::actor::v1::{
@@ -279,7 +280,12 @@ impl MessageSender for ActorServiceMessageSender {
         registry
             .tell(&ctx, &to_id, msg)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| match e {
+                ActorRegistryError::MailboxFull { retry_after_ms, .. } => {
+                    format!("RESOURCE_EXHAUSTED: mailbox full (retry_after_ms={retry_after_ms})")
+                }
+                other => other.to_string(),
+            })
     }
 
     async fn send_message_ex(
@@ -317,7 +323,12 @@ impl MessageSender for ActorServiceMessageSender {
         registry
             .tell(&ctx, &to_id, msg)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| match e {
+                ActorRegistryError::MailboxFull { retry_after_ms, .. } => {
+                    format!("RESOURCE_EXHAUSTED: mailbox full (retry_after_ms={retry_after_ms})")
+                }
+                other => other.to_string(),
+            })
     }
 
     #[instrument(skip(self, payload), fields(from = %from, to = %to, msg_type = %message_type))]
@@ -867,12 +878,10 @@ impl MessageSender for ActorServiceMessageSender {
 mod tests {
     use super::ActorServiceMessageSender;
     use async_trait::async_trait;
-    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
-    use plexspaces_actor::{ActorId, ActorRegistry, ActorService as ActorServiceTrait};
+    use plexspaces_actor::{ActorId, ActorRegistry, ActorRegistryError, ActorService as ActorServiceTrait};
     use plexspaces_common::RequestContextExt;
     use plexspaces_proto::common::v1::Message;
     use plexspaces_proto::node::v1::NodeRegistration;
-    use plexspaces_proto::object_registry::v1::ObjectRegistration;
     use std::sync::Arc;
 
     struct RecordingActorService {
@@ -1019,5 +1028,18 @@ mod tests {
         let msgs = sent.lock().await;
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].1, "tick");
+    }
+
+    #[test]
+    fn test_mailbox_full_maps_to_resource_exhausted() {
+        let err = ActorRegistryError::MailboxFull { depth: 10, capacity: 10, retry_after_ms: 100 };
+        let mapped = match err {
+            ActorRegistryError::MailboxFull { retry_after_ms, .. } => {
+                format!("RESOURCE_EXHAUSTED: mailbox full (retry_after_ms={retry_after_ms})")
+            }
+            other => other.to_string(),
+        };
+        assert!(mapped.contains("RESOURCE_EXHAUSTED"), "mapped: {}", mapped);
+        assert!(mapped.contains("100"), "should include retry_after_ms");
     }
 }

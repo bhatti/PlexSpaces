@@ -3,7 +3,7 @@
 //
 // Job Queue Outbox Actor — Go WASM
 //
-// Demonstrates high-scale outbox dispatch with admission control:
+// Demonstrates high-scale outbox dispatch with AIMD flow control:
 //   - Leader creates N virtual workers (default 100) via CreateShardGroup
 //   - Leader dispatches jobs to all workers via outbox
 //   - Upgrade simulation: leader Ask()s workers for upgrade status
@@ -439,7 +439,7 @@ func (j *JobQueueLeader) handleScalingBenchmark(payloadJSON string) string {
 // ============================================================================
 
 // handleThunderingHerdTest dispatches to ALL workers at once, demonstrating
-// admission control rejection and AIMD adaptation under sudden load.
+// mailbox backpressure (MailboxFull → DeliveryError::Capacity) and AIMD adaptation under sudden load.
 func (j *JobQueueLeader) handleThunderingHerdTest(payloadJSON string) string {
 	if len(j.WorkerIDs) == 0 {
 		return marshal(map[string]any{"error": "call init_workers first"})

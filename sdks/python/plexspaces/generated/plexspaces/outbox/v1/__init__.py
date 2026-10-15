@@ -28,16 +28,6 @@ class ConcurrencyStrategy(betterproto.Enum):
     """Static fixed limit, no adaptation."""
 
 
-class AdmissionStrategy(betterproto.Enum):
-    """Admission control strategy for receiver-side flow control."""
-
-    FIXED_LIMIT = 0
-    """Static max_concurrent limit."""
-
-    LATENCY_ADAPTIVE = 1
-    """Dynamically adjusts limit based on processing latency (EWMA)."""
-
-
 class OutboxEntryStatus(betterproto.Enum):
     """Status of an outbox entry in the dispatch pipeline."""
 
@@ -46,6 +36,19 @@ class OutboxEntryStatus(betterproto.Enum):
     DELIVERED = 2
     FAILED = 3
     DEAD_LETTER = 4
+
+
+class DeliveryErrorKind(betterproto.Enum):
+    """
+    Classification of a delivery failure for AIMD concurrency feedback.
+     Capacity errors halve the concurrency limit; transient errors do not.
+    """
+
+    TRANSIENT = 0
+    """Network failure, actor not found, timeout — preserve AIMD limit."""
+
+    CAPACITY = 1
+    """Receiver at capacity (mailbox full) — halve AIMD limit + backoff."""
 
 
 class HashStrategy(betterproto.Enum):
@@ -78,22 +81,6 @@ class ConcurrencyConfig(betterproto.Message):
 
     strategy: "ConcurrencyStrategy" = betterproto.enum_field(4)
     """Strategy for adjusting the limit."""
-
-
-@dataclass(eq=False, repr=False)
-class AdmissionControlConfig(betterproto.Message):
-    """
-    Configuration for the AdmissionControlFacet (receiver-side protection).
-    """
-
-    max_concurrent: int = betterproto.uint32_field(1)
-    """Maximum concurrent messages being processed (default 100)."""
-
-    strategy: "AdmissionStrategy" = betterproto.enum_field(2)
-    """Strategy for admission decisions."""
-
-    default_retry_after_ms: int = betterproto.uint64_field(3)
-    """Hint returned to rejected senders (default 100ms)."""
 
 
 @dataclass(eq=False, repr=False)

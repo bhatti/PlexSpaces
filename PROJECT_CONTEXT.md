@@ -168,10 +168,11 @@ Layer 6 — Execution engines:
   wasm-runtime  — wasmtime Component Model execution engine
   workflow      — Durable workflow orchestration (built on actor + persistence + facet)
   elastic-pool  — Auto-scaling elastic worker pool
-  outbox        — Flow-controlled messaging: ConcurrencyLimiter (AIMD), OutboxRelay
-                  with real send_at backoff (deferred re-delivery via DB timestamp),
-                  PartitionedOutboxRelay (N-partition hash-routed scale-out),
-                  AdmissionControlFacet (receiver-side), dispatch helpers.
+  outbox        — Flow-controlled messaging: ConcurrencyLimiter (AIMD, also usable
+                  standalone for outbound throttling), OutboxRelay with real send_at
+                  backoff (deferred re-delivery via DB timestamp), PartitionedOutboxRelay
+                  (N-partition hash-routed scale-out), DeliveryError typed enum
+                  (Capacity → AIMD decrease, Transient → preserved), dispatch helpers.
                   Channel nack() accepts optional delay → sets send_at = now + delay;
                   dequeue query filters send_at <= now. delivery_count persisted in DB,
                   survives relay restarts.
@@ -921,8 +922,8 @@ The `job_queue` examples (Rust embedded, Go/Python/TypeScript/Rust WASM) demonst
 
 | UC | Name | Key Mechanisms | What It Shows |
 |----|------|---------------|---------------|
-| UC1 | Thundering Herd Protection | AdmissionControlFacet (max_concurrent=3), AIMD sawtooth | 50 workers, 200 simultaneous jobs — AIMD halves on rejection, recovers additively |
-| UC2 | Config Wave Deploy | Config server actors with AdmissionControlFacet (max_concurrent=2), wave-based dispatch | 3 config servers, 3 waves × 30 workers — bounded fan-out with backpressure |
+| UC1 | Thundering Herd Protection | Bounded mailbox + AIMD sawtooth | 50 workers, 200 simultaneous jobs — MailboxFull → DeliveryError::Capacity → AIMD halves, recovers additively |
+| UC2 | Config Wave Deploy | Config server actors with bounded mailbox, wave-based dispatch | 3 config servers, 3 waves × 30 workers — bounded fan-out with backpressure |
 | UC3 | Heartbeat Coalescing (OVERWRITE) | `conflict_resolution=OVERWRITE`, `idempotency_key` | 50 rapid heartbeats with same key → only latest queued (LWW coalescing) |
 | UC4 | Telemetry Fast-Path with Outbox Fallback | tell() fast-path, OutboxRelay fallback on rejection | 100 events to collector (max_concurrent=3) — tell succeeds or falls back to outbox |
 | UC5 | Reliable Offline Delivery | SQLite-backed channel, send_at backoff, delivery_count, DLQ | 100 jobs via durable channel with retry + exponential backoff + dead-letter queue |

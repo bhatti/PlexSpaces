@@ -72,8 +72,6 @@ pub struct ChildSpec {
     /// Per-actor mailbox configuration. When unset, inherits the node default (IN_MEMORY).
     /// Set channel_provider = SQLITE or POSTGRES to use the shared node DB pool for
     /// a durable, DB-backed mailbox (no per-actor pool; uses node-wide shared connection).
-    /// DB-backed mailboxes should NOT use the admission_control facet — the DB itself
-    /// acts as the buffer; throttling at the inbox level defeats the purpose.
     #[prost(message, optional, tag="12")]
     pub mailbox_config: ::core::option::Option<super::super::mailbox::v1::MailboxConfig>,
 }
